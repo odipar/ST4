@@ -31,6 +31,12 @@ final class St4RoundTripTest {
                 packed.paddedSize());
     }
 
+    private static byte[] unpack(St4Compressor.Result packed, int offsetLimit) {
+        return St4Decompressor.decompress(packed.control(), packed.literal(),
+                packed.byteOffsets(), packed.wordOffsets(), packed.unit(),
+                packed.paddedSize(), offsetLimit);
+    }
+
     private static byte[] padded(byte[] input, int unit) {
         return Arrays.copyOf(input, Units.paddedLength(input.length, unit));
     }
@@ -92,10 +98,25 @@ final class St4RoundTripTest {
         for (int unit : new int[] {1, 2, 4}) {
             for (int window : new int[] {64, 256, 4096}) {
                 St4Compressor.Result packed = pack(input, unit, window, St4Format.MAX_OP);
-                assertArrayEquals(padded(input, unit), unpack(packed),
+                assertArrayEquals(padded(input, unit), unpack(packed, window),
                         "unit " + unit + ", window " + window);
             }
         }
+    }
+
+    @Test
+    void theLimitCheckingDecoderRefusesAWiderStream() {
+        // Decoding through an offset limit is how tests hold a -mN stream to
+        // its ring, so a stream that reaches further must fail loudly rather
+        // than pretend - random data repeated once guarantees one far match.
+        byte[] half = new byte[1000];
+        new Random(5).nextBytes(half);
+        byte[] input = new byte[2000];
+        System.arraycopy(half, 0, input, 0, 1000);
+        System.arraycopy(half, 0, input, 1000, 1000);
+        St4Compressor.Result wide = pack(input, 1);
+        assertThrows(IllegalStateException.class, () -> unpack(wide, 8),
+                "a full-window stream through an 8-unit limit");
     }
 
     @Test

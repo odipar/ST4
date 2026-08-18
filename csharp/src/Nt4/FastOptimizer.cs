@@ -1,0 +1,223 @@
+// ZX1 by Einar Saukas; ST4 and this C# port by Claude (Anthropic's Claude
+// Code) under Robbert van Dalen's direction. See LICENSE for the terms.
+
+namespace Nt4;
+
+/// <summary>
+/// <see cref="Optimizer"/>, restructured to not allocate: the same parse,
+/// found the same way, producing byte-identical output - measured at a
+/// fraction of the time.
+/// </summary>
+/// <remarks>
+/// <para>The reference walks the same dynamic program but materialises every
+/// candidate as a <see cref="Block"/>, and nearly all of them lose and become
+/// garbage. This version runs in two passes: <b>forward</b>, the identical DP
+/// on primitive arrays, recording per position the winning cost and a
+/// three-int descriptor of which candidate won; and <b>backward</b>, chain
+/// reconstruction by <see cref="ChainRebuilder"/>, building only the blocks
+/// the winning parse actually contains.</para>
+/// <para>The candidates are evaluated in the same order with the same
+/// strictly-better replacement rule, so ties fall exactly as in the reference
+/// and the output is byte-identical - which the equivalence test asserts, and
+/// which is the reason <see cref="Optimizer"/> stays in the tree: it is the
+/// specification this class is checked against.</para>
+/// </remarks>
+public sealed class FastOptimizer
+{
+    /// <summary>The offset a stream starts with, as ZX1: one unit.</summary>
+    public const int InitialOffset = Optimizer.InitialOffset;
+
+    /// <summary>No state, and no literal run: nothing has happened at this offset yet.</summary>
+    private const int None = int.MinValue;
+
+    private readonly int[] units;
+    private readonly int literalBits;
+    private readonly int offsetLimit;
+
+    // Per position: the winning cost, and the descriptor to rebuild it.
+    private readonly int[] optimalBits;
+    private readonly byte[] winKind;
+    private readonly int[] winOffset;
+    private readonly int[] winAux;
+
+    private FastOptimizer(int[] units, int unit, int offsetLimit)
+    {
+        this.units = units;
+        this.literalBits = 8 * unit;
+        this.offsetLimit = offsetLimit;
+        this.optimalBits = new int[units.Length];
+        this.winKind = new byte[units.Length];
+        this.winOffset = new int[units.Length];
+        this.winAux = new int[units.Length];
+    }
+
+    /// <summary>
+    /// Returns the last block of the optimal parse of <paramref name="units"/>,
+    /// reporting progress on stdout while it works.
+    /// </summary>
+    /// <param name="units">The input as k-byte units.</param>
+    /// <param name="unit">Bytes per unit, which sets what a literal costs.</param>
+    /// <param name="offsetLimit">The furthest a match may reach back, in units.</param>
+    /// <returns>The final block of the optimal parse chain.</returns>
+    public static Block Optimize(int[] units, int unit, int offsetLimit) =>
+        Optimize(units, unit, offsetLimit, true);
+
+    /// <summary>
+    /// Returns the last block of the optimal parse of <paramref name="units"/>
+    /// - the same chain <see cref="Optimizer.Optimize(int[], int, int, bool)"/>
+    /// returns, byte for byte.
+    /// </summary>
+    /// <param name="units">The input as k-byte units.</param>
+    /// <param name="unit">Bytes per unit, which sets what a literal costs.</param>
+    /// <param name="offsetLimit">The furthest a match may reach back, in units.</param>
+    /// <param name="progress">Whether to report on stdout, as <see cref="ProgressMeter"/>.</param>
+    /// <returns>The final block of the optimal parse chain.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="units"/> is null.</exception>
+    public static Block Optimize(int[] units, int unit, int offsetLimit, bool progress)
+    {
+        ArgumentNullException.ThrowIfNull(units);
+        var optimizer = new FastOptimizer(units, unit, offsetLimit);
+        optimizer.Forward(progress);
+        return new ChainRebuilder(units, optimizer.literalBits, optimizer.optimalBits,
+            optimizer.winKind, optimizer.winOffset, optimizer.winAux).Rebuild();
+    }
+
+    /// <summary>
+    /// The winning cost per position, for the tests that hold other optimizers
+    /// to this one: the optimum is unique, so any exact optimizer must produce
+    /// this exact array.
+    /// </summary>
+    internal static int[] Costs(int[] units, int unit, int offsetLimit)
+    {
+        var optimizer = new FastOptimizer(units, unit, offsetLimit);
+        optimizer.Forward(false);
+        return optimizer.optimalBits;
+    }
+
+    private static int EliasGammaBits(int value) =>
+        2 * (31 - System.Numerics.BitOperations.LeadingZeroCount((uint)value)) + 1;
+
+    /// <summary>
+    /// The DP of <see cref="Optimizer"/>, candidate for candidate, on
+    /// primitives. State per offset: the best chain ending in a match at
+    /// <c>stateEnd</c> costing <c>stateBits</c>, and the best chain ending in
+    /// a literal run at <c>litEnd</c> costing <c>litBits</c>. A position's
+    /// winner is recorded the moment it takes the lead; replacement is strictly
+    /// better, so ties keep the earlier candidate.
+    /// </summary>
+    private void Forward(bool progress)
+    {
+        int count = units.Length;
+        int width = (int)Math.Clamp(count - 1L, InitialOffset, offsetLimit);
+        int[] stateBits = new int[width + 1];
+        int[] stateEnd = new int[width + 1];
+        int[] litBits = new int[width + 1];
+        int[] litEnd = new int[width + 1];
+        int[] matchLength = new int[width + 1];
+        Array.Fill(stateEnd, None);
+        Array.Fill(litEnd, None);
+        int[] bestLength = new int[Math.Max(count, 3)];
+        bestLength[2] = 2;
+
+        // The fake block every chain hangs from, as the reference: one unit
+        // back, ending just before the stream.
+        stateBits[InitialOffset] = -1;
+        stateEnd[InitialOffset] = -1;
+
+        var meter = new ProgressMeter(
+            ProgressMeter.TotalSteps(count, 0, offsetLimit), progress);
+
+        for (int index = 0; index < count; index++)
+        {
+            int maxOffset = (int)Math.Clamp((long)index, InitialOffset, offsetLimit);
+            int bestLengthSize = 2;
+            int unitValue = units[index];
+            int best = int.MaxValue;
+            for (int offset = 1; offset <= maxOffset; offset++)
+            {
+                if (index != 0 && unitValue == units[index - offset])
+                {
+                    // Match reusing the last offset, after a literal run.
+                    if (litEnd[offset] != None)
+                    {
+                        int bits = litBits[offset] + 1
+                            + EliasGammaBits(index - litEnd[offset]);
+                        stateBits[offset] = bits;
+                        stateEnd[offset] = index;
+                        if (bits < best)
+                        {
+                            best = bits;
+                            winKind[index] = ChainRebuilder.Rep;
+                            winOffset[index] = offset;
+                            winAux[index] = litEnd[offset];
+                        }
+                    }
+                    // Match with a new offset, at the best split length.
+                    if (++matchLength[offset] > 1)
+                    {
+                        if (bestLengthSize < matchLength[offset])
+                        {
+                            int bits = optimalBits[index - bestLength[bestLengthSize]]
+                                + EliasGammaBits(bestLength[bestLengthSize] - 1);
+                            do
+                            {
+                                bestLengthSize++;
+                                int shorterBits = optimalBits[index - bestLengthSize]
+                                    + EliasGammaBits(bestLengthSize - 1);
+                                if (shorterBits <= bits)
+                                {
+                                    bestLength[bestLengthSize] = bestLengthSize;
+                                    bits = shorterBits;
+                                }
+                                else
+                                {
+                                    bestLength[bestLengthSize] = bestLength[bestLengthSize - 1];
+                                }
+                            }
+                            while (bestLengthSize < matchLength[offset]);
+                        }
+                        int length = bestLength[matchLength[offset]];
+                        int newBits = optimalBits[index - length] + 3
+                            + (offset > Format.ByteOffsetLimit ? 16 : 8)
+                            + EliasGammaBits(length - 1);
+                        if (stateEnd[offset] != index || stateBits[offset] > newBits)
+                        {
+                            stateBits[offset] = newBits;
+                            stateEnd[offset] = index;
+                            if (newBits < best)
+                            {
+                                best = newBits;
+                                winKind[index] = ChainRebuilder.New;
+                                winOffset[index] = offset;
+                                winAux[index] = length;
+                            }
+                        }
+                    }
+                }
+                else
+                {
+                    // Literals, continuing from the offset's last match.
+                    matchLength[offset] = 0;
+                    if (stateEnd[offset] != None)
+                    {
+                        int length = index - stateEnd[offset];
+                        int bits = stateBits[offset] + 1 + EliasGammaBits(length)
+                            + length * literalBits;
+                        litBits[offset] = bits;
+                        litEnd[offset] = index;
+                        if (bits < best)
+                        {
+                            best = bits;
+                            winKind[index] = ChainRebuilder.Literals;
+                            winOffset[index] = offset;
+                            winAux[index] = stateEnd[offset];
+                        }
+                    }
+                }
+            }
+            optimalBits[index] = best;
+            meter.Advance(maxOffset);
+        }
+        meter.Finish();
+    }
+}

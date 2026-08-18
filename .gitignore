@@ -44,3 +44,7 @@ build/
 # the differential rigs cache packed corpora here
 68k/test/emu/.st4/
 __pycache__/
+
+# .NET build output
+csharp/**/bin/
+csharp/**/obj/

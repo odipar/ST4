@@ -1,0 +1,156 @@
+// ZX1 by Einar Saukas; ST4 and this C# port by Claude (Anthropic's Claude
+// Code) under Robbert van Dalen's direction. See LICENSE for the terms.
+
+namespace Nt4;
+
+/// <summary>
+/// The ST4 container format: ZX1's three block types at a chosen unit
+/// granularity, split across four streams so a 68000 can read each of them the
+/// fastest way that exists for it.
+/// </summary>
+/// <remarks>
+/// <para>Stream A holds nothing but bits - the block-type flags and the
+/// interlaced Elias gamma lengths - so its reservoir refills a word at a time.
+/// Stream B holds the literal payload, stream C the byte offsets and stream D
+/// the word offsets, so each stream is uniform and D is word-aligned by
+/// construction. Lengths and offsets count units of k bytes, where k is 1, 2
+/// or 4; the Java <c>St4Format</c> is the reference and documents the control
+/// codes and the reasoning at length.</para>
+/// <para>The header is twenty bytes and holds only what cannot be worked out:
+/// a signature packing magic, version and k into one long, the padded output
+/// size, and where streams B, C and D begin relative to the header. Stream A
+/// begins where the header ends, and each stream runs to the next.</para>
+/// </remarks>
+public static class Format
+{
+    /// <summary><c>'S4'</c>, the top half of every signature.</summary>
+    public const int Magic = 0x53340000;
+
+    /// <summary>Version 4 cut the header to what cannot be derived.</summary>
+    public const int Version = 4;
+
+    /// <summary>Byte offset of the signature long in a container.</summary>
+    public const int OffsetSignature = 0;
+
+    /// <summary>Byte offset of the padded output size.</summary>
+    public const int OffsetSize = 4;
+
+    /// <summary>Byte offset of stream B's header-relative position.</summary>
+    public const int OffsetLiteral = 8;
+
+    /// <summary>Byte offset of stream C's header-relative position.</summary>
+    public const int OffsetByteOffsets = 12;
+
+    /// <summary>Byte offset of stream D's header-relative position.</summary>
+    public const int OffsetWordOffsets = 16;
+
+    /// <summary>Twenty bytes; stream A begins where the header ends.</summary>
+    public const int HeaderSize = 20;
+
+    /// <summary>
+    /// The furthest any offset reaches, in BYTES. A word offset is stored as
+    /// <c>-offset * k</c>, which the decoder installs unchanged, so the limit
+    /// is what fits a signed word rather than anything about the format.
+    /// </summary>
+    public const int MaxOffset = 32_512;
+
+    /// <summary>The furthest a byte offset reaches, in units: two banks of 256.</summary>
+    public const int ByteOffsetLimit = 512;
+
+    /// <summary>The longest operation the 68000 decoders can count, in units.</summary>
+    public const int MaxOp = 65_535;
+
+    /// <summary>
+    /// Magic, version and unit size in one long, so a decoder built for one k
+    /// checks an asset against itself with a single <c>cmp.l</c>.
+    /// </summary>
+    public static int Signature(int unit) => Magic | (Version << 8) | unit;
+
+    /// <summary>Whether <paramref name="unit"/> is a unit size the format has.</summary>
+    public static bool IsUnitSize(int unit) => unit is 1 or 2 or 4;
+
+    /// <summary>The reason <paramref name="unit"/> cannot be used, or an empty string.</summary>
+    public static string CheckUnit(int unit) =>
+        IsUnitSize(unit) ? "" : $"unit size {unit} is not 1, 2 or 4";
+
+    /// <summary>How far back a match may reach at this unit size, in units.</summary>
+    public static int MaxOffsetUnits(int unit) => MaxOffset / unit;
+
+    /// <summary>What a container holds: the four streams, the unit size and the output size.</summary>
+    /// <param name="Unit">Bytes per unit: 1, 2 or 4.</param>
+    /// <param name="Size">The padded output size in bytes, a multiple of the unit.</param>
+    /// <param name="Control">Stream A, the bits.</param>
+    /// <param name="Literal">Stream B, the literal payload.</param>
+    /// <param name="ByteOffsets">Stream C, one byte per offset.</param>
+    /// <param name="WordOffsets">Stream D, one word per offset.</param>
+    public sealed record Container(int Unit, int Size, byte[] Control, byte[] Literal,
+        byte[] ByteOffsets, byte[] WordOffsets);
+
+    /// <summary>
+    /// Reads a container, checking everything a decoder would otherwise trust.
+    /// The streams it returns may carry up to three bytes of alignment padding,
+    /// since no length is stored and each stream simply runs to the next.
+    /// </summary>
+    /// <param name="file">The complete container, header first.</param>
+    /// <returns>The unit size, output size and the four streams.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="file"/> is null.</exception>
+    /// <exception cref="InvalidDataException">
+    /// It is not an ST4 file this build understands, or the offsets do not
+    /// describe four streams laid out in order inside it.
+    /// </exception>
+    public static Container Read(byte[] file)
+    {
+        ArgumentNullException.ThrowIfNull(file);
+        if (file.Length < HeaderSize)
+        {
+            throw new InvalidDataException("too short to be an ST4 file");
+        }
+        int signature = LongAt(file, OffsetSignature);
+        if ((signature & unchecked((int)0xFFFF0000)) != Magic)
+        {
+            throw new InvalidDataException("not an ST4 file");
+        }
+        int version = (signature >> 8) & 0xFF;
+        if (version != Version)
+        {
+            throw new InvalidDataException($"ST4 format version {version}, not {Version}");
+        }
+        int unit = signature & 0xFF;
+        string problem = CheckUnit(unit);
+        if (problem.Length != 0)
+        {
+            throw new InvalidDataException(problem);
+        }
+        int size = LongAt(file, OffsetSize);
+        if (size < 0 || size % unit != 0)
+        {
+            throw new InvalidDataException(
+                $"output size {size} is not a whole number of {unit}-byte units");
+        }
+
+        int[] edge =
+        {
+            HeaderSize, LongAt(file, OffsetLiteral), LongAt(file, OffsetByteOffsets),
+            LongAt(file, OffsetWordOffsets), file.Length,
+        };
+        for (int i = 1; i < edge.Length - 1; i++)
+        {
+            if (edge[i] % 4 != 0)
+            {
+                throw new InvalidDataException(
+                    $"stream {"ABCD"[i]} does not start on a long boundary");
+            }
+            if (edge[i] < edge[i - 1] || edge[i] > file.Length)
+            {
+                throw new InvalidDataException($"stream {"ABCD"[i]} lies outside the file");
+            }
+        }
+        return new Container(unit, size,
+            file[edge[0]..edge[1]], file[edge[1]..edge[2]],
+            file[edge[2]..edge[3]], file[edge[3]..edge[4]]);
+    }
+
+    private static int LongAt(byte[] file, int at) =>
+        (file[at] & 0xFF) << 24 | (file[at + 1] & 0xFF) << 16
+            | (file[at + 2] & 0xFF) << 8 | (file[at + 3] & 0xFF);
+}
