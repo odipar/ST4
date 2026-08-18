@@ -102,13 +102,31 @@ Three optimizers produce the parse, all held to each other by tests:
   against.
 - **St4FastOptimizer** — the same DP on primitive arrays, chain rebuilt from
   per-position descriptors afterwards. Byte-identical output, measured 4–7×
-  faster: the reference allocates gigabytes of losing candidates.
+  faster: the reference allocates gigabytes of losing candidates — 37 GB for
+  one 300 KB pack.
 - **St4EventOptimizer** — the CLI's default: cost-identical to the DP but
-  driven by match-run boundary events instead of per-(position, offset) steps,
-  36–86× faster where runs are long, falling back to the fast DP when a cheap
-  event count says the data is run-churny. Its chain can differ from the DP's
-  where candidates tie; its cost array cannot, and the equivalence test
-  asserts that element for element.
+  driven by match-run boundary events instead of per-(position, offset) steps
+  — on one measured disk image, 2,922 run boundaries against 76 million steps.
+  It falls back to the fast DP when a cheap event count says the data is
+  run-churny. Its chain can differ from the DP's where candidates tie; its
+  cost array cannot, and the equivalence test asserts that element for
+  element.
+
+Measured on the optimizer alone, k = 4:
+
+| corpus | reference | fast DP | event engine |
+|---|---:|---:|---:|
+| 880 KB disk image, `-m1024` | 163s | 37s | **0.4s** |
+| 300 KB slice, full window | 24s | 5.7s | **0.12s** |
+| 32 KB of 68000 code (k = 1) | 9.8s | 1.5s | gates to the DP |
+
+The `st4` CLI needs no flag for any of this: with no byte-identity contract to
+protect, the engine simply is the default. The jx1 and nx1 packers in
+[odipar/ST1](https://github.com/odipar/ST1) carry the same three classes but
+expose the engine behind their `-q` switch instead, because their default
+output must stay byte-identical to the original ZX1 C compressor — `-q` there
+means the same packed size, two orders of magnitude faster on repetitive data,
+different ties.
 
 ## Tests
 
