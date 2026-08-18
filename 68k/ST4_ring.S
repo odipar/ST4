@@ -105,11 +105,11 @@ wrap_a1:
         clr.w   d5
         swap    d5                      ; zero-extend N, in bytes
         suba.l  d5,a1                   ; wrap a1; leave room = N
-        .if ST4_UNIT>1
+        .if ST4_UNIT=2
         lsr.l   #1,d5
         .endif
-        .if ST4_UNIT>2
-        lsr.l   #1,d5
+        .if ST4_UNIT=4
+        lsr.l   #2,d5              ; one shift, not two: 10 cycles, not 16
         .endif
 ; Leave room one unit short of the ring. A call that wraps and then fills the
 ; whole ring would return a1 exactly where it started, and the caller reads its
@@ -141,11 +141,11 @@ ST4_resume:
         sub.w   a1,d5                   ; exact because the room is <= 65535
 ; Budgets and segments count units, so the room joins them. The ring size and
 ; every position are whole units, which is what makes the shift exact.
-        .if ST4_UNIT>1
+        .if ST4_UNIT=2
         lsr.w   #1,d5
         .endif
-        .if ST4_UNIT>2
-        lsr.w   #1,d5
+        .if ST4_UNIT=4
+        lsr.w   #2,d5              ; one shift, not two: 10 cycles, not 16
         .endif
 have_room:                              ; room in units from here on
         cmp.w   d3,d5                   ; budget = min(budget, room)
@@ -170,11 +170,11 @@ budget_fits:
         add.w   d2,d5                   ; add -offset; carry means unwrapped
         bcs.s   copy                    ; unwrapped source cannot cross before dst
         neg.w   d5                      ; wrapped: room = offset - position, bytes
-        .if ST4_UNIT>1
+        .if ST4_UNIT=2
         lsr.w   #1,d5
         .endif
-        .if ST4_UNIT>2
-        lsr.w   #1,d5
+        .if ST4_UNIT=4
+        lsr.w   #2,d5              ; one shift, not two: 10 cycles, not 16
         .endif
         cmp.w   d4,d5                   ; units, as above: the room is at most N
         bcc.s   source_wrapped

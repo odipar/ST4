@@ -130,11 +130,11 @@ budget_fits:
         neg.w   d5                      ; wrapped: room = offset - position
 ; The room is bytes and the segment is units, so bring them to the same scale.
 ; Both are whole units - offsets and positions are - so the shift is exact.
-        .if ST4_UNIT>1
+        .if ST4_UNIT=2
         lsr.w   #1,d5
         .endif
-        .if ST4_UNIT>2
-        lsr.w   #1,d5
+        .if ST4_UNIT=4
+        lsr.w   #2,d5              ; one shift, not two: 10 cycles, not 16
         .endif
         cmp.w   d4,d5                   ; source units before the ring end
         bcc.s   source_wrapped
