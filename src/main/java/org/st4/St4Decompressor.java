@@ -125,6 +125,10 @@ public final class St4Decompressor {
             lastOffset = ((1 << 16) - scaled) / unit;   // stored as -offset * unit
         }
         assert lastOffset > 0 : "an offset must reach back at least one unit";
+        if (lastOffset > offsetLimit) {
+            throw new IllegalStateException("offset " + lastOffset
+                    + " units reaches past the " + offsetLimit + "-unit limit");
+        }
         copy(readInterlacedEliasGamma() + 1);
         state = State.MATCH;
     }
