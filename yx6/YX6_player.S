@@ -154,7 +154,7 @@ puts:
         include "ST4_wrap.S"
 
         .data
-m_banner:   dc.b    "YX6 player v0.3 - ZX1 streaming through ST4",13,10,0
+m_banner:   dc.b    "YX6 player v0.4 - ZX1 streaming through ST4",13,10,0
 m_playing:  dc.b    "Playing. Press SPACE to stop.",13,10,0
         .if YX6_EXIT_MARKER
 m_marker:   dc.b    "YX6DONE.MRK",0
