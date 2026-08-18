@@ -230,4 +230,5 @@ and C# tools, the 68000 decoders, the YM player, the tests, and the
 optimization work, under Robbert's direction. ST4_wrap.S is based on
 ST1_wrap.S, which OpenAI Codex wrote for ST1.
 
-Special thanks to Sandor Drieënhuizen for his support, proofreading, and ideas.
+Special thanks to Sandor Drieënhuizen and Wietze Spijkerman for their support,
+proofreading, and ideas.
