@@ -202,53 +202,25 @@ op_body:                                ; shared; sign(d2) = LITERALS/MATCH
         bls.s   budget_fits
         move.w  d3,d4
 budget_fits:
-        sub.w   d4,d1
-        sub.w   d4,d3
-        movea.l a2,a3                   ; literals copy from stream B
-        tst.w   d2
-        bpl.s   source_ready
+        tst.w   d2                      ; positive lastOffset means LITERALS
+        bpl.s   literal_source
         movea.l a1,a3                   ; match: destination plus -lastOffset*UNIT
         adda.w  d2,a3                   ; which is why the offset is kept scaled
-source_ready:                           ; n units, ST4_UNIT bytes at a time
-        moveq   #15,d5                  ; d5 = n&15, partial-pass dispatch
-        and.w   d4,d5
-        lsr.w   #4,d4                   ; d4 = n>>4 full passes
-        add.w   d5,d5
-        neg.w   d5                      ; index = -2*(n&15)
-        jmp     ladder_end(pc,d5.w)     ; pc-relative dispatch, no base register
-ladder:
-        ST4_MOVE                        ; entry at ladder_end-2k copies k units
+copy:                                   ; MATCH copies only reach this entry
+        sub.w   d4,d1
+        sub.w   d4,d3
+        cmp.w   #17,d4
+        bcc.s   copy_slow               ; n >= 17: the counted ladder
+        add.w   d4,d4
+        neg.w   d4                      ; d4 = -2n is the dispatch index itself,
+        jmp     fast_end(pc,d4.w)       ; and $ffxx for byte_offset afterwards
+fast_ladder:
+; Sixteen unit moves: entry at fast_end-2k copies k units.
+        .rept   16
         ST4_MOVE
-        ST4_MOVE
-        ST4_MOVE
-        ST4_MOVE
-        ST4_MOVE
-        ST4_MOVE
-        ST4_MOVE
-        ST4_MOVE
-        ST4_MOVE
-        ST4_MOVE
-        ST4_MOVE
-        ST4_MOVE
-        ST4_MOVE
-        ST4_MOVE
-        ST4_MOVE
-ladder_end:
-        dbf     d4,ladder               ; full 16-unit passes
-copy_done:
-        tst.w   d2
-        bmi.s   match_copied            ; matches consume no literals
-        movea.l a3,a2                   ; literals do: stream B advanced
-        tst.w   d1
-        bne.s   suspend                 ; budget spent mid-op
-
-literals_transition:
-        add.w   d0,d0                   ; next(), case LITERALS (bare read)
-        bcs.s   new_offset              ; 1: new offset
-        neg.w   d2                      ; from-last reuses the negated offset
-        bra.s   gamma_seed0
-
-match_copied:
+        .endr
+fast_end:                               ; no counter, no kind test: fall into
+match_copied:                           ; the match epilogue
         tst.w   d1
         bne.s   resume_return           ; budget spent mid-op
         add.w   d0,d0                   ; next(), case MATCH (bare read)
@@ -278,7 +250,8 @@ class_refill:
         bra.s   class_read
 
 byte_offset:
-; The ladder's DBF left d4.w = $ffff, so one move.b makes $ff00 + (256-offset),
+; The copy paths leave d4.w = $ffxx - the fast ladder's -2n dispatch index, or
+; the counted terminator's $ffff - so one move.b makes $ff00 + (256-offset),
 ; which already IS -offset as a word. The bank bit moves it 256 units further.
         move.b  (a4)+,d4
         add.w   d0,d0                   ; class bit 2: the 256-unit bank
@@ -295,9 +268,41 @@ scale_offset:
         add.w   d4,d4
         .endif
         move.w  d4,d2                   ; install -lastOffset*UNIT
-        bra.s   have_offset
+        moveq   #1,d4                   ; new-offset match: remaining = gamma+1
+        bra.w   get_gamma               ; one branch, not two through have_offset
 
 end_marker:
         clr.w   d2                      ; d1.w is already zero; normalize DONE
 resume_return:
         rts                             ; a1 remains the output end
+
+literal_source:
+        movea.l a2,a3                   ; literals copy from stream B
+        sub.w   d4,d1
+        sub.w   d4,d3
+copy_slow:                              ; any n; the subs are already done
+        moveq   #15,d5                  ; d5 = n&15, partial-pass dispatch
+        and.w   d4,d5
+        lsr.w   #4,d4                   ; d4 = n>>4 full passes
+        add.w   d5,d5
+        neg.w   d5                      ; index = -2*(n&15)
+        jmp     ladder_end(pc,d5.w)     ; pc-relative dispatch, no base register
+ladder:
+; Sixteen unit moves: entry at ladder_end-2k copies k units.
+        .rept   16
+        ST4_MOVE
+        .endr
+ladder_end:
+        subq.w  #1,d4                   ; full 16-unit passes; the fall-through
+        bcc.s   ladder                  ; costs 12 where dbf paid 14, and still
+        tst.w   d2                      ; leaves d4.w = $ffff for byte_offset
+        bmi.s   match_copied            ; an n>=17 match rejoins its epilogue
+        movea.l a3,a2                   ; literals do: stream B advanced
+        tst.w   d1
+        bne.s   resume_return           ; budget spent mid-op
+
+literals_transition:
+        add.w   d0,d0                   ; next(), case LITERALS (bare read)
+        bcs.s   new_offset              ; 1: new offset
+        neg.w   d2                      ; from-last reuses the negated offset
+        bra.w   gamma_seed0
