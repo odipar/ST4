@@ -25,7 +25,7 @@ HATARI=${HATARI:-hatari}
 TOS=${TOS:-$HOME/hatari-2.6.1_macos/tos-2.06.rom}
 RING=1024
 CHUNK=16
-UNIT=1
+UNIT=""
 LOOP=""
 
 while [ $# -gt 0 ]; do
@@ -61,7 +61,7 @@ fi
 # Everything for this run goes in one directory, named after the tune, so a
 # second run with a different ring size does not overwrite the first.
 stem=$(basename "$tune" | sed 's/\.[Yy][Mm]$//')
-work=$(cd "$(dirname "$tune")" && pwd)/$stem-n$RING-c$CHUNK-k$UNIT
+work=$(cd "$(dirname "$tune")" && pwd)/$stem-n$RING-c$CHUNK${UNIT:+-k$UNIT}
 mkdir -p "$work"
 
 if [ ! -d "$REPO/target/classes" ]; then
@@ -71,7 +71,7 @@ fi
 
 echo "play.sh: packing $tune"
 java -ea -cp "$REPO/target/classes" org.yx6.Yx6 -f \
-     "-n$RING" "-c$CHUNK" "-k$UNIT" $LOOP "$tune" "$work/$stem.yx6" \
+     "-n$RING" "-c$CHUNK" ${UNIT:+-k$UNIT} $LOOP "$tune" "$work/$stem.yx6" \
     | grep -vE '^  R' || true                   # the per-register table is noise here
 
 "$YX6_DIR/mkprg.sh" -m "$work/$stem.yx6" "$work/PLAY.PRG"

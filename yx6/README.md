@@ -18,8 +18,10 @@ digidrum, sinus-SID, sync-buzzer) are **not** played.
 | [play.sh](play.sh) | one command: pack a `.ym`, build it, play it under Hatari |
 
 **Unit sizes.** `yx6 -kK` (and `play.sh -kK`) packs the register sections at
-ST4 units of 2 or 4 bytes: refill calls hand the decoder half or a quarter as
-many units, at some ratio cost. The tune length, the loop frame and C must be
+ST4 units of 1, 2 or 4 bytes: wider units hand the decoder half or a quarter
+as many units per refill, at some ratio cost. The default is 2 where the
+tune's shape allows it and 1 otherwise - measured on a real tune, 2 buys most
+of 4's speed for a fraction of its size cost. The tune length, the loop frame and C must be
 whole units — a padded section would decode one extra value into the ring, and
 it would be played — and the packer refuses anything else. The player is built
 for one unit size and checks every section's ST4 signature against it at init;

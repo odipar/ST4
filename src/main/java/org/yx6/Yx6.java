@@ -22,8 +22,8 @@ public final class Yx6 {
 
         int ringSize = Yx6Format.DEFAULT_RING_SIZE;
         int chunk = Yx6Format.DEFAULT_CHUNK;
-        int unit = 1;
-        int loopFrame = -1;                     // -1 until the YM header decides
+        int unit = 0;                           // 0 until chosen: -kK, or the
+        int loopFrame = -1;                     // tune's shape; -1 likewise
         boolean playOnce = false;
         boolean forcedMode = false;
         int i = 0;
@@ -60,10 +60,10 @@ public final class Yx6 {
                       -nN     Ring size per register, in bytes (default 1024)
                       -cC     Values decoded per call, and the round-robin group
                               size (default 16; needs C >= 14 and N mod C = 0)
-                      -kK     ST4 unit size: 1, 2 or 4 (default 1). The player
-                              must be built with the same ST4_UNIT, and the
-                              tune length, loop frame and C must be multiples
-                              of K
+                      -kK     ST4 unit size: 1, 2 or 4. The default is 2 when
+                              the tune length, loop frame and C allow it -
+                              they must be multiples of K - and 1 otherwise.
+                              The player must be built with the same ST4_UNIT
                       -lF     Loop from frame F, overriding the YM header
 
                     The input is an unpacked YM5!/YM6! dump. Distributed .ym files
@@ -72,7 +72,7 @@ public final class Yx6 {
         }
         String inputName = args[i];
 
-        String problem = Yx6Format.checkShape(ringSize, chunk, unit);
+        String problem = Yx6Format.checkShape(ringSize, chunk, Math.max(unit, 1));
         if (!problem.isEmpty()) {
             throw error(problem);
         }
@@ -108,6 +108,19 @@ public final class Yx6 {
         }
         if (playOnce) {
             loopFrame = -1;
+        }
+
+        // The default unit is 2 - measured a few percent cheaper per frame
+        // for little ratio - but only where the tune's shape allows it: the
+        // length, the split and C must all be whole units. An explicit -kK
+        // is a promise and fails loudly instead.
+        if (unit == 0) {
+            int split = loopFrame >= 0 ? loopFrame : song.frames();
+            unit = song.frames() % 2 == 0 && split % 2 == 0 && chunk % 2 == 0 ? 2 : 1;
+            if (unit == 1) {
+                System.out.println("Packing at -k1: this tune's shape is not "
+                        + "a whole number of 2-byte units");
+            }
         }
 
         Yx6Encoder.Result result;

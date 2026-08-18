@@ -50,7 +50,7 @@ def main() -> int:
     tune.write_bytes(gen_ym.ym6_file(FRAMES, source, loop_frame=LOOP))
     packed = HERE / 'tune.yx6'
     subprocess.run(['java', '-ea', '-cp', str(CLASSES), 'org.yx6.Yx6', '-f',
-                    f'-n{RING}', f'-c{CHUNK}', f'-l{LOOP}', str(tune), str(packed)],
+                    f'-n{RING}', f'-c{CHUNK}', '-k1', f'-l{LOOP}', str(tune), str(packed)],
                    check=True, capture_output=True)
 
     played = FRAMES + EXTRA
