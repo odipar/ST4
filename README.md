@@ -100,9 +100,9 @@ runtime choice of width:
 
 | | k=1 | k=2 | k=4 | calls |
 |---|---:|---:|---:|---|
-| [ST4.S](68k/ST4.S) | 220 B | 222 B | 224 B | `ST4_init`, `ST4_decompress`, `ST4_resume` |
-| [ST4_wrap.S](68k/ST4_wrap.S) | 238 B | 242 B | 244 B | `ST4_init`, `ST4_resume` — counted wrap, no DONE state |
-| [ST4_ring.S](68k/ST4_ring.S) | 288 B | 296 B | 298 B | `ST4_init`, `ST4_resume` — general ring |
+| [ST4.S](68k/ST4.S) | 276 B | 278 B | 280 B | `ST4_init`, `ST4_decompress`, `ST4_resume` |
+| [ST4_wrap.S](68k/ST4_wrap.S) | 292 B | 296 B | 298 B | `ST4_init`, `ST4_resume` — counted wrap, no DONE state |
+| [ST4_ring.S](68k/ST4_ring.S) | 352 B | 360 B | 362 B | `ST4_init`, `ST4_resume` — general ring |
 
 Use [ST4.S](68k/ST4.S) when the whole output stays in one buffer; it can
 decode everything in one call or stop and resume. The other two stream through
@@ -110,6 +110,12 @@ a small ring. Use [ST4_wrap.S](68k/ST4_wrap.S) when the sizes and call pattern
 are known and your caller counts the wraps; use
 [ST4_ring.S](68k/ST4_ring.S) for variable call sizes — it stops each call at
 the ring end.
+
+Each decoder runs two copy ladders: match runs of at most sixteen units — on
+measured streams, four of every five — take a counter-free ladder that falls
+straight into what comes next, and literals and longer runs take a counted
+one. Measured on real streams, that is 12–14% fewer cycles for ST4_wrap in a
+small-budget streaming loop, 3–5% in bulk, with no case slower.
 
 State lives in registers: `a0`, `a2`, `a4`, `a5` walk the four streams, `a1`
 writes, `d0.w` holds the bit queue and `d1`/`d2` the counters. Only `a6`, `d6`

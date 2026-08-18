@@ -20,6 +20,11 @@
 ; at the ring end and wraps the write pointer on the next entry, so the caller
 ; may ask for any budget and needs no call counting. d1.w = 0 means done.
 ;
+; The copy engine runs two ladders: match segments of at most sixteen units
+; take a counter-free ladder that falls straight into the match epilogue, and
+; literals and longer segments take the classic counted one - see ST4_wrap.S
+; for the measurements behind the split.
+;
 ; The container is ST4.S's: twenty bytes of header - signature, O, and where
 ; streams B, C and D begin - then A, B, C and D in order. See ST4.S for the
 ; eight instructions that open one.
@@ -180,49 +185,21 @@ budget_fits:
         bcc.s   source_wrapped
         move.w  d5,d4                   ; this segment stops at the wrap
         bra.s   source_wrapped
-literal_source:
-        movea.l a2,a3                   ; literals copy from stream B
-copy:                                   ; Java: writeByte(...) - n moves total:
+copy:                                   ; MATCH copies only reach this entry
         sub.w   d4,d1                   ; consume n from the operation
         sub.w   d4,d3                   ; and from this call's budget
-        moveq   #15,d5                  ; d5 = n&15, partial-pass dispatch
-        and.w   d4,d5
-        lsr.w   #4,d4                   ; d4 = n>>4 full passes
-        add.w   d5,d5
-        neg.w   d5                      ; index = -2*(n&15)
-        jmp     ladder_end(pc,d5.w)     ; pc-relative dispatch, no base register
-ladder:
-        ST4_MOVE                        ; entry at ladder_end-2k copies k units
+        cmp.w   #17,d4
+        bcc.s   copy_slow               ; n >= 17: the counted ladder
+        add.w   d4,d4
+        neg.w   d4                      ; d4 = -2n is the dispatch index itself,
+        jmp     fast_end(pc,d4.w)       ; and $ffxx for byte_offset afterwards
+fast_ladder:
+; Sixteen unit moves: entry at fast_end-2k copies k units.
+        .rept   16
         ST4_MOVE
-        ST4_MOVE
-        ST4_MOVE
-        ST4_MOVE
-        ST4_MOVE
-        ST4_MOVE
-        ST4_MOVE
-        ST4_MOVE
-        ST4_MOVE
-        ST4_MOVE
-        ST4_MOVE
-        ST4_MOVE
-        ST4_MOVE
-        ST4_MOVE
-        ST4_MOVE
-ladder_end:
-        dbf     d4,ladder               ; full 16-unit passes
-        tst.w   d2
-        bmi.s   match_copied             ; matches consume no input here
-        movea.l a3,a2                   ; literals do: stream B advanced
-        tst.w   d1
-        bne.s   resume_return            ; literals can stop only on the budget
-
-literals_transition:
-        add.w   d0,d0                   ; Java: next(), case LITERALS (bare read)
-        bcs.s   new_offset              ; 1: new offset
-        neg.w   d2                      ; from-last reuses the negated offset
-        bra.s   gamma_seed0             ; Java: beginMatchFromLastOffset()
-
-match_copied:
+        .endr
+fast_end:                               ; no counter, no kind test: fall into
+match_copied:                           ; the match epilogue
         tst.w   d1
         beq.s   match_transition
 resume_fresh:                           ; gamma or a split match may continue
@@ -235,38 +212,38 @@ resume_return:                          ; return the current d1.w result
 entry_special:                          ; d1.w = 0: only START or DONE survives a call
         tst.w   d2                      ; START has -1; DONE is zero
         beq.s   resume_return
+        bra.w   begin_literals          ; START: once per stream
 
-begin_literals:                         ; Java: beginLiterals()
-        neg.w   d2                      ; positive lastOffset = State.LITERALS
-gamma_seed0:
-        moveq   #0,d4                   ; remaining = gamma + 0; fall through
+literal_source:
+        movea.l a2,a3                   ; literals copy from stream B
+        sub.w   d4,d1                   ; consume n from the operation
+        sub.w   d4,d3                   ; and from this call's budget
+copy_slow:                              ; any n; the subs are already done
+        moveq   #15,d5                  ; d5 = n&15, partial-pass dispatch
+        and.w   d4,d5
+        lsr.w   #4,d4                   ; d4 = n>>4 full passes
+        add.w   d5,d5
+        neg.w   d5                      ; index = -2*(n&15)
+        jmp     ladder_end(pc,d5.w)     ; pc-relative dispatch, no base register
+ladder:
+; Sixteen unit moves: entry at ladder_end-2k copies k units.
+        .rept   16
+        ST4_MOVE
+        .endr
+ladder_end:
+        subq.w  #1,d4                   ; full 16-unit passes; the fall-through
+        bcc.s   ladder                  ; costs 12 where dbf paid 14, and still
+        tst.w   d2                      ; leaves d4.w = $ffff for byte_offset
+        bmi.s   match_copied            ; an n>=17 match rejoins its epilogue
+        movea.l a3,a2                   ; literals do: stream B advanced
+        tst.w   d1
+        bne.s   resume_return           ; literals can stop only on the budget
 
-; get_gamma: interlaced Elias gamma in d1.w; d4.w is the 0/1 length seed.
-; Gammas are odd-length and each is followed by one flag bit, so a gamma always
-; starts at an even position and the queue - which empties every 16 bits, also
-; even - can only run out on a continuation bit. Data and transition reads need
-; no refill check; 16 is even like 8, so the word queue inherits the argument.
-; The first continuation is peeled and bcs is the loop edge.
-; Java: readInterlacedEliasGamma().
-get_gamma:
-        addq.w  #1,d1
-        add.w   d0,d0                   ; first continuation bit
-        beq.s   gamma_refill            ; the queue empties on one bit in eight,
-        bcc.s   gamma_done              ; so the refill is out of line and this
-gamma_loop:                             ; branch is the one normally not taken
-        add.w   d0,d0                   ; data bit: never a refill
-        addx.w  d1,d1                   ; value = value*2 + bit
-        add.w   d0,d0                   ; continuation bit
-        beq.s   gamma_refill
-        bcs.s   gamma_loop              ; 1: another pair; the continue branch
-gamma_done:                             ; doubles as the loop jump
-        add.w   d4,d1                   ; +1 only for a new-offset match
-        bra.s   resume_fresh
-gamma_refill:                           ; queue-empty continuations share one
-        move.w  (a0)+,d0                ; refill; carry set means another pair
-        addx.w  d0,d0                   ; follows, otherwise finish the gamma
-        bcs.s   gamma_loop
-        bra.s   gamma_done
+literals_transition:
+        add.w   d0,d0                   ; Java: next(), case LITERALS (bare read)
+        bcs.s   new_offset              ; 1: new offset
+        neg.w   d2                      ; from-last reuses the negated offset
+        bra.w   gamma_seed0             ; Java: beginMatchFromLastOffset()
 
 match_transition:                       ; remaining == 0: parse after a match
         add.w   d0,d0                   ; Java: next(), case MATCH (bare read)
@@ -296,7 +273,8 @@ class_refill:
         bra.s   class_read
 
 byte_offset:
-; The ladder's DBF left d4.w = $ffff, so one move.b makes $ff00 + (256-offset),
+; The copy paths leave d4.w = $ffxx - the fast ladder's -2n dispatch index, or
+; the counted terminator's $ffff - so one move.b makes $ff00 + (256-offset),
 ; which already IS -offset as a word. The bank bit moves it 256 units further.
         move.b  (a4)+,d4
         add.w   d0,d0                   ; class bit 2: the 256-unit bank
@@ -312,8 +290,43 @@ scale_offset:
         add.w   d4,d4
         .endif
         move.w  d4,d2                   ; install -lastOffset*UNIT, keep d2.high
-        bra.s   have_offset
+        moveq   #1,d4                   ; new-offset match: remaining = gamma+1
+        bra.s   get_gamma               ; one branch, not two through have_offset
 
 end_marker:                             ; Java: State.DONE
         clr.w   d2                      ; d1.w is already zero; keep metadata highs
         rts
+
+begin_literals:                         ; Java: beginLiterals()
+        neg.w   d2                      ; positive lastOffset = State.LITERALS
+gamma_seed0:
+        moveq   #0,d4                   ; remaining = gamma + 0; fall through
+
+; get_gamma: interlaced Elias gamma in d1.w; d4.w is the 0/1 length seed.
+; Gammas are odd-length and each is followed by one flag bit, so a gamma always
+; starts at an even position and the queue - which empties every 16 bits, also
+; even - can only run out on a continuation bit. Data and transition reads need
+; no refill check; 16 is even like 8, so the word queue inherits the argument.
+; The first continuation is peeled and bcs is the loop edge.
+; Java: readInterlacedEliasGamma().
+get_gamma:
+        addq.w  #1,d1
+        add.w   d0,d0                   ; first continuation bit
+        beq.s   gamma_refill            ; the queue empties on one bit in eight,
+        bcc.s   gamma_done              ; so the refill is out of line and this
+gamma_loop:                             ; branch is the one normally not taken
+        add.w   d0,d0                   ; data bit: never a refill
+        addx.w  d1,d1                   ; value = value*2 + bit
+        add.w   d0,d0                   ; continuation bit
+        beq.s   gamma_refill
+        bcs.s   gamma_loop              ; 1: another pair; the continue branch
+gamma_done:                             ; doubles as the loop jump
+        add.w   d4,d1                   ; +1 only for a new-offset match
+        move.w  d3,d4                   ; the resume_fresh tail, duplicated so
+        bne.w   segment                 ; the parse exit takes one branch
+        rts                             ; budget spent: the d1.w result stands
+gamma_refill:                           ; queue-empty continuations share one
+        move.w  (a0)+,d0                ; refill; carry set means another pair
+        addx.w  d0,d0                   ; follows, otherwise finish the gamma
+        bcs.s   gamma_loop
+        bra.s   gamma_done

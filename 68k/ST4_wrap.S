@@ -26,6 +26,16 @@
 ; counts are units; offsets, positions and N are bytes - which is what keeps
 ; the wrap arithmetic identical to ST1_wrap's.
 ;
+; The copy engine runs two ladders. Match segments of at most sixteen units -
+; measured to be four of every five segments a small-budget streamer makes,
+; with the whole-chunk segment the most common of all - take a counter-free
+; ladder that falls straight into the match epilogue: no full-pass shift, no
+; loop counter, no post-copy kind test. Literals and longer segments take the
+; classic counted ladder. And there is no first-call test: ST4_init seeds the
+; bit queue with one virtual 0 flag ($4000), so a fresh state decodes itself
+; through a zero-unit match segment and reads that flag as "begin literals"
+; exactly where the old entry branch went.
+;
 ; The container is ST4.S's: twenty bytes of header - signature, O, and where
 ; streams B, C and D begin - then A, B, C and D in order. See ST4.S for the
 ; eight instructions that open one.
@@ -95,7 +105,13 @@ ST4_init:
         move.l  #(-ST4_UNIT)<<16,d2
         move.w  d3,d2                   ; N lives below it for now
         swap    d2                      ; N above, -INITIAL_OFFSET*UNIT below
-        move.w  #$8000,d0               ; an empty bit queue: $8000 is the sentinel
+; One virtual 0 flag, then the empty sentinel. The first resume call runs a
+; zero-unit match segment through the normal path - remaining is zero, so
+; n = 0 and the ladder is entered at its end - and lands in match_transition,
+; which shifts $4000 into $8000: the flag reads as "begin literals" and the
+; queue is the empty sentinel the old first call started from. That is what
+; lets ST4_resume skip a first-call test on every call.
+        move.w  #$4000,d0
         rts
 
 source_wrapped:
@@ -109,12 +125,10 @@ source_wrapped:
 ; Continuing calls emit d3 bytes; the final call may be shorter. The caller
 ; knows the final span from O; [old a1 .. new a1) is fresh output.
 ST4_resume:
-        tst.w   d1                      ; only the first legal call has zero
-        beq.s   begin_literals
-        move.w  d3,d4                   ; seed n from the nonzero budget
-segment:                                ; d1.w remaining >= 1, d3 budget >= 1
-        cmp.w   d1,d4                   ; n = min(budget, remaining)
-        bls.s   budget_fits
+        move.w  d3,d4                   ; seed n from the budget; a fresh state
+segment:                                ; runs one 0-unit match segment and
+        cmp.w   d1,d4                   ; reads the seeded flag afterwards.
+        bls.s   budget_fits             ; n = min(budget, remaining)
         move.w  d1,d4
 budget_fits:
         tst.w   d2                      ; positive lastOffset means LITERALS
@@ -140,11 +154,35 @@ budget_fits:
         bcc.s   source_wrapped
         move.w  d5,d4                   ; stop this segment at the source wrap
         bra.s   source_wrapped
-literal_source:
-        movea.l a2,a3                   ; literals copy from stream B
-copy:                                   ; Java: writeByte(...) - n moves total:
+
+copy:                                   ; MATCH copies only reach this entry
         sub.w   d4,d1                   ; consume n from the operation
         sub.w   d4,d3                   ; and from this call's budget
+        cmp.w   #17,d4
+        bcc.s   copy_slow               ; n >= 17: the counted ladder
+        add.w   d4,d4
+        neg.w   d4                      ; d4 = -2n is the dispatch index itself,
+        jmp     fast_end(pc,d4.w)       ; and $ffxx for byte_offset afterwards
+fast_ladder:
+; Sixteen unit moves: entry at fast_end-2k copies k units.
+        .rept   16
+        ST4_MOVE
+        .endr
+fast_end:                               ; no counter, no kind test: fall into
+match_copied:                           ; the match epilogue
+        tst.w   d1
+        beq.s   match_transition
+resume_fresh:                           ; gamma or a split match may continue
+        move.w  d3,d4                   ; test budget and seed the next segment
+        bne.s   segment                 ; budget remains: start/continue a segment
+resume_return:
+        rts
+
+literal_source:
+        movea.l a2,a3                   ; literals copy from stream B
+        sub.w   d4,d1                   ; consume n from the operation
+        sub.w   d4,d3                   ; and from this call's budget
+copy_slow:                              ; any n; the subs are already done
         moveq   #15,d5                  ; d5 = n&15, partial-pass dispatch
         and.w   d4,d5
         lsr.w   #4,d4                   ; d4 = n>>4 full passes
@@ -152,45 +190,24 @@ copy:                                   ; Java: writeByte(...) - n moves total:
         neg.w   d5                      ; index = -2*(n&15)
         jmp     ladder_end(pc,d5.w)     ; pc-relative dispatch, no base register
 ladder:
-        ST4_MOVE                        ; entry at ladder_end-2k copies k units
+; Sixteen unit moves: entry at ladder_end-2k copies k units.
+        .rept   16
         ST4_MOVE
-        ST4_MOVE
-        ST4_MOVE
-        ST4_MOVE
-        ST4_MOVE
-        ST4_MOVE
-        ST4_MOVE
-        ST4_MOVE
-        ST4_MOVE
-        ST4_MOVE
-        ST4_MOVE
-        ST4_MOVE
-        ST4_MOVE
-        ST4_MOVE
-        ST4_MOVE
+        .endr
 ladder_end:
-        dbf     d4,ladder               ; full 16-unit passes
-        tst.w   d2
-        bmi.s   match_copied             ; matches consume no input here
-        movea.l a3,a2                   ; literals do: stream B advanced
+        subq.w  #1,d4                   ; full 16-unit passes; the fall-through
+        bcc.s   ladder                  ; costs 12 where dbf paid 14, and still
+        tst.w   d2                      ; leaves d4.w = $ffff for byte_offset
+        bmi.s   match_copied            ; an n>=17 match rejoins its epilogue
+        movea.l a3,a2                   ; literals do consume input: B advanced
         tst.w   d1
-        bne.s   resume_return            ; literals stop only on the budget
+        bne.s   resume_return           ; literals stop only on the budget
 
 literals_transition:
         add.w   d0,d0                   ; Java: next(), case LITERALS (bare read)
         bcs.s   new_offset              ; 1: new offset
         neg.w   d2                      ; from-last reuses the negated offset
         bra.s   gamma_seed0             ; Java: beginMatchFromLastOffset()
-
-match_copied:
-        tst.w   d1
-        beq.s   match_transition
-resume_fresh:                           ; gamma or a split match may continue
-        move.w  d3,d4                   ; test budget and seed the next segment
-        bne.s   segment                 ; budget remains: start/continue a segment
-
-resume_return:
-        rts
 
 begin_literals:                         ; Java: beginLiterals()
         neg.w   d2                      ; positive lastOffset = State.LITERALS
@@ -215,7 +232,10 @@ gamma_loop:
         bcs.s   gamma_loop
 gamma_done:
         add.w   d4,d1                   ; +1 only for a new-offset match
-        bra.s   resume_fresh
+        move.w  d3,d4                   ; the resume_fresh tail, duplicated so
+        bne.w   segment                 ; the parse exit takes one branch
+parse_done:
+        rts
 gamma_refill:
         move.w  (a0)+,d0
         addx.w  d0,d0
@@ -238,7 +258,7 @@ new_offset:                             ; Java: beginMatchFromNewOffset/readOffs
 class_read:
         bcs.s   byte_offset
         add.w   d0,d0                   ; class bit 2: set means end of stream
-        bcs.s   resume_return
+        bcs.s   parse_done              ; the nearer of the two identical rts
         move.w  (a5)+,d2                ; -lastOffset*UNIT, stored ready to use
 have_offset:
         moveq   #1,d4                   ; new-offset match: remaining = gamma+1
@@ -250,7 +270,8 @@ class_refill:
         bra.s   class_read
 
 byte_offset:
-; The ladder's DBF left d4.w = $ffff, so one move.b makes $ff00 + (256-offset),
+; The copy paths leave d4.w = $ffxx - the fast ladder's -2n dispatch index, or
+; the counted terminator's $ffff - so one move.b makes $ff00 + (256-offset),
 ; which already IS -offset as a word. The bank bit moves it 256 units further.
         move.b  (a4)+,d4
         add.w   d0,d0                   ; class bit 2: the 256-unit bank
@@ -266,4 +287,5 @@ scale_offset:
         add.w   d4,d4
         .endif
         move.w  d4,d2                   ; install -lastOffset*UNIT, keep d2.high
-        bra.s   have_offset
+        moveq   #1,d4                   ; new-offset match: remaining = gamma+1
+        bra.s   get_gamma               ; one branch, not two through have_offset
