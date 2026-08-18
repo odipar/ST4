@@ -128,6 +128,21 @@ output must stay byte-identical to the original ZX1 C compressor — `-q` there
 means the same packed size, two orders of magnitude faster on repetitive data,
 different ties.
 
+## YX6: the YM chiptune player
+
+[yx6/](yx6/README.md) is the proof the streaming decoders earn their keep: a
+Java packer turns a YM6 dump into fourteen ST4 containers - one per YM2149
+register, each a stream of one register's values, exactly the event engine's
+kind of data - and an 888-byte 68000 player decodes them through fourteen
+small rings with ST4_wrap, one refill per VBL, about 2,200 cycles a frame on
+real hardware. Loop points restart a register's stream mid-refill; effects are
+masked at pack time.
+
+```sh
+mvn -q compile exec:exec@yx6 -Dargs="-f song.ym song.yx6"
+yx6/mkprg.sh song.yx6                 # -> SONG.PRG
+```
+
 ## Tests
 
 ```sh
@@ -136,6 +151,7 @@ python3 68k/test/emu/test_st4.py          # linear decoder vs the Java packer, k
 python3 68k/test/emu/test_st4_wrap.py     # counted wrap, every unit size
 python3 68k/test/emu/test_st4_ring.py     # general ring, both wrap modes, oversized budgets
 python3 68k/test/emu/bench_bits.py        # why the lengths are still Elias gamma
+python3 yx6/test/emu/test_yx6.py          # the YM player, against the chip writes
 ```
 
 The Python rigs need `mvn compile`, [rmac](http://rmac.is-slick.com) and
@@ -146,8 +162,8 @@ packed register metadata.
 
 ## ST1
 
-ST1 — the ZX1 decoders this grew from, the jx1 packer, the YX6 chiptune
-player — lives in [odipar/ST1](https://github.com/odipar/ST1). ST4 forked from
+ST1 — the ZX1 decoders this grew from, and the jx1 packer — lives in
+[odipar/ST1](https://github.com/odipar/ST1). ST4 forked from
 it at `odipar/ST1@132aef0`; the shared emulator harness and the MC68000 cycle
 knowledge in the rigs are carried copies of that repository's, which remains
 authoritative for ST1's own timing tables.

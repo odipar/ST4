@@ -1,0 +1,1062 @@
+    1           =00000001               ST4_UNIT    equ     1
+    2                                           include "YX6.S"
+    1                                   ; -----------------------------------------------------------------------------
+    2                                   ; YX6.S - streaming YM chiptune player for the plain 68000 (Atari ST)
+    3                                   ;
+    4                                   ; By Robbert van Dalen. Plays a .yx6 file: fourteen YM2149 register streams,
+    5                                   ; each packed as its own embedded ST4 container and decoded through its own
+    6                                   ; small ring by ST4_wrap.S. Written by Claude (Anthropic's Claude Code) under
+    7                                   ; Robbert's direction, based on ZX1 v1.5 by Einar Saukas and inspired by Steve
+    8                                   ; Clarets' MinYMiser. Use it freely, including commercially, as long as your
+    9                                   ; documentation says you used ZX1 through ST4 (see LICENSE).
+   10                                   ;
+   11                                   ; It plays the fourteen standard sound registers, and loops. The YM6 special
+   12                                   ; effects - SID voice, digidrum, sinus-SID, sync-buzzer - are not played, and
+   13                                   ; the yx6 packer has already masked their bits out of the register values.
+   14                                   ;
+   15                                   ; REQUIRES ST4_wrap.S, built for the SAME unit size the tune was packed with
+   16                                   ; (yx6 -kK; byte units unless the packer was told otherwise). Include both, in
+   17                                   ; either order, with the unit size defined first:
+   18                                   ;
+   19                                   ;       ST4_UNIT    equ     1
+   20                                   ;               include "YX6.S"
+   21                                   ;               include "ST4_wrap.S"
+   22                                   ;
+   23                                   ; YX6 calls ST4_init and ST4_resume by label, and YX6_init checks every
+   24                                   ; section's ST4 signature against this build's unit size - a tune packed for
+   25                                   ; a different one is rejected, not garbled.
+   26                                   ;
+   27                                   ; -----------------------------------------------------------------------------
+   28                                   ; THE DESIGN, in one paragraph. A tune is O frames long. Each of the fourteen
+   29                                   ; registers gets its own ring of N bytes and its own saved decoder state, and
+   30                                   ; is decoded C values at a time (C = 16 by default). On every VBL the player
+   31                                   ; uses one value from each of the fourteen rings and refills exactly one
+   32                                   ; register - register k on the VBL where the frame number modulo C is k. With
+   33                                   ; C >= 14 every register is refilled once per C frames, one refill per VBL, so
+   34                                   ; the work per frame is flat: fourteen register writes plus one ST4_resume of
+   35                                   ; C bytes. Since C divides N and a call never reaches the ring end, ST4_wrap.S
+   36                                   ; is the decoder that fits: the player counts the calls itself and wraps the
+   37                                   ; write pointer when it lands on the ring end.
+   38                                   ;
+   39                                   ; LOOPING. A packed stream can only be restarted from its beginning, so the packer
+   40                                   ; splits every register at the loop frame L: an intro stream for frames [0, L)
+   41                                   ; and a loop stream for [L, O). When a register's section runs out mid-refill
+   42                                   ; the player starts its loop stream over - a fresh decoder writing on into the
+   43                                   ; same ring - so the rings always hold one continuous sequence of values and
+   44                                   ; the read side never learns that anything happened. Nothing requires L to fall
+   45                                   ; on a group boundary: a refill that straddles the split simply decodes two
+   46                                   ; pieces. A tune that loops from frame 0 has no intro streams at all.
+   47                                   ;
+   48                                   ; -----------------------------------------------------------------------------
+   49                                   ; USING IT
+   50                                   ;
+   51                                   ;       lea     song,a0                 ; the .yx6 file, loaded anywhere
+   52                                   ;       lea     workspace,a1            ; even address, YX6_SIZE bytes
+   53                                   ;       bsr     YX6_init                ; d0 = 0 when the file was accepted
+   54                                   ;       tst.l   d0
+   55                                   ;       bne     bad_file
+   56                                   ;   vbl:                                ; once per frame, in supervisor mode
+   57                                   ;       lea     workspace,a0
+   58                                   ;       bsr     YX6_play                ; d0 = 0 played, 1 wrapped, -1 ended
+   59                                   ;       ...
+   60                                   ;       bsr     YX6_stop                ; silence the three voices
+   61                                   ;
+   62                                   ; The workspace holds the player's own fields, the fourteen decoder states and
+   63                                   ; the fourteen rings, so its size depends on the ring size in the file:
+   64                                   ;
+   65                                   ;   YX6_SIZE = YX6_FIXED + 14 * N       ; 944 + 14 * N bytes
+   66                                   ;
+   67                                   ; For the default 1024-byte rings that is 15280 bytes. A program that knows N
+   68                                   ; at build time can reserve it with
+   69                                   ;
+   70                                   ;       ds.b    YX6_FIXED+(YX6_STREAMS*1024)
+   71                                   ;
+   72                                   ; where the parentheses matter: rmac evaluates expressions left to right.
+   73                                   ;
+   74                                   ; CALLS AND REGISTERS
+   75                                   ;
+   76                                   ;   YX6_init   in   a0 = .yx6 file, at an even address, a1 = workspace
+   77                                   ;              out  d0 = 0 accepted, -1 not a v3 yx6 file with 14 streams
+   78                                   ;                        packed at this build's unit size
+   79                                   ;   YX6_play   in   a0 = workspace
+   80                                   ;              out  d0 = 0 played a frame
+   81                                   ;                   d0 = 1 played a frame, and that frame ended the tune: the
+   82                                   ;                          next one is the loop frame L
+   83                                   ;                   d0 = -1 the tune is over and nothing was written, which
+   84                                   ;                          only a tune packed with -o can report
+   85                                   ;   YX6_stop   in   -
+   86                                   ;   CLOBBERED  d0-d5, a0-a5. d6, d7 and a6 survive, as with ST4 - whose
+   87                                   ;              decoder state spans a4 and a5, which is why they no longer do.
+   88                                   ;
+   89                                   ; YX6_play writes to the sound chip at $FFFF8800, so it must run in supervisor
+   90                                   ; mode - which a VBL handler already does. It masks interrupts around the
+   91                                   ; fourteen writes, because selecting a register and writing it are two bus
+   92                                   ; cycles and TOS's own handlers use the chip too. Beyond that it performs no
+   93                                   ; side effect: no interrupt setup, no memory allocation, nothing outside the
+   94                                   ; workspace.
+   95                                   ;
+   96                                   ; ASSUMPTIONS (unchecked beyond the magic, version and stream count):
+   97                                   ;
+   98                                   ;   1. the file comes from the yx6 packer, which enforces C >= 14, N mod C = 0,
+   99                                   ;      N >= 2C, offsets that stay inside the ring, and - at ST4_UNIT above 1 -
+  100                                   ;      a tune length, loop frame and C that are whole units, so every budget
+  101                                   ;      this player passes to the decoder divides cleanly
+  102                                   ;   2. the workspace is at an even address and large enough for the file's N
+  103                                   ;   3. YX6_play is called once per frame and never after it returns -1.
+  104                                   ;      Calling it again is harmless - it returns -1 and writes nothing - which
+  105                                   ;      is what keeps ST4_wrap's "never call the decoder again" rule intact
+  106                                   ;   4. a looping tune plays for as long as you keep calling: d0 = 1 marks each
+  107                                   ;      time round, and YX6_init is only needed to start again from frame 0
+  108                                   ; -----------------------------------------------------------------------------
+  109                                   
+  110           =0000000E               YX6_STREAMS     equ     14              ; R0..R13; R14/R15 are I/O ports
+  111           =00000040               YX6_STATE_SIZE  equ     64              ; per stream, so the index is a shift
+  112                                                                           ; both ways: *64 in, /16 back to *4
+  113                                   
+  114                                   ; Workspace layout. Counters that a frame touches are kept in the form the
+  115                                   ; frame wants them in: a pointer to walk, and a countdown to test against zero.
+  116           =00000000               YX6_CURSOR      equ     0               ; long  this frame's byte in ring 0
+  117           =00000004               YX6_LEFTFR      equ     4               ; long  frames before the tune ends
+  118           =00000008               YX6_NEXT        equ     8               ; long  values decoded so far
+  119           =0000000C               YX6_RINGEND     equ     12              ; long  one past ring 0, where it wraps
+  120           =00000010               YX6_RINGS       equ     16              ; long  base of the ring area
+  121           =00000014               YX6_FILE        equ     20              ; long  the .yx6 file
+  122           =00000018               YX6_TOTAL       equ     24              ; long  O, the tune length in frames
+  123           =0000001C               YX6_LOOPLEN     equ     28              ; long  O - L, zero when it does not loop
+  124           =00000020               YX6_LOOP        equ     32              ; long  L, read at init to split sections
+  125           =00000024               YX6_N           equ     36              ; word  ring size N
+  126           =00000026               YX6_C           equ     38              ; word  values per call C
+  127           =00000028               YX6_SLOT        equ     40              ; word  refill slot, 0..C-1
+  128           =0000002A               YX6_INDEX       equ     42              ; word  stream index, during init only
+  129           =0000002C               YX6_LOOPS       equ     44              ; word  nonzero when the tune loops
+  130           =00000030               YX6_STATE       equ     48              ; 14 decoder states
+  131                                   ; rmac evaluates left to right, so the parentheses here are load-bearing:
+  132                                   ; without them this reads as (YX6_STATE+YX6_STREAMS)*YX6_STATE_SIZE.
+  133           =000003B0               YX6_FIXED       equ     YX6_STATE+(YX6_STREAMS*YX6_STATE_SIZE)
+  134                                   
+  135                                   ; One saved ST4_wrap state, plus the ring bounds the wrap check needs. The
+  136                                   ; first four longs are in movem order - d1, d2, then a0, a1 - so that much of
+  137                                   ; the decoder state loads and stores in one instruction; the three extra
+  138                                   ; stream pointers ST4 carries (literals, byte offsets, word offsets) follow.
+  139           =00000000               YS_D1           equ     0               ; long  d1, -ring.low : remaining
+  140           =00000004               YS_D2           equ     4               ; long  d2, N : signed offset
+  141           =00000008               YS_INPUT        equ     8               ; long  a0, stream A position
+  142           =0000000C               YS_WRITE        equ     12              ; long  a1, write pointer
+  143           =00000010               YS_LIT          equ     16              ; long  a2, stream B position
+  144           =00000014               YS_BOFF         equ     20              ; long  a4, stream C position
+  145           =00000018               YS_WOFF         equ     24              ; long  a5, stream D position
+  146           =0000001C               YS_QUEUE        equ     28              ; word  d0, bit queue
+  147           =00000020               YS_START        equ     32              ; long  this stream's ring
+  148           =00000024               YS_END          equ     36              ; long  one past its last byte
+  149           =00000028               YS_LEFT         equ     40              ; long  values left in the current section
+  150                                   ; The movem block starts at the top of the state, so the two movems address it
+  151                                   ; as plain (a2) - see the note where they are used.
+  152                                   
+  153                                   ; The .yx6 header, as written by the packer.
+  154           =00000000               YH_MAGIC        equ     0
+  155           =00000004               YH_VERSION      equ     4
+  156           =00000006               YH_FLAGS        equ     6
+  157           =00000008               YH_FRAMES       equ     8
+  158           =0000000C               YH_PLAYER_HZ    equ     12
+  159           =0000000E               YH_STREAM_COUNT equ     14
+  160           =00000010               YH_RING         equ     16
+  161           =00000012               YH_CHUNK        equ     18
+  162           =00000014               YH_LOOP         equ     20
+  163           =00000018               YH_CLOCK        equ     24
+  164           =0000001C               YH_INTRO_TABLE  equ     28              ; 14 offsets: the frames before the loop
+  165           =00000054               YH_LOOP_TABLE   equ     84              ; 14 offsets: the frames from L on
+  166                                   
+  167           =59583621               YX6_MAGIC       equ     $59583621       ; 'YX6!'
+  168           =00000003               YX6_VERSION     equ     3               ; 3: the sections are ST4 containers
+  169           =00000001               YX6_FLAG_LOOPS  equ     1               ; header flag: the tune loops
+  170           =FFFF8800               YX6_PSG         equ     $FFFF8800       ; select/read at +0, write at +2
+  171           =000000FF               YX6_NO_ENV      equ     $FF             ; R13 value meaning "leave it alone"
+  172           =000000C0               YX6_PORTS       equ     $C0             ; R7 bits the ST needs as outputs
+  173           =00000007               YX6_MIXER       equ     7
+  174           =0000000D               YX6_ENVELOPE    equ     13
+  175                                   
+  176                                   ; -----------------------------------------------------------------------------
+  177                                   ; YX6_WRITE: send one register's value straight from its ring to the sound
+  178                                   ; chip, then step a1 on to the next register's ring.
+  179                                   ;
+  180                                   ; Two moves and an add, with the register number assembled in as an immediate:
+  181                                   ; nothing is tested, nothing is counted, and the value never passes through a
+  182                                   ; data register. Registers 7 and 13 need their values touched, so they are
+  183                                   ; written out of line rather than through this macro.
+  184                                   ;
+  185                                   ; Skipping a register whose value has not changed was measured and dropped: a
+  186                                   ; sound-chip access on an ST costs about 1.5 cycles more than a RAM one, so the
+  187                                   ; compare that would save the write costs about as much as the write.
+  188                                   ; -----------------------------------------------------------------------------
+  189                                           .macro YX6_WRITE number
+  190                                 .         move.b  #\number,(a2)           ; select
+  191                                 .         move.b  (a1),2(a2)              ; and write
+  192                                 .         adda.l  d3,a1
+  193                                 .         .endm
+  194                                   
+  195                                   ; Jump table: bra.w keeps 4-byte slots for a program that loads YX6 as a blob.
+  196  00000000  6000xxxx                               bra.w   YX6_init
+  197  00000004  6000xxxx                               bra.w   YX6_play
+  198  00000008  6000xxxx                               bra.w   YX6_stop
+  199                                   
+  200                                   ; -----------------------------------------------------------------------------
+  201                                   ; YX6_init: a0 = .yx6 file, a1 = workspace. Sets up fourteen decoders and
+  202                                   ; decodes each register's first group, so frame 0 can be played immediately.
+  203                                   ; -----------------------------------------------------------------------------
+  204                                   YX6_init:
+  205  0000000C  2649                           movea.l a1,a3                   ; a3 is the workspace throughout
+  206  0000000E  27480014                       move.l  a0,YX6_FILE(a3)
+  207  00000012  0C9059583621                   cmp.l   #YX6_MAGIC,YH_MAGIC(a0)
+  208  00000018  6600xxxx                       bne     .rejected
+  209  0000001C  0C6800030004                   cmp.w   #YX6_VERSION,YH_VERSION(a0)
+  210  00000022  6600xxxx                       bne     .rejected
+  211  00000026  0C68000E000E                   cmp.w   #YX6_STREAMS,YH_STREAM_COUNT(a0)
+  212  0000002C  6600xxxx                       bne     .rejected
+  213                                   
+  214  00000030  276800080018                   move.l  YH_FRAMES(a0),YX6_TOTAL(a3)
+  215  00000036  276800140020                   move.l  YH_LOOP(a0),YX6_LOOP(a3)
+  216  0000003C  376800100024                   move.w  YH_RING(a0),YX6_N(a3)
+  217  00000042  376800120026                   move.w  YH_CHUNK(a0),YX6_C(a3)
+  218  00000048  30280006                       move.w  YH_FLAGS(a0),d0
+  219  0000004C  C07C0001                       and.w   #YX6_FLAG_LOOPS,d0
+  220  00000050  3740002C                       move.w  d0,YX6_LOOPS(a3)
+  221  00000054  276800080004                   move.l  YH_FRAMES(a0),YX6_LEFTFR(a3)
+  222  0000005A  426B0028                       clr.w   YX6_SLOT(a3)
+  223  0000005E  43EB03B0                       lea     YX6_FIXED(a3),a1        ; the rings follow the decoder states
+  224  00000062  27490010                       move.l  a1,YX6_RINGS(a3)
+  225  00000066  2689                           move.l  a1,YX6_CURSOR(a3)       ; frame 0 is the first byte of ring 0
+  226  00000068  7000                           moveq   #0,d0
+  227  0000006A  30280010                       move.w  YH_RING(a0),d0
+  228  0000006E  D089                           add.l   a1,d0
+  229  00000070  2740000C                       move.l  d0,YX6_RINGEND(a3)      ; where the cursor goes back to the top
+  230                                   
+  231  00000074  202B0018                       move.l  YX6_TOTAL(a3),d0        ; the loop section is O - L frames long,
+  232  00000078  90AB0020                       sub.l   YX6_LOOP(a3),d0         ; and empty when the tune plays once
+  233  0000007C  4A6B002C                       tst.w   YX6_LOOPS(a3)
+  234  00000080  66xx                           bne.s   .loop_length
+  235  00000082  7000                           moveq   #0,d0
+  236                                   .loop_length:
+  237  00000084  2740001C                       move.l  d0,YX6_LOOPLEN(a3)
+  238                                   
+  239  00000088  7200                           moveq   #0,d1                   ; the first group is C values, or the
+  240  0000008A  322B0026                       move.w  YX6_C(a3),d1            ; whole tune when that is shorter and
+  241  0000008E  4A6B002C                       tst.w   YX6_LOOPS(a3)           ; there is no loop to carry on into
+  242  00000092  66xx                           bne.s   .first_group
+  243  00000094  202B0018                       move.l  YX6_TOTAL(a3),d0
+  244  00000098  B081                           cmp.l   d1,d0
+  245  0000009A  64xx                           bcc.s   .first_group
+  246  0000009C  2200                           move.l  d0,d1
+  247                                   .first_group:
+  248  0000009E  27410008                       move.l  d1,YX6_NEXT(a3)         ; values decoded once init is done
+  249                                   
+  250  000000A2  426B002A                       clr.w   YX6_INDEX(a3)           ; the loop counter lives here: every
+  251                                   .stream:                                ; register is state during the calls
+  252  000000A6  302B002A                       move.w  YX6_INDEX(a3),d0
+  253  000000AA  ED48                           lsl.w   #6,d0                   ; * YX6_STATE_SIZE
+  254  000000AC  45F30030                       lea     YX6_STATE(a3,d0.w),a2
+  255  000000B0  7600                           moveq   #0,d3
+  256  000000B2  362B0024                       move.w  YX6_N(a3),d3
+  257  000000B6  302B002A                       move.w  YX6_INDEX(a3),d0
+  258  000000BA  C0C3                           mulu.w  d3,d0                   ; this stream's ring is the k'th
+  259  000000BC  226B0010                       movea.l YX6_RINGS(a3),a1
+  260  000000C0  D3C0                           adda.l  d0,a1
+  261  000000C2  25490020                       move.l  a1,YS_START(a2)
+  262  000000C6  2549000C                       move.l  a1,YS_WRITE(a2)
+  263  000000CA  2009                           move.l  a1,d0
+  264  000000CC  D083                           add.l   d3,d0
+  265  000000CE  25400024                       move.l  d0,YS_END(a2)
+  266                                   
+  267                                   ; A tune that loops from frame 0 has no intro streams, so its registers start
+  268                                   ; on the loop section - which is then the whole tune. The load of L comes
+  269                                   ; last because it is the branch condition: a move to a data register writes
+  270                                   ; the flags, a lesson the original version of this choice taught by always
+  271                                   ; picking the intro table and leaning on the section-exhausted path to
+  272                                   ; recover. The signature check below ended that arrangement.
+  273  000000D2  383C001C                       move.w  #YH_INTRO_TABLE,d4
+  274  000000D6  202B0020                       move.l  YX6_LOOP(a3),d0
+  275  000000DA  66xx                           bne.s   .section                ; L != 0: the intro covers [0, L)
+  276  000000DC  383C0054                       move.w  #YH_LOOP_TABLE,d4
+  277  000000E0  202B001C                       move.l  YX6_LOOPLEN(a3),d0
+  278                                   .section:
+  279  000000E4  25400028                       move.l  d0,YS_LEFT(a2)          ; values before this stream runs out
+  280                                   
+  281  000000E8  302B002A                       move.w  YX6_INDEX(a3),d0
+  282  000000EC  E548                           lsl.w   #2,d0                   ; the tables hold long offsets
+  283  000000EE  D044                           add.w   d4,d0
+  284  000000F0  206B0014                       movea.l YX6_FILE(a3),a0
+  285  000000F4  20300000                       move.l  0(a0,d0.w),d0
+  286  000000F8  D1C0                           adda.l  d0,a0                   ; the section's ST4 container
+  287  000000FA  0C90xxxxxxxx                   cmp.l   #ST4_SIGNATURE,(a0)     ; magic, version and unit in one compare:
+  288  00000100  6600xxxx                       bne     .rejected               ; a tune packed for another unit size
+  289                                   
+  290                                   ; Open the container: stream A begins where its header ends, and B, C and D
+  291                                   ; sit at the header-relative offsets it records - ST4.S documents exactly this
+  292                                   ; sequence. The state block goes to the stack; ST4_init clobbers a3, so the
+  293                                   ; workspace pointer does too.
+  294  00000104  2F0A                           move.l  a2,-(sp)
+  295  00000106  2448                           movea.l a0,a2
+  296  00000108  D5E80008                       adda.l  8(a0),a2                ; stream B, the literals
+  297  0000010C  2848                           movea.l a0,a4
+  298  0000010E  D9E8000C                       adda.l  12(a0),a4               ; stream C, the byte offsets
+  299  00000112  2A48                           movea.l a0,a5
+  300  00000114  DBE80010                       adda.l  16(a0),a5               ; stream D, the word offsets
+  301  00000118  41E80014                       lea     20(a0),a0               ; stream A, the bits
+  302  0000011C  7600                           moveq   #0,d3
+  303  0000011E  362B0024                       move.w  YX6_N(a3),d3            ; N, also ST4_init's argument
+  304  00000122  2F0B                           move.l  a3,-(sp)
+  305  00000124  6100xxxx                       bsr     ST4_init
+  306  00000128  265F                           movea.l (sp)+,a3
+  307                                   
+  308  0000012A  225F                           movea.l (sp)+,a1                ; the state block; a1 is recomputed
+  309  0000012C  23480008                       move.l  a0,YS_INPUT(a1)         ; every time round this loop
+  310  00000130  234A0010                       move.l  a2,YS_LIT(a1)
+  311  00000134  234C0014                       move.l  a4,YS_BOFF(a1)
+  312  00000138  234D0018                       move.l  a5,YS_WOFF(a1)
+  313  0000013C  3340001C                       move.w  d0,YS_QUEUE(a1)
+  314  00000140  2281                           move.l  d1,YS_D1(a1)
+  315  00000142  23420004                       move.l  d2,YS_D2(a1)
+  316                                   
+  317  00000146  302B002A                       move.w  YX6_INDEX(a3),d0        ; and its first group
+  318  0000014A  ED48                           lsl.w   #6,d0
+  319  0000014C  362B000A                       move.w  YX6_NEXT+2(a3),d3       ; C, or fewer: both fit a word
+  320  00000150  6100xxxx                       bsr     YX6_fill
+  321  00000154  526B002A                       addq.w  #1,YX6_INDEX(a3)
+  322  00000158  0C6B000E002A                   cmp.w   #YX6_STREAMS,YX6_INDEX(a3)
+  323  0000015E  6600FF46                       bne     .stream
+  324                                   
+  325  00000162  7000                           moveq   #0,d0
+  326  00000164  4E75                           rts
+  327                                   .rejected:
+  328  00000166  70FF                           moveq   #-1,d0
+  329  00000168  4E75                           rts
+  330                                   
+  331                                   ; -----------------------------------------------------------------------------
+  332                                   ; YX6_fill: d0.w = stream index * YX6_STATE_SIZE, d3.w = values wanted.
+  333                                   ; Produces exactly that many values for one register, crossing into the loop
+  334                                   ; section - and around it again - as often as it takes. Straddling matters even
+  335                                   ; for one group: nothing says the loop frame falls on a group boundary.
+  336                                   ; -----------------------------------------------------------------------------
+  337                                   YX6_fill:
+  338  0000016A  48E70302                       movem.l d6-d7/a6,-(sp)          ; three registers that survive a decoder
+  339  0000016E  45F30030                       lea     YX6_STATE(a3,d0.w),a2   ; call, which its own state needs
+  340  00000172  2C4B                           movea.l a3,a6                   ; ST4 clobbers a3: a6 keeps the workspace
+  341  00000174  2C0A                           move.l  a2,d6
+  342  00000176  7E00                           moveq   #0,d7
+  343  00000178  3E03                           move.w  d3,d7                   ; values still wanted
+  344                                   .piece:
+  345  0000017A  202A0028                       move.l  YS_LEFT(a2),d0
+  346  0000017E  66xx                           bne.s   .section
+  347  00000180  6100xxxx                       bsr     YX6_start_loop          ; this section ran out: go round again
+  348  00000184  202A0028                       move.l  YS_LEFT(a2),d0
+  349  00000188  67xx                           beq.s   .done                   ; nothing to go round to; do not hang
+  350                                   .section:
+  351  0000018A  B087                           cmp.l   d7,d0
+  352  0000018C  65xx                           bcs.s   .piece_size
+  353  0000018E  2007                           move.l  d7,d0                   ; the section covers all that is wanted
+  354                                   .piece_size:
+  355  00000190  91AA0028                       sub.l   d0,YS_LEFT(a2)
+  356  00000194  9E80                           sub.l   d0,d7
+  357  00000196  3600                           move.w  d0,d3                   ; a piece is at most C, so it fits a word
+  358                                   ; The decoder's budget counts units of ST4_UNIT bytes. The packer enforces
+  359                                   ; that every piece boundary - C, the loop frame, the tune length - is a whole
+  360                                   ; number of units, so this shift never drops a remainder.
+  361                                           .if ST4_UNIT=2
+  362                                 -         lsr.w   #1,d3
+  363                                 -         .endif
+  364                                           .if ST4_UNIT=4
+  365                                 -         lsr.w   #2,d3
+  366                                 -         .endif
+  367                                   
+  368                                   ; (a2) written out rather than YS_D1(a2): with +o3 rmac folds a zero
+  369                                   ; displacement away on movem but keeps the addressing mode, and emits the
+  370                                   ; instruction without its extension word. The next word becomes the
+  371                                   ; displacement and the code runs off into nothing.
+  372  00000198  4CD20306                       movem.l (a2),d1-d2/a0-a1
+  373  0000019C  286A0014                       movea.l YS_BOFF(a2),a4
+  374  000001A0  2A6A0018                       movea.l YS_WOFF(a2),a5
+  375  000001A4  302A001C                       move.w  YS_QUEUE(a2),d0
+  376  000001A8  246A0010                       movea.l YS_LIT(a2),a2           ; loaded last: a2 was the base
+  377  000001AC  6100xxxx                       bsr     ST4_resume
+  378  000001B0  264E                           movea.l a6,a3                   ; the decoder clobbered the workspace
+  379  000001B2  CD8A                           exg     a2,d6                   ; a2 = the block again, d6 = stream B
+  380  000001B4  B3EA0024                       cmpa.l  YS_END(a2),a1           ; YX6_save, inlined: this is the hot path
+  381  000001B8  66xx                           bne.s   .stored
+  382  000001BA  226A0020                       movea.l YS_START(a2),a1         ; the call landed on the ring end
+  383                                   .stored:
+  384  000001BE  48D20306                       movem.l d1-d2/a0-a1,(a2)
+  385  000001C2  25460010                       move.l  d6,YS_LIT(a2)
+  386  000001C6  254C0014                       move.l  a4,YS_BOFF(a2)
+  387  000001CA  254D0018                       move.l  a5,YS_WOFF(a2)
+  388  000001CE  3540001C                       move.w  d0,YS_QUEUE(a2)
+  389  000001D2  2C0A                           move.l  a2,d6                   ; the block pointer, back where fill keeps it
+  390  000001D4  4A87                           tst.l   d7
+  391  000001D6  66A2                           bne.s   .piece
+  392                                   .done:
+  393  000001D8  4CDF40C0                       movem.l (sp)+,d6-d7/a6
+  394  000001DC  4E75                           rts
+  395                                   
+  396                                   ; -----------------------------------------------------------------------------
+  397                                   ; YX6_start_loop: a2 = state block. Starts this register's loop stream over -
+  398                                   ; a fresh decoder, reading from the top of the loop section, still writing
+  399                                   ; where the last one stopped. ST4_init wants the ring start so that its packed
+  400                                   ; metadata comes out right; the write pointer is restored from the block, which
+  401                                   ; is why it is stored rather than held in a register.
+  402                                   ; -----------------------------------------------------------------------------
+  403                                   ; It runs inside YX6_fill, which guarantees d6 = the state block and a6 = the
+  404                                   ; workspace - the two anchors that survive the decoder call.
+  405                                   YX6_start_loop:
+  406  000001DE  200A                           move.l  a2,d0
+  407  000001E0  908B                           sub.l   a3,d0
+  408  000001E2  907C0030                       sub.w   #YX6_STATE,d0
+  409  000001E6  E848                           lsr.w   #4,d0                   ; k * 64 becomes k * 4, a table index
+  410  000001E8  206B0014                       movea.l YX6_FILE(a3),a0
+  411  000001EC  20300054                       move.l  YH_LOOP_TABLE(a0,d0.w),d0
+  412  000001F0  67xx                           beq.s   .no_loop                ; this tune has no loop section
+  413  000001F2  D1C0                           adda.l  d0,a0                   ; the loop section's ST4 container
+  414  000001F4  226A0020                       movea.l YS_START(a2),a1         ; read before a2 becomes stream B
+  415  000001F8  2448                           movea.l a0,a2
+  416  000001FA  D5E80008                       adda.l  8(a0),a2                ; stream B
+  417  000001FE  2848                           movea.l a0,a4
+  418  00000200  D9E8000C                       adda.l  12(a0),a4               ; stream C
+  419  00000204  2A48                           movea.l a0,a5
+  420  00000206  DBE80010                       adda.l  16(a0),a5               ; stream D
+  421  0000020A  41E80014                       lea     20(a0),a0               ; stream A
+  422  0000020E  7600                           moveq   #0,d3
+  423  00000210  362B0024                       move.w  YX6_N(a3),d3
+  424  00000214  6100xxxx                       bsr     ST4_init
+  425  00000218  264E                           movea.l a6,a3                   ; the decoder clobbered the workspace
+  426  0000021A  CD8A                           exg     a2,d6                   ; a2 = the block again, d6 = stream B
+  427  0000021C  25480008                       move.l  a0,YS_INPUT(a2)
+  428  00000220  25460010                       move.l  d6,YS_LIT(a2)
+  429  00000224  254C0014                       move.l  a4,YS_BOFF(a2)
+  430  00000228  254D0018                       move.l  a5,YS_WOFF(a2)
+  431  0000022C  3540001C                       move.w  d0,YS_QUEUE(a2)
+  432  00000230  2481                           move.l  d1,YS_D1(a2)
+  433  00000232  25420004                       move.l  d2,YS_D2(a2)
+  434  00000236  256B001C0028                   move.l  YX6_LOOPLEN(a3),YS_LEFT(a2)
+  435  0000023C  2C0A                           move.l  a2,d6                   ; the block pointer, as fill keeps it
+  436                                   .no_loop:
+  437  0000023E  4E75                           rts
+  438                                   
+  439                                   ; -----------------------------------------------------------------------------
+  440                                   ; YX6_play: a0 = workspace. One frame: write fourteen registers, refill one.
+  441                                   ; -----------------------------------------------------------------------------
+  442                                   YX6_play:
+  443  00000240  2648                           movea.l a0,a3
+  444  00000242  4AAB0004                       tst.l   YX6_LEFTFR(a3)
+  445  00000246  66xx                           bne.s   .frame
+  446  00000248  70FF                           moveq   #-1,d0                  ; past the last frame of a tune that
+  447  0000024A  4E75                           rts                             ; does not loop: write nothing
+  448                                   
+  449                                   .frame:                                 ; the same offset in all fourteen rings
+  450  0000024C  2253                           movea.l YX6_CURSOR(a3),a1
+  451  0000024E  7600                           moveq   #0,d3
+  452  00000250  362B0024                       move.w  YX6_N(a3),d3            ; one ring to the next
+  453  00000254  45F9FFFF8800                   lea     YX6_PSG,a2
+  454                                   
+  455                                   ; Selecting a register and writing it are two bus cycles. An interrupt that
+  456                                   ; uses the sound chip in between - TOS has several, its floppy motor timeout
+  457                                   ; among them - would leave this write going to whatever register it selected,
+  458                                   ; so the burst runs masked. Cheap: about 24 cycles for the whole frame.
+  459  0000025A  40E7                           move.w  sr,-(sp)
+  460  0000025C  007C0700                       ori.w   #$0700,sr
+  461                                   
+                                                YX6_WRITE 0                     ; channel A period, fine and coarse
+       00000260  14BC0000             @         move.b  #$0,(a2)           
+       00000264  15510002             @         move.b  (a1),2(a2)              
+  462  00000268  D3C3                 @         adda.l  d3,a1
+                                                YX6_WRITE 1
+       0000026A  14BC0001             @         move.b  #$1,(a2)           
+       0000026E  15510002             @         move.b  (a1),2(a2)              
+  463  00000272  D3C3                 @         adda.l  d3,a1
+                                                YX6_WRITE 2                     ; channel B
+       00000274  14BC0002             @         move.b  #$2,(a2)           
+       00000278  15510002             @         move.b  (a1),2(a2)              
+  464  0000027C  D3C3                 @         adda.l  d3,a1
+                                                YX6_WRITE 3
+       0000027E  14BC0003             @         move.b  #$3,(a2)           
+       00000282  15510002             @         move.b  (a1),2(a2)              
+  465  00000286  D3C3                 @         adda.l  d3,a1
+                                                YX6_WRITE 4                     ; channel C
+       00000288  14BC0004             @         move.b  #$4,(a2)           
+       0000028C  15510002             @         move.b  (a1),2(a2)              
+  466  00000290  D3C3                 @         adda.l  d3,a1
+                                                YX6_WRITE 5
+       00000292  14BC0005             @         move.b  #$5,(a2)           
+       00000296  15510002             @         move.b  (a1),2(a2)              
+  467  0000029A  D3C3                 @         adda.l  d3,a1
+                                                YX6_WRITE 6                     ; noise period
+       0000029C  14BC0006             @         move.b  #$6,(a2)           
+       000002A0  15510002             @         move.b  (a1),2(a2)              
+  468  000002A4  D3C3                 @         adda.l  d3,a1
+  469                                   
+  470  000002A6  14BC0007                       move.b  #YX6_MIXER,(a2)         ; R7 also carries the ST's I/O port
+  471  000002AA  1211                           move.b  (a1),d1                 ; directions, which port A needs kept
+  472  000002AC  823C00C0                       or.b    #YX6_PORTS,d1           ; as outputs for the floppy select
+  473  000002B0  15410002                       move.b  d1,2(a2)
+  474  000002B4  D3C3                           adda.l  d3,a1
+  475                                   
+                                                YX6_WRITE 8                     ; the three volumes
+       000002B6  14BC0008             @         move.b  #$8,(a2)           
+       000002BA  15510002             @         move.b  (a1),2(a2)              
+  476  000002BE  D3C3                 @         adda.l  d3,a1
+                                                YX6_WRITE 9
+       000002C0  14BC0009             @         move.b  #$9,(a2)           
+       000002C4  15510002             @         move.b  (a1),2(a2)              
+  477  000002C8  D3C3                 @         adda.l  d3,a1
+                                                YX6_WRITE 10
+       000002CA  14BC000A             @         move.b  #$A,(a2)           
+       000002CE  15510002             @         move.b  (a1),2(a2)              
+  478  000002D2  D3C3                 @         adda.l  d3,a1
+                                                YX6_WRITE 11                    ; envelope period
+       000002D4  14BC000B             @         move.b  #$B,(a2)           
+       000002D8  15510002             @         move.b  (a1),2(a2)              
+  479  000002DC  D3C3                 @         adda.l  d3,a1
+                                                YX6_WRITE 12
+       000002DE  14BC000C             @         move.b  #$C,(a2)           
+       000002E2  15510002             @         move.b  (a1),2(a2)              
+  480  000002E6  D3C3                 @         adda.l  d3,a1
+  481                                   
+  482  000002E8  1211                           move.b  (a1),d1                 ; R13 restarts the envelope whenever it
+  483  000002EA  B23C00FF                       cmp.b   #YX6_NO_ENV,d1          ; is written, so $FF means leave it be
+  484  000002EE  67xx                           beq.s   .envelope_held
+  485  000002F0  14BC000D                       move.b  #YX6_ENVELOPE,(a2)
+  486  000002F4  15410002                       move.b  d1,2(a2)
+  487                                   .envelope_held:
+  488  000002F8  46DF                           move.w  (sp)+,sr
+  489                                   
+  490                                   ; Refill the register whose turn it is. Slots 14..C-1 exist when C is larger
+  491                                   ; than the register count; they simply have nothing to do.
+  492  000002FA  302B0028                       move.w  YX6_SLOT(a3),d0
+  493  000002FE  B07C000E                       cmp.w   #YX6_STREAMS,d0
+  494  00000302  64xx                           bcc.s   .advance
+  495  00000304  7600                           moveq   #0,d3
+  496  00000306  362B0026                       move.w  YX6_C(a3),d3            ; a whole group
+  497  0000030A  4A6B002C                       tst.w   YX6_LOOPS(a3)
+  498  0000030E  66xx                           bne.s   .refill                 ; a looping tune never runs out
+  499  00000310  222B0018                       move.l  YX6_TOTAL(a3),d1
+  500  00000314  92AB0008                       sub.l   YX6_NEXT(a3),d1         ; values still packed
+  501  00000318  6Fxx                           ble.s   .advance                ; all decoded: never call ST4 again
+  502  0000031A  B283                           cmp.l   d3,d1
+  503  0000031C  64xx                           bcc.s   .refill
+  504  0000031E  2601                           move.l  d1,d3                   ; the last group is a short one
+  505                                   .refill:
+  506  00000320  ED48                           lsl.w   #6,d0
+  507  00000322  6100FE46                       bsr     YX6_fill
+  508                                   
+  509                                   .advance:
+  510  00000326  5293                           addq.l  #1,YX6_CURSOR(a3)       ; one byte along every ring
+  511  00000328  2013                           move.l  YX6_CURSOR(a3),d0
+  512  0000032A  B0AB000C                       cmp.l   YX6_RINGEND(a3),d0
+  513  0000032E  65xx                           bcs.s   .cursor_ready
+  514  00000330  26AB0010                       move.l  YX6_RINGS(a3),YX6_CURSOR(a3)
+  515                                   .cursor_ready:
+  516  00000334  302B0028                       move.w  YX6_SLOT(a3),d0
+  517  00000338  5240                           addq.w  #1,d0
+  518  0000033A  B06B0026                       cmp.w   YX6_C(a3),d0
+  519  0000033E  65xx                           bcs.s   .slot_ready
+  520  00000340  7000                           moveq   #0,d0                   ; a cycle ended: the groups move on
+  521  00000342  7200                           moveq   #0,d1
+  522  00000344  322B0026                       move.w  YX6_C(a3),d1
+  523  00000348  D3AB0008                       add.l   d1,YX6_NEXT(a3)
+  524                                   .slot_ready:
+  525  0000034C  37400028                       move.w  d0,YX6_SLOT(a3)
+  526                                   
+  527                                   ; The rings hold the tune as one continuous sequence, so reaching the end of
+  528                                   ; the last frame simply means the next values in them are the loop section's.
+  529                                   ; The countdown follows: it reloads with the loop section's length.
+  530  00000350  53AB0004                       subq.l  #1,YX6_LEFTFR(a3)
+  531  00000354  66xx                           bne.s   .played
+  532  00000356  4A6B002C                       tst.w   YX6_LOOPS(a3)
+  533  0000035A  67xx                           beq.s   .played                 ; zero and no loop: the next call ends
+  534  0000035C  276B001C0004                   move.l  YX6_LOOPLEN(a3),YX6_LEFTFR(a3)
+  535  00000362  7001                           moveq   #1,d0                   ; played, and wrapped to the loop point
+  536  00000364  4E75                           rts
+  537                                   .played:
+  538  00000366  7000                           moveq   #0,d0
+  539  00000368  4E75                           rts
+  540                                   
+  541                                   ; -----------------------------------------------------------------------------
+  542                                   ; YX6_stop: silence the three voices. Leaves the tone and envelope settings
+  543                                   ; alone, so a later YX6_play picks up where it left off.
+  544                                   ; -----------------------------------------------------------------------------
+  545                                   YX6_stop:
+  546  0000036A  41F9FFFF8800                   lea     YX6_PSG,a0
+  547  00000370  7008                           moveq   #8,d0                   ; R8, R9, R10 are the voice volumes
+  548                                   .silence:
+  549  00000372  1080                           move.b  d0,(a0)
+  550  00000374  42280002                       clr.b   2(a0)
+  551  00000378  5200                           addq.b  #1,d0
+  552  0000037A  B03C000B                       cmp.b   #11,d0
+  553  0000037E  66F2                           bne.s   .silence
+  554  00000380  4E75                           rts
+    3                                           include "ST4_wrap.S"
+    1                                   ; -----------------------------------------------------------------------------
+    2                                   ; ST4_wrap.S - ST4: counted-wrap ring decompressor for the Atari ST (68000)
+    3                                   ;
+    4                                   ; By Robbert van Dalen, based on ZX1 v1.5 by Einar Saukas and on ST1_wrap.S,
+    5                                   ; which this follows instruction for instruction wherever the format allows.
+    6                                   ; Written by Claude (Anthropic's Claude Code) under Robbert's direction. Use it
+    7                                   ; freely, including commercially, as long as your documentation says you used
+    8                                   ; ZX1 through ST4 (see LICENSE).
+    9                                   ;
+   10                                   ; ST4_wrap is ST1_wrap with ST4's three streams and units: the literal payload
+   11                                   ; comes from stream B in a2 and the offsets from stream C in a4 (bytes) or D in
+   12                                   ; a5 (words), lengths and budgets count units of ST4_UNIT bytes, and the copy
+   13                                   ; moves a unit at a time. With the offsets gone, stream A holds nothing but
+   14                                   ; bits, so the queue refills a word at a time. Set the unit size before
+   15                                   ; including:
+   16                                   ;
+   17                                   ;       ST4_UNIT    equ     4
+   18                                   ;               include "ST4_wrap.S"
+   19                                   ;
+   20                                   ; !!! LIKE ST1_wrap, THIS HAS NO DONE STATE !!!
+   21                                   ; The caller must know the exact output size O in units, make exactly
+   22                                   ; T = ceil(O/C) decode calls, and never call again.
+   23                                   ;
+   24                                   ; The ring is N BYTES and must be a whole number of units; the caller resets a1
+   25                                   ; to the ring start after every F = N/(C*UNIT) calls. Budgets and remaining
+   26                                   ; counts are units; offsets, positions and N are bytes - which is what keeps
+   27                                   ; the wrap arithmetic identical to ST1_wrap's.
+   28                                   ;
+   29                                   ; The container is ST4.S's: twenty bytes of header - signature, O, and where
+   30                                   ; streams B, C and D begin - then A, B, C and D in order. See ST4.S for the
+   31                                   ; eight instructions that open one.
+   32                                   ;
+   33                                   ; THE STATE IS YOUR REGISTERS:
+   34                                   ;
+   35                                   ;   a0.l  position in stream A          a1.l  write pointer
+   36                                   ;   a2.l  position in stream B          a4.l  stream C, the byte offsets
+   37                                   ;   a5.l  stream D, the word offsets    d0.w  bit queue ($8000 empty)
+   38                                   ;   d1.l  -ring_start.low : units remaining
+   39                                   ;   d2.l  N : signed byte offset (+lastOffset*UNIT literals, - during a match)
+   40                                   ;
+   41                                   ;   resume in    d3.w   this call's budget in UNITS
+   42                                   ;   CLOBBERED    d3.w d4.l d5.l a3.l
+   43                                   ;   untouched    d6 d7 a6
+   44                                   ;
+   45                                   ; ASSUMPTIONS (unchecked; violating them is undefined behaviour):
+   46                                   ;
+   47                                   ;   1. THE RING SIZE N IS A MULTIPLE OF ST4_UNIT, and the ring starts on a unit
+   48                                   ;      boundary - as does the destination. A wide move would fault on an odd
+   49                                   ;      address, and the caller's wrap has to land on a unit
+   50                                   ;   2. N mod (C * ST4_UNIT) = 0, so F = N/(C*UNIT) calls fill the ring exactly
+   51                                   ;   3. no offset exceeds 32512 BYTES - the packer clamps -m to that
+   52                                   ;   4. no operation is longer than 65535 units - compress with -l65535
+   53                                   ;   5. the caller knows O and makes exactly T = ceil(O/C) calls, as ST1_wrap
+   54                                   ;   6. streams A and D start on even addresses, and A holds an even number of
+   55                                   ;      bytes: the bit queue is refilled with a move.w, and so is a word offset
+   56                                   ;
+   57                                   ; Compress with st4 -k<UNIT> -m<ring/UNIT> -l65535.
+   58                                   ; -----------------------------------------------------------------------------
+   59                                   
+   60                                   ; The asset's signature for this build: 'S4', format version 4, and the unit
+   61                                   ; size this decoder was assembled for. One cmp.l against a file's first long
+   62                                   ; proves all three at once.
+   63           =53340401               ST4_SIGNATURE   equ     $53340400+ST4_UNIT
+   64                                   
+   65                                   ; One unit copied, at the width this build was made for.
+   66                                           .macro ST4_MOVE
+   67                                 .         .if ST4_UNIT=4
+   68                                 .         move.l  (a3)+,(a1)+
+   69                                 .         .endif
+   70                                 .         .if ST4_UNIT=2
+   71                                 .         move.w  (a3)+,(a1)+
+   72                                 .         .endif
+   73                                 .         .if ST4_UNIT=1
+   74                                 .         move.b  (a3)+,(a1)+
+   75                                 .         .endif
+   76                                 .         .endm
+   77                                   
+   78                                   ; Jump table: bra.w keeps 4-byte slots (base+0/4). A counted ring has no
+   79                                   ; one-shot entry; the caller drains it through ST4_resume.
+   80  00000382  6000xxxx                               bra.w   ST4_init
+   81  00000386  6000xxxx                               bra.w   ST4_resume
+   82                                   
+   83                                   ; ST4_init: a0 = A, a1 = first ring byte, a2 = B, a4 = C, a5 = D,
+   84                                   ; d3.w = N.
+   85                                   ; Packs -ring_start.low/N above the common state; writes no memory.
+   86                                   ; Java: the Decompressor constructor / reset().
+   87                                   ST4_init:
+   88  0000038A  7200                           moveq   #0,d1
+   89  0000038C  9249                           sub.w   a1,d1                   ; -ring_start.low, exact modulo 65536
+   90  0000038E  4841                           swap    d1                      ; pack it high; remaining = 0
+   91                                   ; The initial offset has to land in the low word after the swap, so it starts
+   92                                   ; in the high half. moveq would put -1 there whatever the unit size, which is
+   93                                   ; a byte short at k=2 and three at k=4 - and only shows up on a stream whose
+   94                                   ; first match reuses INITIAL_OFFSET.
+   95  00000390  243CFFFF0000                   move.l  #(-ST4_UNIT)<<16,d2
+   96  00000396  3403                           move.w  d3,d2                   ; N lives below it for now
+   97  00000398  4842                           swap    d2                      ; N above, -INITIAL_OFFSET*UNIT below
+   98  0000039A  303C8000                       move.w  #$8000,d0               ; an empty bit queue: $8000 is the sentinel
+   99  0000039E  4E75                           rts
+  100                                   
+  101                                   source_wrapped:
+  102  000003A0  2A02                           move.l  d2,d5
+  103  000003A2  4245                           clr.w   d5
+  104  000003A4  4845                           swap    d5                      ; zero-extend N from d2.high
+  105  000003A6  D7C5                           adda.l  d5,a3                   ; raw source + N, back into the ring
+  106  000003A8  60xx                           bra.s   copy
+  107                                   
+  108                                   ; ST4_resume: a0/a1/d0/d1/d2 = state and d3.w = this call's budget.
+  109                                   ; Continuing calls emit d3 bytes; the final call may be shorter. The caller
+  110                                   ; knows the final span from O; [old a1 .. new a1) is fresh output.
+  111                                   ST4_resume:
+  112  000003AA  4A41                           tst.w   d1                      ; only the first legal call has zero
+  113  000003AC  67xx                           beq.s   begin_literals
+  114  000003AE  3803                           move.w  d3,d4                   ; seed n from the nonzero budget
+  115                                   segment:                                ; d1.w remaining >= 1, d3 budget >= 1
+  116  000003B0  B841                           cmp.w   d1,d4                   ; n = min(budget, remaining)
+  117  000003B2  63xx                           bls.s   budget_fits
+  118  000003B4  3801                           move.w  d1,d4
+  119                                   budget_fits:
+  120  000003B6  4A42                           tst.w   d2                      ; positive lastOffset means LITERALS
+  121  000003B8  6Axx                           bpl.s   literal_source
+  122                                   ; MATCH: derive the source and split a segment that crosses the ring end.
+  123  000003BA  2649                           movea.l a1,a3                   ; raw source = dst + -lastOffset*UNIT
+  124  000003BC  D6C2                           adda.w  d2,a3                   ; which is why the offset is kept scaled
+  125  000003BE  2A01                           move.l  d1,d5
+  126  000003C0  4845                           swap    d5                      ; d5.w = -ring_start.low
+  127  000003C2  DA49                           add.w   a1,d5                   ; d5.w = destination position
+  128  000003C4  DA42                           add.w   d2,d5                   ; add -offset; carry means unwrapped
+  129  000003C6  65xx                           bcs.s   copy                    ; unwrapped source cannot cross before dst
+  130  000003C8  4445                           neg.w   d5                      ; wrapped: room = offset - position
+  131                                   ; The room is bytes and the segment is units, so bring them to the same scale.
+  132                                   ; Both are whole units - offsets and positions are - so the shift is exact.
+  133                                           .if ST4_UNIT>1
+  134                                 -         lsr.w   #1,d5
+  135                                 -         .endif
+  136                                           .if ST4_UNIT>2
+  137                                 -         lsr.w   #1,d5
+  138                                 -         .endif
+  139  000003CA  BA44                           cmp.w   d4,d5                   ; source units before the ring end
+  140  000003CC  64D2                           bcc.s   source_wrapped
+  141  000003CE  3805                           move.w  d5,d4                   ; stop this segment at the source wrap
+  142  000003D0  60CE                           bra.s   source_wrapped
+  143                                   literal_source:
+  144  000003D2  264A                           movea.l a2,a3                   ; literals copy from stream B
+  145                                   copy:                                   ; Java: writeByte(...) - n moves total:
+  146  000003D4  9244                           sub.w   d4,d1                   ; consume n from the operation
+  147  000003D6  9644                           sub.w   d4,d3                   ; and from this call's budget
+  148  000003D8  7A0F                           moveq   #15,d5                  ; d5 = n&15, partial-pass dispatch
+  149  000003DA  CA44                           and.w   d4,d5
+  150  000003DC  E84C                           lsr.w   #4,d4                   ; d4 = n>>4 full passes
+  151  000003DE  DA45                           add.w   d5,d5
+  152  000003E0  4445                           neg.w   d5                      ; index = -2*(n&15)
+  153  000003E2  4EFB50xx                       jmp     ladder_end(pc,d5.w)     ; pc-relative dispatch, no base register
+  154                                   ladder:
+                                                ST4_MOVE                        ; entry at ladder_end-2k copies k units
+                                      @         .if ST4_UNIT=4
+                                      -         move.l  (a3)+,(a1)+
+                                      -         .endif
+                                      @         .if ST4_UNIT=2
+                                      -         move.w  (a3)+,(a1)+
+                                      -         .endif
+                                      @         .if ST4_UNIT=1
+       000003E6  12DB                 @         move.b  (a3)+,(a1)+
+  155                                 @         .endif
+                                                ST4_MOVE
+                                      @         .if ST4_UNIT=4
+                                      -         move.l  (a3)+,(a1)+
+                                      -         .endif
+                                      @         .if ST4_UNIT=2
+                                      -         move.w  (a3)+,(a1)+
+                                      -         .endif
+                                      @         .if ST4_UNIT=1
+       000003E8  12DB                 @         move.b  (a3)+,(a1)+
+  156                                 @         .endif
+                                                ST4_MOVE
+                                      @         .if ST4_UNIT=4
+                                      -         move.l  (a3)+,(a1)+
+                                      -         .endif
+                                      @         .if ST4_UNIT=2
+                                      -         move.w  (a3)+,(a1)+
+                                      -         .endif
+                                      @         .if ST4_UNIT=1
+       000003EA  12DB                 @         move.b  (a3)+,(a1)+
+  157                                 @         .endif
+                                                ST4_MOVE
+                                      @         .if ST4_UNIT=4
+                                      -         move.l  (a3)+,(a1)+
+                                      -         .endif
+                                      @         .if ST4_UNIT=2
+                                      -         move.w  (a3)+,(a1)+
+                                      -         .endif
+                                      @         .if ST4_UNIT=1
+       000003EC  12DB                 @         move.b  (a3)+,(a1)+
+  158                                 @         .endif
+                                                ST4_MOVE
+                                      @         .if ST4_UNIT=4
+                                      -         move.l  (a3)+,(a1)+
+                                      -         .endif
+                                      @         .if ST4_UNIT=2
+                                      -         move.w  (a3)+,(a1)+
+                                      -         .endif
+                                      @         .if ST4_UNIT=1
+       000003EE  12DB                 @         move.b  (a3)+,(a1)+
+  159                                 @         .endif
+                                                ST4_MOVE
+                                      @         .if ST4_UNIT=4
+                                      -         move.l  (a3)+,(a1)+
+                                      -         .endif
+                                      @         .if ST4_UNIT=2
+                                      -         move.w  (a3)+,(a1)+
+                                      -         .endif
+                                      @         .if ST4_UNIT=1
+       000003F0  12DB                 @         move.b  (a3)+,(a1)+
+  160                                 @         .endif
+                                                ST4_MOVE
+                                      @         .if ST4_UNIT=4
+                                      -         move.l  (a3)+,(a1)+
+                                      -         .endif
+                                      @         .if ST4_UNIT=2
+                                      -         move.w  (a3)+,(a1)+
+                                      -         .endif
+                                      @         .if ST4_UNIT=1
+       000003F2  12DB                 @         move.b  (a3)+,(a1)+
+  161                                 @         .endif
+                                                ST4_MOVE
+                                      @         .if ST4_UNIT=4
+                                      -         move.l  (a3)+,(a1)+
+                                      -         .endif
+                                      @         .if ST4_UNIT=2
+                                      -         move.w  (a3)+,(a1)+
+                                      -         .endif
+                                      @         .if ST4_UNIT=1
+       000003F4  12DB                 @         move.b  (a3)+,(a1)+
+  162                                 @         .endif
+                                                ST4_MOVE
+                                      @         .if ST4_UNIT=4
+                                      -         move.l  (a3)+,(a1)+
+                                      -         .endif
+                                      @         .if ST4_UNIT=2
+                                      -         move.w  (a3)+,(a1)+
+                                      -         .endif
+                                      @         .if ST4_UNIT=1
+       000003F6  12DB                 @         move.b  (a3)+,(a1)+
+  163                                 @         .endif
+                                                ST4_MOVE
+                                      @         .if ST4_UNIT=4
+                                      -         move.l  (a3)+,(a1)+
+                                      -         .endif
+                                      @         .if ST4_UNIT=2
+                                      -         move.w  (a3)+,(a1)+
+                                      -         .endif
+                                      @         .if ST4_UNIT=1
+       000003F8  12DB                 @         move.b  (a3)+,(a1)+
+  164                                 @         .endif
+                                                ST4_MOVE
+                                      @         .if ST4_UNIT=4
+                                      -         move.l  (a3)+,(a1)+
+                                      -         .endif
+                                      @         .if ST4_UNIT=2
+                                      -         move.w  (a3)+,(a1)+
+                                      -         .endif
+                                      @         .if ST4_UNIT=1
+       000003FA  12DB                 @         move.b  (a3)+,(a1)+
+  165                                 @         .endif
+                                                ST4_MOVE
+                                      @         .if ST4_UNIT=4
+                                      -         move.l  (a3)+,(a1)+
+                                      -         .endif
+                                      @         .if ST4_UNIT=2
+                                      -         move.w  (a3)+,(a1)+
+                                      -         .endif
+                                      @         .if ST4_UNIT=1
+       000003FC  12DB                 @         move.b  (a3)+,(a1)+
+  166                                 @         .endif
+                                                ST4_MOVE
+                                      @         .if ST4_UNIT=4
+                                      -         move.l  (a3)+,(a1)+
+                                      -         .endif
+                                      @         .if ST4_UNIT=2
+                                      -         move.w  (a3)+,(a1)+
+                                      -         .endif
+                                      @         .if ST4_UNIT=1
+       000003FE  12DB                 @         move.b  (a3)+,(a1)+
+  167                                 @         .endif
+                                                ST4_MOVE
+                                      @         .if ST4_UNIT=4
+                                      -         move.l  (a3)+,(a1)+
+                                      -         .endif
+                                      @         .if ST4_UNIT=2
+                                      -         move.w  (a3)+,(a1)+
+                                      -         .endif
+                                      @         .if ST4_UNIT=1
+       00000400  12DB                 @         move.b  (a3)+,(a1)+
+  168                                 @         .endif
+                                                ST4_MOVE
+                                      @         .if ST4_UNIT=4
+                                      -         move.l  (a3)+,(a1)+
+                                      -         .endif
+                                      @         .if ST4_UNIT=2
+                                      -         move.w  (a3)+,(a1)+
+                                      -         .endif
+                                      @         .if ST4_UNIT=1
+       00000402  12DB                 @         move.b  (a3)+,(a1)+
+  169                                 @         .endif
+                                                ST4_MOVE
+                                      @         .if ST4_UNIT=4
+                                      -         move.l  (a3)+,(a1)+
+                                      -         .endif
+                                      @         .if ST4_UNIT=2
+                                      -         move.w  (a3)+,(a1)+
+                                      -         .endif
+                                      @         .if ST4_UNIT=1
+       00000404  12DB                 @         move.b  (a3)+,(a1)+
+  170                                 @         .endif
+  171                                   ladder_end:
+  172  00000406  51CCFFDE                       dbf     d4,ladder               ; full 16-unit passes
+  173  0000040A  4A42                           tst.w   d2
+  174  0000040C  6Bxx                           bmi.s   match_copied             ; matches consume no input here
+  175  0000040E  244B                           movea.l a3,a2                   ; literals do: stream B advanced
+  176  00000410  4A41                           tst.w   d1
+  177  00000412  66xx                           bne.s   resume_return            ; literals stop only on the budget
+  178                                   
+  179                                   literals_transition:
+  180  00000414  D040                           add.w   d0,d0                   ; Java: next(), case LITERALS (bare read)
+  181  00000416  65xx                           bcs.s   new_offset              ; 1: new offset
+  182  00000418  4442                           neg.w   d2                      ; from-last reuses the negated offset
+  183  0000041A  60xx                           bra.s   gamma_seed0             ; Java: beginMatchFromLastOffset()
+  184                                   
+  185                                   match_copied:
+  186  0000041C  4A41                           tst.w   d1
+  187  0000041E  67xx                           beq.s   match_transition
+  188                                   resume_fresh:                           ; gamma or a split match may continue
+  189  00000420  3803                           move.w  d3,d4                   ; test budget and seed the next segment
+  190  00000422  668C                           bne.s   segment                 ; budget remains: start/continue a segment
+  191                                   
+  192                                   resume_return:
+  193  00000424  4E75                           rts
+  194                                   
+  195                                   begin_literals:                         ; Java: beginLiterals()
+  196  00000426  4442                           neg.w   d2                      ; positive lastOffset = State.LITERALS
+  197                                   gamma_seed0:
+  198  00000428  7800                           moveq   #0,d4                   ; remaining = gamma + 0; fall through
+  199                                   
+  200                                   ; get_gamma: interlaced Elias gamma in d1.w; d4.w is the 0/1 length seed.
+  201                                   ; Gammas are odd-length and each is followed by one flag bit, so a gamma always
+  202                                   ; starts at an even position and the queue - which empties every 16 bits, also
+  203                                   ; even - can only run out on a continuation bit. Data and transition reads need
+  204                                   ; no refill check; 16 is even like 8, so the word queue inherits the argument.
+  205                                   get_gamma:
+  206  0000042A  5241                           addq.w  #1,d1
+  207  0000042C  D040                           add.w   d0,d0                   ; first continuation bit
+  208  0000042E  67xx                           beq.s   gamma_refill
+  209  00000430  64xx                           bcc.s   gamma_done
+  210                                   gamma_loop:
+  211  00000432  D040                           add.w   d0,d0                   ; data bit: never a refill
+  212  00000434  D341                           addx.w  d1,d1                   ; value = value*2 + bit
+  213  00000436  D040                           add.w   d0,d0                   ; continuation bit
+  214  00000438  67xx                           beq.s   gamma_refill
+  215  0000043A  65F6                           bcs.s   gamma_loop
+  216                                   gamma_done:
+  217  0000043C  D244                           add.w   d4,d1                   ; +1 only for a new-offset match
+  218  0000043E  60E0                           bra.s   resume_fresh
+  219                                   gamma_refill:
+  220  00000440  3018                           move.w  (a0)+,d0
+  221  00000442  D140                           addx.w  d0,d0
+  222  00000444  65EC                           bcs.s   gamma_loop
+  223  00000446  60F4                           bra.s   gamma_done
+  224                                   
+  225                                   match_transition:                       ; remaining == 0: parse after a match
+  226  00000448  D040                           add.w   d0,d0
+  227  0000044A  64DA                           bcc.s   begin_literals
+  228                                   
+  229                                   new_offset:                             ; Java: beginMatchFromNewOffset/readOffset
+  230                                   ; Two class bits: the first says byte or word, the second picks a byte offset's
+  231                                   ; 256-unit bank or, for a word, marks the end of the stream. That first bit is
+  232                                   ; the only read here that can need a refill. Every operation is an even number
+  233                                   ; of bits, so flags and gamma data bits all land on odd positions and the queue
+  234                                   ; - which empties every 16 bits - can never run out on one; the bit immediately
+  235                                   ; after a flag is the one exception, and it is checked.
+  236  0000044C  D040                           add.w   d0,d0                   ; class bit 1: set means a byte offset
+  237  0000044E  67xx                           beq.s   class_refill
+  238                                   class_read:
+  239  00000450  65xx                           bcs.s   byte_offset
+  240  00000452  D040                           add.w   d0,d0                   ; class bit 2: set means end of stream
+  241  00000454  65CE                           bcs.s   resume_return
+  242  00000456  341D                           move.w  (a5)+,d2                ; -lastOffset*UNIT, stored ready to use
+  243                                   have_offset:
+  244  00000458  7801                           moveq   #1,d4                   ; new-offset match: remaining = gamma+1
+  245  0000045A  60CE                           bra.s   get_gamma
+  246                                   
+  247                                   class_refill:
+  248  0000045C  3018                           move.w  (a0)+,d0
+  249  0000045E  D140                           addx.w  d0,d0
+  250  00000460  60EE                           bra.s   class_read
+  251                                   
+  252                                   byte_offset:
+  253                                   ; The ladder's DBF left d4.w = $ffff, so one move.b makes $ff00 + (256-offset),
+  254                                   ; which already IS -offset as a word. The bank bit moves it 256 units further.
+  255  00000462  181C                           move.b  (a4)+,d4
+  256  00000464  D040                           add.w   d0,d0                   ; class bit 2: the 256-unit bank
+  257  00000466  64xx                           bcc.s   scale_offset
+  258  00000468  987C0100                       sub.w   #256,d4                 ; the far bank: 257..512 units
+  259                                   scale_offset:
+  260                                   ; The offset arrives in units and is kept in bytes, so the match source is one
+  261                                   ; adda.w away for the rest of the operation.
+  262                                           .if ST4_UNIT>1
+  263                                 -         add.w   d4,d4
+  264                                 -         .endif
+  265                                           .if ST4_UNIT>2
+  266                                 -         add.w   d4,d4
+  267                                 -         .endif
+  268  0000046C  3404                           move.w  d4,d2                   ; install -lastOffset*UNIT, keep d2.high
+  269  0000046E  60E8                           bra.s   have_offset
+          .advance 0000000000000326  t          YX6_LOOPS 000000000000002C  a 
+     .cursor_ready 0000000000000334  t          YX6_MAGIC 0000000059583621  a 
+             .done 00000000000001D8  t          YX6_MIXER 0000000000000007  a 
+    .envelope_held 00000000000002F8  t              YX6_N 0000000000000024  a 
+      .first_group 000000000000009E  t           YX6_NEXT 0000000000000008  a 
+            .frame 000000000000024C  t         YX6_NO_ENV 00000000000000FF  a 
+      .loop_length 0000000000000084  t          YX6_PORTS 00000000000000C0  a 
+          .no_loop 000000000000023E  t            YX6_PSG 00000000FFFF8800  a 
+            .piece 000000000000017A  t        YX6_RINGEND 000000000000000C  a 
+       .piece_size 0000000000000190  t          YX6_RINGS 0000000000000010  a 
+           .played 0000000000000366  t           YX6_SLOT 0000000000000028  a 
+           .refill 0000000000000320  t          YX6_STATE 0000000000000030  a 
+         .rejected 0000000000000166  t     YX6_STATE_SIZE 0000000000000040  a 
+          .section 00000000000000E4  t        YX6_STREAMS 000000000000000E  a 
+          .section 000000000000018A  t          YX6_TOTAL 0000000000000018  a 
+          .silence 0000000000000372  t        YX6_VERSION 0000000000000003  a 
+       .slot_ready 000000000000034C  t           YX6_fill 000000000000016A  t 
+           .stored 00000000000001BE  t           YX6_init 000000000000000C  t 
+           .stream 00000000000000A6  t           YX6_play 0000000000000240  t 
+     ST4_SIGNATURE 0000000053340401  a     YX6_start_loop 00000000000001DE  t 
+          ST4_UNIT 0000000000000001  a           YX6_stop 000000000000036A  t 
+          ST4_init 000000000000038A  t             _RMAC_ 0000000002040003  a 
+        ST4_resume 00000000000003AA  t     begin_literals 0000000000000426  t 
+          YH_CHUNK 0000000000000012  a        budget_fits 00000000000003B6  t 
+          YH_CLOCK 0000000000000018  a        byte_offset 0000000000000462  t 
+          YH_FLAGS 0000000000000006  a         class_read 0000000000000450  t 
+         YH_FRAMES 0000000000000008  a       class_refill 000000000000045C  t 
+    YH_INTRO_TABLE 000000000000001C  a               copy 00000000000003D4  t 
+           YH_LOOP 0000000000000014  a         gamma_done 000000000000043C  t 
+     YH_LOOP_TABLE 0000000000000054  a         gamma_loop 0000000000000432  t 
+          YH_MAGIC 0000000000000000  a       gamma_refill 0000000000000440  t 
+      YH_PLAYER_HZ 000000000000000C  a        gamma_seed0 0000000000000428  t 
+           YH_RING 0000000000000010  a          get_gamma 000000000000042A  t 
+   YH_STREAM_COUNT 000000000000000E  a        have_offset 0000000000000458  t 
+        YH_VERSION 0000000000000004  a             ladder 00000000000003E6  t 
+           YS_BOFF 0000000000000014  a         ladder_end 0000000000000406  t 
+             YS_D1 0000000000000000  a     literal_source 00000000000003D2  t 
+             YS_D2 0000000000000004  a   literals_transition 0000000000000414  t 
+            YS_END 0000000000000024  a       match_copied 000000000000041C  t 
+          YS_INPUT 0000000000000008  a   match_transition 0000000000000448  t 
+           YS_LEFT 0000000000000028  a         new_offset 000000000000044C  t 
+            YS_LIT 0000000000000010  a       resume_fresh 0000000000000420  t 
+          YS_QUEUE 000000000000001C  a      resume_return 0000000000000424  t 
+          YS_START 0000000000000020  a       scale_offset 000000000000046C  t 
+           YS_WOFF 0000000000000018  a            segment 00000000000003B0  t 
+          YS_WRITE 000000000000000C  a     source_wrapped 00000000000003A0  t 
+             YX6_C 0000000000000026  a 
+        YX6_CURSOR 0000000000000000  a 
+      YX6_ENVELOPE 000000000000000D  a 
+          YX6_FILE 0000000000000014  a 
+         YX6_FIXED 00000000000003B0  a 
+    YX6_FLAG_LOOPS 0000000000000001  a 
+         YX6_INDEX 000000000000002A  a 
+        YX6_LEFTFR 0000000000000004  a 
+          YX6_LOOP 0000000000000020  a 
+       YX6_LOOPLEN 000000000000001C  a 

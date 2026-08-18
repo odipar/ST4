@@ -13,6 +13,7 @@ public final class St4Decompressor {
 
     private enum State { START, LITERALS, MATCH, DONE }
 
+    private final int offsetLimit;
     private final byte[] control;
     private final byte[] literal;
     private final byte[] byteOffsets;
@@ -30,7 +31,9 @@ public final class St4Decompressor {
     private State state = State.START;
 
     private St4Decompressor(byte[] control, byte[] literal, byte[] byteOffsets,
-                            byte[] wordOffsets, byte[] output, int unit) {
+                            byte[] wordOffsets, byte[] output, int unit,
+                            int offsetLimit) {
+        this.offsetLimit = offsetLimit;
         this.control = control;
         this.literal = literal;
         this.byteOffsets = byteOffsets;
@@ -42,10 +45,25 @@ public final class St4Decompressor {
     /** Decodes the streams into {@code size} bytes, which must be a multiple of k. */
     public static byte[] decompress(byte[] control, byte[] literal, byte[] byteOffsets,
                                     byte[] wordOffsets, int unit, int size) {
+        return decompress(control, literal, byteOffsets, wordOffsets, unit, size,
+                St4Format.maxOffsetUnits(unit));
+    }
+
+    /**
+     * As above, refusing any back-reference further than {@code offsetLimit}
+     * units. An offset within the limit is exactly what makes a stream safe
+     * for a ring of that many units, so this is how tests hold a {@code -mN}
+     * stream to its ring without a ring in sight.
+     *
+     * @throws IllegalStateException when the stream reaches further back
+     */
+    public static byte[] decompress(byte[] control, byte[] literal, byte[] byteOffsets,
+                                    byte[] wordOffsets, int unit, int size,
+                                    int offsetLimit) {
         assert St4Format.isUnitSize(unit) : "unit size must be 1, 2 or 4";
         assert size % unit == 0 : "output size must be a whole number of units";
         var decoder = new St4Decompressor(control, literal, byteOffsets, wordOffsets,
-                new byte[size], unit);
+                new byte[size], unit, offsetLimit);
         decoder.run();
         return decoder.output;
     }

@@ -113,7 +113,9 @@ public final class St4 {
      * Twenty bytes of header, then A, B, C and D in order, each starting on a
      * long boundary. Nothing says how long a stream is: it runs to the next.
      */
-    static byte[] container(St4Compressor.Result result) {
+    // Public because a container is also how other formats embed an ST4
+    // stream: a yx6 file holds up to twenty-eight of them.
+    public static byte[] container(St4Compressor.Result result) {
         int controlAt = St4Format.HEADER_SIZE;                  // already a multiple of 4
         int literalAt = align(controlAt + result.control().length);
         int byteAt = align(literalAt + result.literal().length);
