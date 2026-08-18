@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <AssemblyName>Nt4.Core</AssemblyName>
+    <PackageId>Nt4.Core</PackageId>
+    <RootNamespace>Nt4</RootNamespace>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+  </PropertyGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="Nt4.Tests" />
+  </ItemGroup>
+</Project>

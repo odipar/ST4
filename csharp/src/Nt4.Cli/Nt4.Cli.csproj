@@ -1,0 +1,11 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>nt4</AssemblyName>
+    <PackageId>Nt4.Compressor.Tool</PackageId>
+    <RootNamespace>Nt4.CommandLine</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../Nt4/Nt4.csproj" />
+  </ItemGroup>
+</Project>

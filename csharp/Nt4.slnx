@@ -1,0 +1,10 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Nt4/Nt4.csproj" />
+    <Project Path="src/Nt4.Cli/Nt4.Cli.csproj" />
+    <Project Path="src/Dnt4.Cli/Dnt4.Cli.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Nt4.Tests/Nt4.Tests.csproj" />
+  </Folder>
+</Solution>
