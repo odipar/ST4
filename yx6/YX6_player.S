@@ -6,10 +6,10 @@
 ; SPACE or when a play-once tune ends.
 ; It is also the smallest worked example of the library's calling convention.
 ;
-; It is not a standalone assembly: the includer supplies the two things that
-; depend on the actual song, then includes this file.
+; It is not a standalone assembly: the includer supplies the three things
+; that depend on the actual song, then includes this file.
 ;
-;       RING_SIZE   equ     1024            ; the ring size in the file header
+;       RING_SIZE   equ     960             ; the ring size in the file header
 ;       YX6_EXIT_MARKER equ 0               ; 1 to drop a file when it stops
 ;       ST4_UNIT    equ     1               ; the unit the tune was packed at
 ;               include "YX6_player.S"
