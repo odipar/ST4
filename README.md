@@ -191,9 +191,11 @@ timer-count streams, with the digidrum samples appended as a table. A
 ST4_wrap, one refill per frame, and plays the effects — digidrums, SID
 voices, the sync-buzzer — on MFP Timers A and D. On one measured tune that
 costs about 1,850 cycles a frame on real hardware, effect stage included.
-The packer picks k = 2 by itself when the tune's shape allows it: a few
-percent fewer cycles for a few percent more bytes. Loop points restart a
-stream mid-refill.
+The packer picks k = 2 by itself, padding odd shapes with safe duplicate
+frames. Loop points restart a stream mid-refill. The canonical build is an
+SNDH v2.2 container - subtunes, tags and all - with the runnable .PRG a
+thin shell around the same bytes; a whole set of tunes packs with one
+configuration in one call.
 
 ```sh
 mvn -q compile exec:exec@yx6 -Dargs="-f song.ym song.yx6"

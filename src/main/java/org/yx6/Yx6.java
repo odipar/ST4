@@ -66,6 +66,29 @@ public final class Yx6 {
             }
         }
 
+        // A trailing DIRECTORY collects a whole set: every argument before it
+        // is an input, each packed with the identical configuration into
+        // <dir>/<stem>.yx6 - the shape a multi-tune player needs, since one
+        // player build serves one unit size and one workspace.
+        if (args.length - i >= 2 && Files.isDirectory(Path.of(args[args.length - 1]))) {
+            if (startMin != 0 || startSec != 0 || startFrame >= 0
+                    || endFrame >= 0 || frameCount >= 0) {
+                throw error("the trim options take one tune, not a set");
+            }
+            if (unit == 0) {
+                unit = 2;               // uniform by construction: padding
+            }                           // makes any shape fit, or fails loudly
+            Path dir = Path.of(args[args.length - 1]);
+            for (int input = i; input < args.length - 1; input++) {
+                String stem = Path.of(args[input]).getFileName().toString()
+                        .replaceAll("(?i)\\.ym$", "");
+                packOne(args[input], dir.resolve(stem + ".yx6").toString(),
+                        ringSize, chunk, unit, loopFrame, playOnce, forcedMode,
+                        drumHz, 0, 0, -1, -1, -1);
+            }
+            return;
+        }
+
         String outputName;
         if (args.length == i + 1) {
             outputName = args[i] + ".yx6";
@@ -74,6 +97,7 @@ public final class Yx6 {
         } else {
             usage("""
                     Usage: yx6 [-f] [-o] [-nN] [-cC] [-kK] [-lF] input.ym [output.yx6]
+                           yx6 [options] one.ym two.ym more.ym output-dir/
                       -f      Force overwrite of output file
                       -o      Play once: pack no loop section
                       -nN     Ring size per stream, in bytes (default 960)
@@ -93,11 +117,23 @@ public final class Yx6 {
                               frames: start, end, or a length cap
 
                     The input is a YM5!/YM6! dump, LHA-archived or already
-                    unpacked - the reader tells them apart by itself.""");
+                    unpacked - the reader tells them apart by itself. With a
+                    trailing DIRECTORY, every argument before it is an input,
+                    packed with the same configuration - the set one player
+                    build can hold as subtunes.""");
             return;
         }
-        String inputName = args[i];
+        packOne(args[i], outputName, ringSize, chunk, unit, loopFrame, playOnce,
+                forcedMode, drumHz, startMin, startSec, startFrame, endFrame,
+                frameCount);
+    }
 
+    /** The whole pipeline for one tune: read, trim, pad, pack, write, report. */
+    private static void packOne(String inputName, String outputName, int ringSize,
+                                int chunk, int unit, int loopFrame, boolean playOnce,
+                                boolean forcedMode, int drumHz, int startMin,
+                                int startSec, int startFrame, int endFrame,
+                                int frameCount) {
         String problem = Yx6Format.checkShape(ringSize, chunk, Math.max(unit, 1));
         if (!problem.isEmpty()) {
             throw error(problem);

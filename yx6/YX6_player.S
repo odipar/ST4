@@ -1,24 +1,23 @@
 ; -----------------------------------------------------------------------------
-; YX6_player.S - a complete TOS program that plays one .yx6 file.
+; YX6_player.S - a complete TOS program around an SNDH container.
 ;
-; This is what yx6/mkprg.sh assembles around a song: it installs YX6 on the
-; VBL, plays the tune - round its loop for as long as it has one - and quits on
-; SPACE or when a play-once tune ends.
-; It is also the smallest worked example of the library's calling convention.
+; This is what yx6/mkprg.sh assembles: a thin shell that takes the machine
+; over, then drives the incbin'd SNDH blob - the canonical build of the
+; player - through its three entries: +0 init (subtune in d0.w, 1-based),
+; +4 exit, +8 play. All the player code lives in the SNDH; the PRG adds
+; only this shell, so the two containers share every byte that matters.
 ;
-; It is not a standalone assembly: the includer supplies the three things
-; that depend on the actual song, then includes this file.
+; It is not a standalone assembly: the includer supplies four things, then
+; includes this file.
 ;
-;       RING_SIZE   equ     960             ; the ring size in the file header
-;       YX6_EXIT_MARKER equ 0               ; 1 to drop a file when it stops
-;       ST4_UNIT    equ     1               ; the unit the tune was packed at
+;       YX6_TUNES       equ     1       ; subtunes in the blob
+;       YX6_FRAMES      equ     0       ; frames of subtune 1; 0 = loops
+;       YX6_EXIT_MARKER equ     0       ; 1 to drop a file when it stops
 ;               include "YX6_player.S"
-;       song:   incbin  "song.yx6"          ; in .data, at an even address
+;       sndh:   incbin  "tune.sndh"     ; in .data, at an even address
 ;
-; and a `workspace` label is reserved here from RING_SIZE. yx6/mkprg.sh writes
-; exactly that wrapper and runs:
-;
-;       rmac -m68000 -p +o3 -iyx6 -i68k -o SONG.PRG wrapper.S
+; yx6/mkprg.sh writes exactly that wrapper. SPACE quits; with more than one
+; subtune, the number keys 1-9 switch.
 ; -----------------------------------------------------------------------------
 
 GEMDOS      equ     1
@@ -54,29 +53,22 @@ start:
         lea     m_playing,a0                    ; printed while TOS still owns
         bsr     puts                            ; the machine - see below
 
-; From here to remove, the machine is ours alone. install silences every
-; interrupt TOS runs - the 200 Hz tick, the keyboard, the lot - takes the VBL,
-; and only then initialises the player, whose YX6_init needs supervisor mode
-; anyway for the MFP timers it claims. TOS never touches the sound chip or a
-; timer while the tune plays, and space is read straight off the keyboard
-; ACIA. play holds the whole session; d0 comes back -1 for a bad file.
+; From here to the handback the machine is ours alone: every TOS interrupt
+; silenced, the VBL unshared, the keyboard read straight off the ACIA. The
+; SNDH blob does its own polite save/restore of the two timers it claims -
+; redundant under this takeover, and exactly right when the same bytes run
+; under a jukebox.
         move.l  #play,-(sp)
         move.w  #Supexec,-(sp)
         trap    #XBIOS
         addq.l  #6,sp
-        tst.l   d0
-        beq.s   .quit
-        lea     m_bad,a0
-        bsr     puts
 
-.quit:
         lea     m_bye,a0
         bsr     puts
         .if YX6_EXIT_MARKER
 ; A scripted run - yx6/play.sh - watches for this file so it can close the
 ; emulator when the program stops, instead of leaving a window to be quit by
-; hand. It is the only thing the player ever writes to disk, and only when the
-; wrapper asks for it.
+; hand.
         clr.w   -(sp)                           ; ordinary attributes
         pea     m_marker
         move.w  #Fcreate,-(sp)
@@ -94,13 +86,7 @@ start:
         trap    #GEMDOS
 
 ; -----------------------------------------------------------------------------
-; play, under Supexec: the takeover, the whole playing session, and the
-; handback. Every MFP interrupt is disabled and its enable state saved - the
-; system tick, the keyboard, the disk, the serial port - so nothing but this
-; player touches the sound chip or a timer; YX6_init then enables exactly the
-; two timers the effects own. The VBL is ours alone, no chaining: TOS's VBL
-; work (the floppy deselect among it, a sound-chip access) stays silenced
-; with the rest. The space bar is read straight off the keyboard ACIA.
+; play, under Supexec: takeover, the session, handback.
 ; -----------------------------------------------------------------------------
 play:
         move.w  sr,-(sp)
@@ -113,39 +99,18 @@ play:
         clr.b   $FFFFFA09.w
         clr.b   $FFFFFA13.w
         clr.b   $FFFFFA15.w
-; The library saves nothing - the machine state is ours to keep (YX6.S,
-; assumption 5). Save the rest of what the player touches: both timer
-; vectors, the timer registers, and - YX6_SUPER_HOST - the USP its drum
-; tick parks a0 in.
-        move.l  $134.w,old_ta
-        move.l  $110.w,old_td
-        move.b  $FFFFFA19.w,old_tacr
-        move.b  $FFFFFA1D.w,old_tcdcr
-        move.b  $FFFFFA1F.w,old_tadr
-        move.b  $FFFFFA25.w,old_tddr
-        move    usp,a0
-        move.l  a0,old_usp
+        move    usp,a0                          ; ours to keep, per the
+        move.l  a0,old_usp                      ; host-state contract
 
-        lea     song,a0                         ; the packed tune; init claims
-        lea     workspace,a1                    ; Timers A and D on top of the
-        bsr     YX6_init                        ; silence just made
-        tst.l   d0
-        beq.s   .accepted
-        move.b  old_iera,$FFFFFA07.w            ; rejected: hand it all back
-        move.b  old_ierb,$FFFFFA09.w
-        move.b  old_imra,$FFFFFA13.w
-        move.b  old_imrb,$FFFFFA15.w
-        move.w  (sp)+,sr
-        moveq   #-1,d0
-        rts
-.accepted:
+        moveq   #1,d0                           ; subtune 1
+        bsr     sndh_call_init
         move.l  VBL_VECTOR,old_vbl
         move.l  #handler,VBL_VECTOR
-        move.w  #$2300,sr                       ; VBL and our timers, only
+        move.w  #$2300,sr                       ; VBL and the blob's timers
 
         clr.w   mouse_skip
 .wait:
-        tst.w   finished                        ; the handler reports the end
+        tst.w   finished                        ; the handler counts the end
         bne.s   .stop
         btst    #0,ACIA_CTRL.w                  ; a byte from the keyboard?
         beq.s   .wait
@@ -162,47 +127,62 @@ play:
         move.w  #2,mouse_skip
         bra.s   .wait
 .key:
-        cmp.b   #SPACE_MAKE,d0                  ; space stops; anything else
-        bne.s   .wait                           ; keeps it playing
+        cmp.b   #SPACE_MAKE,d0                  ; space stops
+        beq.s   .stop
+        .if YX6_TUNES-1
+        cmp.b   #2,d0                           ; make codes $02-$0A are the
+        bcs.s   .wait                           ; number keys 1-9: switch
+        cmp.b   #2+YX6_TUNES,d0
+        bcc.s   .wait
+        subq.b  #1,d0
+        and.w   #$FF,d0                         ; the subtune, 1-based
+        move.w  sr,-(sp)
+        move.w  #$2700,sr                       ; no play call mid-switch
+        move.w  d0,-(sp)
+        bsr     sndh_exit_entry
+        move.w  (sp)+,d0
+        bsr     sndh_call_init
+        clr.w   frame_count
+        move.w  (sp)+,sr
+        .endif
+        bra.s   .wait
 
 .stop:
         move.w  #$2700,sr
-        lea     workspace,a0
-        bsr     YX6_stop                        ; chip quiet, timers stopped
-        movea.l old_usp,a0                      ; now hand the machine back:
-        move    a0,usp                          ; the state was ours to keep
-        move.l  old_ta,$134.w
-        move.l  old_td,$110.w
-        move.b  old_tadr,$FFFFFA1F.w
-        move.b  old_tddr,$FFFFFA25.w
-        move.b  old_tacr,$FFFFFA19.w
-        move.b  old_tcdcr,d0                    ; only Timer D's nibble was
-        and.b   #$0F,d0                         ; the player's
-        or.b    d0,$FFFFFA1D.w
+        bsr     sndh_exit_entry                 ; the blob hands its claim back
         move.l  old_vbl,VBL_VECTOR
+        movea.l old_usp,a0
+        move    a0,usp
         move.b  old_iera,$FFFFFA07.w            ; and TOS's interrupts revived
         move.b  old_ierb,$FFFFFA09.w
         move.b  old_imra,$FFFFFA13.w
         move.b  old_imrb,$FFFFFA15.w
         move.w  (sp)+,sr
-        moveq   #0,d0
         rts
 
-; The VBL handler runs in supervisor mode at 50 Hz, which is exactly what
-; YX6_play wants: one call per frame, in order, and never after it reports
-; the end. A looping tune never reports one - it returns 1 each time round
-; and plays until the space bar stops it.
+sndh_call_init:
+        lea     sndh,a0
+        jsr     (a0)                            ; +0: init, subtune in d0.w
+        rts
+sndh_exit_entry:
+        lea     sndh+4,a0
+        jsr     (a0)
+        rts
+
+; The VBL: one play call per frame, and for a play-once tune the frame count
+; the builder measured tells us when the music has ended.
 handler:
         movem.l d0-d7/a0-a6,-(sp)
         tst.w   finished
         bne.s   .done
-        lea     workspace,a0
-        bsr     YX6_play
-        tst.l   d0
-        bpl.s   .done                           ; 0 played, 1 went round again
-        move.w  #1,finished                     ; -1: a play-once tune ran out
-        lea     workspace,a0
-        bsr     YX6_stop
+        lea     sndh+8,a0
+        jsr     (a0)
+        .if YX6_FRAMES
+        addq.w  #1,frame_count
+        cmp.w   #YX6_FRAMES,frame_count
+        bcs.s   .done
+        move.w  #1,finished
+        .endif
 .done:
         movem.l (sp)+,d0-d7/a0-a6
         rte                                     ; ours alone: no TOS behind us
@@ -214,43 +194,31 @@ puts:
         addq.l  #6,sp
         rts
 
-; ------------------------------------------------------------------ the library
-; The whole session runs in supervisor mode under one Supexec, so the USP is
-; genuinely spare: the drum tick may use it as its scratch slot.
-YX6_SUPER_HOST  equ     1
-        include "YX6.S"
-        include "ST4_wrap.S"
-
         .data
 m_banner:   dc.b    "YX6 player v0.7 - ZX1 streaming through ST4",13,10,0
-m_playing:  dc.b    "Playing. Press SPACE to stop.",13,10,0
+m_playing:  dc.b    "Playing. SPACE stops"
+        .if YX6_TUNES-1
+            dc.b    ", 1-",'0'+YX6_TUNES," picks a subtune"
+        .endif
+            dc.b    ".",13,10,0
         .if YX6_EXIT_MARKER
 m_marker:   dc.b    "YX6DONE.MRK",0
         .endif
-m_bad:      dc.b    "Not a v4 yx6 file for this build.",13,10,0
 m_bye:      dc.b    "Done.",13,10,0
         even
 
         .bss
         even
-old_vbl:    ds.l    1
-finished:   ds.w    1
-old_iera:   ds.b    1
-old_ierb:   ds.b    1
-old_imra:   ds.b    1
-old_imrb:   ds.b    1
-old_tacr:   ds.b    1
-old_tcdcr:  ds.b    1
-old_tadr:   ds.b    1
-old_tddr:   ds.b    1
+old_vbl:     ds.l    1
+old_usp:     ds.l    1
+finished:    ds.w    1
+frame_count: ds.w    1
+old_iera:    ds.b    1
+old_ierb:    ds.b    1
+old_imra:    ds.b    1
+old_imrb:    ds.b    1
         even
-old_ta:     ds.l    1
-old_td:     ds.l    1
-old_usp:    ds.l    1
-mouse_skip: ds.w    1
+mouse_skip:  ds.w    1
         even
-; The parentheses matter: rmac evaluates expressions strictly left to right.
-workspace:  ds.b    YX6_FIXED+(YX6_STREAMS*RING_SIZE)
-        even
-            ds.b    $1000
+            ds.b    $800
 stack_top:
