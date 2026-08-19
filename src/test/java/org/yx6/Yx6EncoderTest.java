@@ -142,6 +142,9 @@ final class Yx6EncoderTest {
         assertThrows(IllegalArgumentException.class, () -> Yx6Encoder.encode(source, 24, 24, false));
         // ST1_wrap needs the chunk to divide the ring.
         assertThrows(IllegalArgumentException.class, () -> Yx6Encoder.encode(source, 1000, 24, false));
+        // The burst reads register k's ring through an assembled-in k*N
+        // displacement: 13*N must fit a signed word, so N stops at 2520.
+        assertThrows(IllegalArgumentException.class, () -> Yx6Encoder.encode(source, 2544, 24, false));
     }
     @Test
     void widerUnitsRoundTripAndAreRejectedWhenTheyCannot() {

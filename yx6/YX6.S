@@ -115,9 +115,11 @@
 ; ASSUMPTIONS (unchecked beyond the magic, version and stream count):
 ;
 ;   1. the file comes from the yx6 packer, which enforces C >= 18, N mod C = 0,
-;      N >= 2C, offsets that stay inside the ring, and - at ST4_UNIT above 1 -
-;      a tune length, loop frame and C that are whole units, so every budget
-;      this player passes to the decoder divides cleanly
+;      N >= 2C, N <= 2520 - the burst reads each register's ring through an
+;      assembled-in 16-bit displacement of k*N - offsets that stay inside the
+;      ring, and - at ST4_UNIT above 1 - a tune length, loop frame and C that
+;      are whole units, so every budget this player passes to the decoder
+;      divides cleanly
 ;   2. the workspace is at an even address and large enough for the file's N
 ;   3. YX6_play is called once per frame and never after it returns -1.
 ;      Calling it again is harmless - it returns -1 and writes nothing - which
@@ -253,8 +255,12 @@ YX6_ENVELOPE    equ     13
 ;
 ; Two moves and an add, with the register number assembled in as an immediate:
 ; nothing is tested, nothing is counted, and the value never passes through a
-; data register. Registers 7 and 13 need their values touched, so they are
-; written out of line rather than through this macro.
+; data register. Register k's ring byte sits k*N above the cursor, and N is
+; known at init: the displacement is patched into the instruction there,
+; once, so the burst never steps a pointer. The $7FFF placeholder is
+; load-bearing - a zero displacement would let rmac's +o3 fold the extension
+; word away and shift every patch site. Registers 7 and 13 need their values
+; touched, so they are written out of line rather than through this macro.
 ;
 ; Skipping a register whose value has not changed was measured and dropped: a
 ; sound-chip access on an ST costs about 1.5 cycles more than a RAM one, so the
@@ -262,8 +268,7 @@ YX6_ENVELOPE    equ     13
 ; -----------------------------------------------------------------------------
         .macro YX6_WRITE number
         move.b  #\number,(a2)           ; select
-        move.b  (a1),2(a2)              ; and write
-        adda.l  d3,a1
+        move.b  $7FFF(a1),2(a2)         ; and write - SMC: k*N, set at init
         .endm
 
 ; Jump table: bra.w keeps 4-byte slots for a program that loads YX6 as a blob.
@@ -392,6 +397,32 @@ YX6_init:
         move.l  d0,YX6_R7OFF(a3)
         add.l   d0,d0                   ; and 14*N, from the same mulu
         move.l  d0,YX6_EFXOFF(a3)
+
+; The burst reads register k's ring byte through an assembled-in k*N
+; displacement - patch all fourteen now that N is known. The packer keeps
+; N at 2520 or less, so 13*N fits the signed word. Each YX6_WRITE is ten
+; bytes with its displacement at +6; R7 and R13 read out of line.
+        move.w  YX6_N(a3),d2
+        moveq   #0,d1                   ; k*N, accumulated
+        lea     yx6_wA+6(pc),a0
+        moveq   #6,d0                   ; R0..R6
+.wpatchA:
+        move.w  d1,(a0)
+        add.w   d2,d1
+        lea     10(a0),a0
+        dbra    d0,.wpatchA
+        lea     yx6_w7+2(pc),a0         ; R7 reads through d1
+        move.w  d1,(a0)
+        add.w   d2,d1
+        lea     yx6_wB+6(pc),a0
+        moveq   #4,d0                   ; R8..R12
+.wpatchB:
+        move.w  d1,(a0)
+        add.w   d2,d1
+        lea     10(a0),a0
+        dbra    d0,.wpatchB
+        lea     yx6_w13+2(pc),a0
+        move.w  d1,(a0)
         clr.b   YX6_PATCHES(a3)
         lea     yx6_drums(pc),a0
         clr.b   (a0)
@@ -602,8 +633,8 @@ YX6_play:
         bsr     yx6_borrow              ; the ring gets this byte back
         or.b    d1,(a0)
 .mixer_ok:
-        movea.l YX6_CURSOR(a3),a1       ; the same offset in all fourteen
-        lea     YX6_PSG,a2              ; register rings
+        movea.l YX6_CURSOR(a3),a1       ; the cursor: every register's ring
+        lea     YX6_PSG,a2              ; byte is a patched k*N above it
 
 ; Selecting a register and writing it are two bus cycles. An interrupt that
 ; uses the sound chip in between - TOS has several, its floppy motor timeout
@@ -612,6 +643,7 @@ YX6_play:
         move.w  sr,-(sp)
         ori.w   #$0700,sr
 
+yx6_wA:
         YX6_WRITE 0                     ; channel A period, fine and coarse
         YX6_WRITE 1
         YX6_WRITE 2                     ; channel B
@@ -621,18 +653,20 @@ YX6_play:
         YX6_WRITE 6                     ; noise period
 
         move.b  #YX6_MIXER,(a2)         ; R7 also carries the ST's I/O port
-        move.b  (a1),d1                 ; directions, which port A needs kept
+yx6_w7:
+        move.b  $7FFF(a1),d1            ; directions, which port A needs kept
         or.b    #YX6_PORTS,d1           ; as outputs for the floppy select
         move.b  d1,2(a2)
-        adda.l  d3,a1
 
+yx6_wB:
         YX6_WRITE 8                     ; the three volumes
         YX6_WRITE 9
         YX6_WRITE 10
         YX6_WRITE 11                    ; envelope period
         YX6_WRITE 12
 
-        move.b  (a1),d1                 ; R13 restarts the envelope whenever it
+yx6_w13:
+        move.b  $7FFF(a1),d1            ; R13 restarts the envelope whenever it
         cmp.b   #YX6_NO_ENV,d1          ; is written, so $FF means leave it be
         beq.s   .envelope_held
         move.b  #YX6_ENVELOPE,(a2)

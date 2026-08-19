@@ -187,10 +187,10 @@ dotnet run --project csharp/src/Nt4.Cli -- [-f] [-kK] [-mN] [-lN] input [output.
 a YM chiptune dump — YM5 or YM6, LHA-archived or not — into eighteen ST4
 containers: one per YM2149 sound register, plus each effect slot's code and
 timer-count streams, with the digidrum samples appended as a table. A
-1,914-byte 68000 player decodes them through eighteen small rings with
+1,972-byte 68000 player decodes them through eighteen small rings with
 ST4_wrap, one refill per frame, and plays the effects — digidrums, SID
 voices, the sync-buzzer — on MFP Timers A and D. On one measured tune that
-costs about 1,900 cycles a frame on real hardware, effect stage included.
+costs about 1,850 cycles a frame on real hardware, effect stage included.
 The packer picks k = 2 by itself when the tune's shape allows it: a few
 percent fewer cycles for a few percent more bytes. Loop points restart a
 stream mid-refill.

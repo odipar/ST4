@@ -152,8 +152,10 @@ public final class Yx6Format {
         if (ringSize % chunk != 0) {
             return "ring " + ringSize + " is not a multiple of chunk " + chunk;
         }
-        if (ringSize > 65535) {
-            return "ring " + ringSize + " exceeds the 65535-byte decoder limit";
+        if (ringSize > 2520) {
+            return "ring " + ringSize + " exceeds 2520: the player reads register"
+                    + " k's ring through an assembled-in displacement of k*N,"
+                    + " and 13*N must fit a signed word";
         }
         return "";
     }
