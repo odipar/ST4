@@ -16,10 +16,10 @@ other player including the format author's.
 
 | Piece | What it is |
 |---|---|
-| [`org.yx6.Yx6`](../src/main/java/org/yx6/Yx6.java) | the packer: YM5!/YM6! in, `.yx6` out |
-| [YX6.S](YX6.S) | the player library, 2,260 bytes plus ST4_wrap's 292 |
-| [YX6_player.S](YX6_player.S) | a VBL front end: a complete TOS program |
-| [mkprg.sh](mkprg.sh) | links the two around a song into a runnable `.PRG` |
+| [`org.yx6.Yx6`](../src/main/java/org/yx6/Yx6.java) | the packer: YM5!/YM6! in, `.yx6` out - one tune or a whole set |
+| [YX6.S](YX6.S) | the player library, 2,264 bytes plus ST4_wrap's 292 |
+| [YX6_sndh.S](YX6_sndh.S) + [mksndh.sh](mksndh.sh) | the canonical container: an SNDH v2.2 file, subtunes included |
+| [YX6_player.S](YX6_player.S) + [mkprg.sh](mkprg.sh) | a thin TOS shell around those same SNDH bytes |
 | [play.sh](play.sh) | one command: pack a `.ym`, build it, play it under Hatari |
 
 **Unit sizes.** `yx6 -kK` (and `play.sh -kK`) packs the register sections at
@@ -64,6 +64,37 @@ yx6/mkprg.sh song.yx6                 # -> SONG.PRG, runnable on an ST
 `mkprg.sh -m` builds the same program but has it drop a `YX6DONE.MRK` file as
 it exits; that is how `play.sh` knows the tune has stopped. A plain build never
 touches the disk.
+
+## The SNDH container
+
+The canonical build of the player is an **SNDH v2.2 file** - the Atari ST's
+standard music container - and the `.PRG` is a thin shell around those same
+bytes. [mksndh.sh](mksndh.sh) assembles [YX6_sndh.S](YX6_sndh.S) around one
+or more `.yx6` files:
+
+```sh
+java ... org.yx6.Yx6 -f one.ym two.ym three.ym build/   # a set, one config
+yx6/mksndh.sh -t"My Set" myset.sndh build/*.yx6         # -> subtunes 1..3
+yx6/mkprg.sh MYSET.PRG build/*.yx6                      # the same, runnable
+```
+
+The SNDH glue is the polite host the player's assumption 5 describes: INIT
+(subtune in `d0.w`, 1-based) saves exactly what the player touches and
+claims the two timers, EXIT quiesces and hands everything back, PLAY runs
+one frame - every entry preserves `d0`-`a6`, nothing outside the blob is
+used, the USP is never touched, and INIT called twice without an EXIT
+cleans up after itself. The header carries `TC50` (play is driven at 50 Hz
+from whatever the host hangs on it), `FLAG ~ady`, and a `FRMS` table -
+looping tunes are marked endless, play-once tunes declare their frames -
+and the subtune names (the tunes' file stems), which is what a jukebox
+shows as its track list: SNDH's subtunes ARE its multi-song format.
+The file is raw and position independent; pack it with ICE 2.4 for the
+archive if you like, players unpack that themselves.
+
+One honest limitation, in the file's own header comment: a native host
+that dispatches PLAY from its Timer C hook delays slot 2's timer (lower
+MFP priority) by up to the length of the call - pending, never lost. VBL
+and emulator hosts have no such window.
 
 The packer's parameters are the ring size and the chunk size:
 

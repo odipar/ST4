@@ -595,6 +595,166 @@ def drum_ticks(player, code, flags) -> str:
     return ''
 
 
+class Sndh:
+    """One emulated ST driving an SNDH blob through its three entries."""
+
+    CANARY = {UC_M68K_REG_D0: 0xD0D0D0D0, UC_M68K_REG_D1: 0xD1D1D1D1,
+              UC_M68K_REG_D2: 0xD2D2D2D2, UC_M68K_REG_D3: 0xD3D3D3D3,
+              UC_M68K_REG_D4: 0xD4D4D4D4, UC_M68K_REG_D5: 0xD5D5D5D5,
+              UC_M68K_REG_D6: 0xD6D6D6D6, UC_M68K_REG_D7: 0xD7D7D7D7,
+              UC_M68K_REG_A0: 0xA0A0A0A0, UC_M68K_REG_A1: 0xA1A1A1A1,
+              UC_M68K_REG_A2: 0xA2A2A2A2, UC_M68K_REG_A3: 0xA3A3A3A3,
+              UC_M68K_REG_A4: 0xA4A4A4A4, UC_M68K_REG_A5: 0xA5A5A5A5,
+              UC_M68K_REG_A6: 0xA6A6A6A6}
+
+    def __init__(self, blob: bytes, offset: int = 0x1002):
+        self.uc = Uc(UC_ARCH_M68K, UC_MODE_BIG_ENDIAN)
+        self.uc.ctl_set_cpu_model(UC_CPU_M68K_M68000)
+        size = (len(blob) + offset + 0xFFFF) & ~0xFFF
+        for base, span in ((CODE, size), (STACK_TOP - 0x8000, 0x8000),
+                           (MAGIC, 0x1000), (PSG_PAGE, 0x1000),
+                           (MFP_PAGE, 0x1000), (VECTORS, 0x1000)):
+            self.uc.mem_map(base, span)
+        self.base = CODE + offset            # any even address must do
+        self.uc.mem_write(self.base, blob)
+        self.writes = []
+        self.uc.hook_add(UC_HOOK_MEM_WRITE, self._psg, None, PSG, PSG + 4)
+        self.uc.mem_write(MAGIC, b'\x4e\x71')
+
+    def _psg(self, uc, access, address, size, value, user):
+        for lane in range(size):
+            self.writes.append((address + lane, (value >> (8 * (size - 1 - lane))) & 0xFF))
+
+    def call(self, entry: int, d0: int) -> str:
+        """Runs one SNDH entry; every register d0-a6 must come back."""
+        self.uc.reg_write(UC_M68K_REG_SR, 0x2300)  # supervisor FIRST: writing
+        for register, canary in self.CANARY.items():   # SR banks a7, so the
+            self.uc.reg_write(register, canary)        # stack goes in after
+        self.uc.reg_write(UC_M68K_REG_D0, d0)
+        stack = STACK_TOP - 256
+        self.uc.mem_write(stack, MAGIC.to_bytes(4, 'big'))
+        self.uc.reg_write(UC_M68K_REG_A7, stack)
+        self.uc.emu_start(self.base + entry, MAGIC, count=50_000_000)
+        if self.uc.reg_read(UC_M68K_REG_PC) != MAGIC:
+            return f'entry +{entry} did not return'
+        for register, canary in self.CANARY.items():
+            want = d0 if register == UC_M68K_REG_D0 else canary
+            if self.uc.reg_read(register) != want:
+                return f'entry +{entry} clobbered a register'
+        return ''
+
+    def frame(self):
+        self.writes.clear()
+        problem = self.call(8, 0xD0D0D0D0)
+        pairs = []
+        selected = None
+        for address, value in self.writes:
+            if address == PSG:
+                selected = value
+            elif address == PSG + 2 and selected is not None:
+                pairs.append((selected, value))
+        return problem, dict(pairs)
+
+
+def run_sndh() -> str:
+    """The SNDH container, end to end: two subtunes built by mksndh.sh, the
+    blob loaded at an arbitrary even address, every entry preserving d0-a6,
+    each subtune playing its own data, the machine state handed back at
+    exit, and init-without-exit recovering by itself."""
+    frames = 200
+    sets = []
+    for signature in (lambda f: (3 * f + 1) & 0xFF, lambda f: 0x55):
+        values = [bytearray(frames) for _ in range(16)]
+        for f in range(frames):
+            values[2][f] = signature(f)
+            values[13][f] = gen_ym.NO_ENVELOPE_CHANGE
+        sets.append(pack(gen_ym.ym6_file(frames, values), 960, 24, 0, 2))
+    for i, packed in enumerate(sets):
+        (SCRATCH / f'sndh_tune{i + 1}.yx6').write_bytes(packed)
+    out = SCRATCH / 'sndh_test.sndh'
+    build = subprocess.run(['sh', str(YX6 / 'mksndh.sh'), '-tRig',
+                            str(out),
+                            str(SCRATCH / 'sndh_tune1.yx6'),
+                            str(SCRATCH / 'sndh_tune2.yx6')],
+                           capture_output=True, text=True)
+    if build.returncode:
+        return 'sndh: build failed: ' + (build.stderr or build.stdout).strip()[:120]
+    blob = out.read_bytes()
+    if blob[12:16] != b'SNDH' or b'HDNS' not in blob[:256]:
+        return 'sndh: the header is not an SNDH header'
+    # the subtune-name tag: word offsets from the tag start to NUL strings
+    sn = blob.index(b'!#SN')
+    for i in range(2):
+        at = sn + int.from_bytes(blob[sn + 4 + 2 * i:sn + 6 + 2 * i], 'big')
+        name = blob[at:blob.index(0, at)].decode()
+        if name != f'sndh_tune{i + 1}':
+            return f'sndh: subtune {i + 1} is named {name!r}'
+
+    player = Sndh(blob)
+    # sentinels for everything init must save and exit must hand back
+    player.uc.mem_write(0x134, (0xCAFE0134).to_bytes(4, 'big'))
+    player.uc.mem_write(0x110, (0xCAFE0110).to_bytes(4, 'big'))
+    for address, value in ((0xFFFFFA19, 3), (0xFFFFFA1D, 0x17),
+                           (0xFFFFFA1F, 99), (0xFFFFFA25, 88),
+                           (0xFFFFFA07, 0x21), (0xFFFFFA13, 0x20),
+                           (0xFFFFFA09, 0x10), (0xFFFFFA15, 0x11)):
+        player.uc.mem_write(address, bytes([value]))
+
+    def signature(which, frame):
+        return ((3 * frame + 1) & 0xFF) if which == 1 else 0x55
+
+    def play_and_check(which, count=30):
+        for f in range(count):
+            problem, got = player.frame()
+            if problem:
+                return problem
+            if got.get(2) != signature(which, f):
+                return (f'sndh: subtune {which} frame {f} played '
+                        f'{got.get(2)} want {signature(which, f)}')
+        return ''
+
+    problem = player.call(0, 1)                 # init subtune 1
+    if problem:
+        return 'sndh: ' + problem
+    problem = play_and_check(1)
+    if problem:
+        return problem
+    problem = player.call(4, 0xD0D0D0D0)        # exit
+    if problem:
+        return 'sndh: ' + problem
+    for address, want in ((0x134, 0xCAFE0134), (0x110, 0xCAFE0110)):
+        if int.from_bytes(player.uc.mem_read(address, 4), 'big') != want:
+            return f'sndh: exit lost the vector at {address:#x}'
+    for address, want in ((0xFFFFFA19, 3), (0xFFFFFA1F, 99), (0xFFFFFA25, 88),
+                          (0xFFFFFA07, 0x21), (0xFFFFFA13, 0x20),
+                          (0xFFFFFA09, 0x10), (0xFFFFFA15, 0x11)):
+        if player.uc.mem_read(address, 1)[0] != want:
+            return f'sndh: exit lost the register at {address:#x}'
+    if player.uc.mem_read(0xFFFFFA1D, 1)[0] & 0x0F != 0x07:
+        return 'sndh: exit lost Timer D\'s nibble'
+
+    problem = player.call(0, 2)                 # subtune 2
+    if problem:
+        return 'sndh: ' + problem
+    problem = play_and_check(2)
+    if problem:
+        return problem
+    problem = player.call(0, 1)                 # init WITHOUT exit
+    if problem:
+        return 'sndh: ' + problem
+    problem = play_and_check(1)
+    if problem:
+        return problem
+    problem = player.call(0, 9)                 # out of range: subtune 1
+    if problem:
+        return 'sndh: ' + problem
+    problem = play_and_check(1)
+    if problem:
+        return problem
+    player.call(4, 0xD0D0D0D0)
+    return ''
+
+
 def Yx6_DRUM_TABLE(player) -> int:
     """The drum table's offset, straight from the packed file's header."""
     return int.from_bytes(player.uc.mem_read(player.file + 28, 4), 'big')
@@ -657,6 +817,13 @@ def main() -> int:
         else:
             where = 'plays once' if loop is None else f'loops at {loop}'
             print(f'OK   {label:26s} ({frames} frames, {ring}-byte rings, {where})')
+
+    problem = run_sndh()
+    if problem:
+        print(f'FAIL {problem}')
+        failures += 1
+    else:
+        print('OK   the SNDH container       (subtunes, handback, re-init)')
 
     for super_host in (False, True):
         problem = run_effects(super_host)

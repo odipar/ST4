@@ -113,11 +113,10 @@
 ; self-modifying code. The slot descriptors and the tick handlers' operands
 ; live in this blob, init patches the burst's ring displacements and the
 ; run-time addresses into it, and the effect stage keeps patching as
-; effects come and go. Three consequences: the player must run from RAM;
-; one loaded copy is one player - two workspaces cannot share it; and it
-; must sit inside one 64K segment, because the SID tick swaps only the low
-; word of its vector. Every self-reference is pc-relative or patched at
-; run time, so the blob still loads anywhere.
+; effects come and go. Two consequences: the player must run from RAM, and
+; one loaded copy is one player - two workspaces cannot share it. Every
+; self-reference is pc-relative or patched at run time, so the blob loads
+; at any even address.
 ;
 ; ASSUMPTIONS (unchecked beyond the magic, version and stream count):
 ;
@@ -842,11 +841,8 @@ yx6_desc2:
 ;   drum:  select immediate at +3, sample address at +8, flag mask at
 ;          _clear+3, the burst gate's address at _gate+4
 ;   sid:   select at +2 and volume at +4 inside the imm long; the partner's
-;          address low word at +14, past the IPL drop, patched by yx6_link
+;          whole vector at +14, past the IPL drop, patched by yx6_link
 ;   buzz:  the shape at +4
-; The SID vector swap patches the vector's LOW word only, so the two halves
-; of a block must share their address high word: keep the player inside one
-; 64K segment - anywhere a program smaller than 64K naturally loads.
 ; -----------------------------------------------------------------------------
 
 ; One drum tick: the sample byte goes straight to the voice's volume register.
@@ -885,13 +881,13 @@ yx6_parkA:
 yx6_sidA_on:
         move.l  #$08000F00,$FFFF8800.w  ; SMC +2 select, +4 volume
         move.w  #$2500,sr
-        move.w  #0,$136.w               ; SMC +14: the quiet half is next
-        move.b  #$DF,$FFFFFA0F.w
-        rte
+        move.l  #0,$134.w               ; SMC +14: the quiet half is next -
+        move.b  #$DF,$FFFFFA0F.w        ; the whole vector, so the blob may
+        rte                             ; straddle a 64K boundary
 yx6_sidA_off:
         move.l  #$08000000,$FFFF8800.w  ; SMC +2 select; silence
         move.w  #$2500,sr
-        move.w  #0,$136.w               ; SMC +14: the loud half is next
+        move.l  #0,$134.w               ; SMC +14: the loud half is next
         move.b  #$DF,$FFFFFA0F.w
         rte
 
@@ -950,13 +946,13 @@ yx6_parkD:
 yx6_sidD_on:
         move.l  #$08000F00,$FFFF8800.w
         move.w  #$2500,sr
-        move.w  #0,$112.w
+        move.l  #0,$110.w
         move.b  #$EF,$FFFFFA11.w
         rte
 yx6_sidD_off:
         move.l  #$08000000,$FFFF8800.w
         move.w  #$2500,sr
-        move.w  #0,$112.w
+        move.l  #0,$110.w
         move.b  #$EF,$FFFFFA11.w
         rte
 
@@ -1013,12 +1009,10 @@ yx6_link:
         lea     yx6_drumD(pc),a2
         move.l  a2,SD_ISR(a1)
 .partners:
-        lea     ISR_SIDOFF(a2),a0       ; each half installs the other
-        move.l  a0,d0
-        move.w  d0,ISR_SIDON_NEXT(a2)
+        lea     ISR_SIDOFF(a2),a0       ; each half installs the other,
+        move.l  a0,ISR_SIDON_NEXT(a2)   ; as a whole vector
         lea     ISR_SIDON(a2),a0
-        move.l  a0,d0
-        move.w  d0,ISR_SIDOFF_NEXT(a2)
+        move.l  a0,ISR_SIDOFF_NEXT(a2)
         rts
 
 ; -----------------------------------------------------------------------------
