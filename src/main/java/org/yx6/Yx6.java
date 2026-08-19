@@ -3,14 +3,15 @@ package org.yx6;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import org.jspecify.annotations.Nullable;
 
 /**
  * Command-line YM to yx6 packer: reads a YM5!/YM6! register dump and writes a
  * {@code .yx6} file that the 68000 {@code YX6.S} player streams through ST4.
  *
- * <p>The player covers the fourteen standard YM2149 registers. The YM6 special
- * effects - SID voice, digidrum, sinus-SID, sync-buzzer - are dropped, along
- * with the register bits that carry them.
+ * <p>The player covers the fourteen standard YM2149 registers and the YM
+ * special effects - digidrums, SID voices, the sync-buzzer - extracted into
+ * their own streams; only the never-implemented sinus-SID is dropped.
  */
 public final class Yx6 {
 
@@ -26,13 +27,28 @@ public final class Yx6 {
         int loopFrame = -1;                     // tune's shape; -1 likewise
         boolean playOnce = false;
         boolean forcedMode = false;
+        int startMin = 0;                       // the trim window, for zooming
+        int startSec = 0;                       // in on a moment of a tune
+        int startFrame = -1;
+        int endFrame = -1;
+        int frameCount = -1;
         int i = 0;
         for (; i < args.length && args[i].startsWith("-"); i++) {
             switch (args[i]) {
                 case "-f" -> forcedMode = true;
                 case "-o" -> playOnce = true;
                 default -> {
-                    if (args[i].startsWith("-n")) {
+                    if (args[i].startsWith("-startframe")) {
+                        startFrame = parseNumber(args[i].substring(11));
+                    } else if (args[i].startsWith("-endframe")) {
+                        endFrame = parseNumber(args[i].substring(9));
+                    } else if (args[i].startsWith("-frames")) {
+                        frameCount = parseNumber(args[i].substring(7));
+                    } else if (args[i].startsWith("-min")) {
+                        startMin = parseNumber(args[i].substring(4));
+                    } else if (args[i].startsWith("-sec")) {
+                        startSec = parseNumber(args[i].substring(4));
+                    } else if (args[i].startsWith("-n")) {
                         ringSize = parseNumber(args[i].substring(2));
                     } else if (args[i].startsWith("-c")) {
                         chunk = parseNumber(args[i].substring(2));
@@ -60,11 +76,15 @@ public final class Yx6 {
                       -nN     Ring size per stream, in bytes (default 960)
                       -cC     Values decoded per call, and the round-robin group
                               size (default 24; needs C >= 18 and N mod C = 0)
-                      -kK     ST4 unit size: 1, 2 or 4. The default is 2 when
-                              the tune length, loop frame and C allow it -
-                              they must be multiples of K - and 1 otherwise.
+                      -kK     ST4 unit size: 1, 2 or 4 (default 2). An odd
+                              tune length or loop frame is padded with safe
+                              duplicate frames - inaudible - to fit the unit.
                               The player must be built with the same ST4_UNIT
                       -lF     Loop from frame F, overriding the YM header
+                      -minM -secS   Trim: drop everything before M:S, so a
+                              moment deep in a long tune plays immediately
+                      -startframeF -endframeF -framesN   The same window in
+                              frames: start, end, or a length cap
 
                     The input is a YM5!/YM6! dump, LHA-archived or already
                     unpacked - the reader tells them apart by itself.""");
@@ -96,6 +116,38 @@ public final class Yx6 {
             throw error(inputName + ": " + e.getMessage());
         }
 
+        // The trim window: -minM -secS (or -startframeF) picks where to start,
+        // -framesN (or -endframeF) how much to keep - everything before and
+        // after is dropped, so a moment deep in a long tune plays immediately.
+        // A loop frame inside the kept window is kept, adjusted; one outside
+        // it makes the excerpt loop from its own start.
+        int start = startFrame >= 0 ? startFrame
+                : (startMin * 60 + startSec) * song.playerHz();
+        int end = song.frames();
+        if (endFrame >= 0) {
+            end = Math.min(end, endFrame);
+        }
+        if (frameCount >= 0) {
+            end = Math.min(end, start + frameCount);
+        }
+        if (start > 0 || end < song.frames()) {
+            if (start < 0 || start >= end) {
+                throw error("Empty trim window: frames " + start + ".." + end
+                        + " of " + song.frames());
+            }
+            byte[][] cut = new byte[song.registers().length][];
+            for (int r = 0; r < cut.length; r++) {
+                cut[r] = java.util.Arrays.copyOfRange(song.registers()[r], start, end);
+            }
+            long loop = song.loopFrame() >= start && song.loopFrame() < end
+                    ? song.loopFrame() - start : 0;
+            song = new Ym6Reader.Song(song.format(), end - start, song.playerHz(),
+                    song.masterClock(), loop, song.interleaved(), song.attributes(),
+                    song.drums(), song.name(), song.author(), song.comment(), cut);
+            System.out.printf("Trimmed to frames %d-%d: %d frames%n",
+                    start, end - 1, end - start);
+        }
+
         // The YM header's loop frame is the default; -lF overrides it and -o
         // drops the loop altogether.
         if (loopFrame < 0 && !playOnce) {
@@ -110,16 +162,34 @@ public final class Yx6 {
             loopFrame = -1;
         }
 
-        // The default unit is 2 - measured a few percent cheaper per frame
-        // for little ratio - but only where the tune's shape allows it: the
-        // length, the split and C must all be whole units. An explicit -kK
-        // is a promise and fails loudly instead.
-        if (unit == 0) {
-            int split = loopFrame >= 0 ? loopFrame : song.frames();
-            unit = song.frames() % 2 == 0 && split % 2 == 0 && chunk % 2 == 0 ? 2 : 1;
-            if (unit == 1) {
+        // The default unit is 2, measured a few percent cheaper per frame for
+        // little ratio. A tune whose length or loop frame is odd is PADDED to
+        // the shape: a duplicated frame holds the chip state one tick longer,
+        // which is inaudible as long as the duplicate neither writes R13 (an
+        // envelope restart) nor triggers a drum - the packer scans for a safe
+        // frame and says what it did. An explicit -kK pads the same way and
+        // fails loudly only when no safe frame exists.
+        if (unit == 0 && chunk % 2 == 0) {
+            Ym6Reader.Song padded = padToUnit(song, loopFrame, 2);
+            if (padded != null) {
+                if (padded != song) {
+                    song = padded;
+                    loopFrame = loopFrame > 0 ? (int) song.loopFrame() : loopFrame;
+                }
+                unit = 2;
+            } else {
+                unit = 1;
                 System.out.println("Packing at -k1: this tune's shape is not "
-                        + "a whole number of 2-byte units");
+                        + "a whole number of 2-byte units, and no frame near "
+                        + "the boundary is safe to duplicate");
+            }
+        } else if (unit == 0) {
+            unit = 1;
+        } else if (unit > 1) {
+            Ym6Reader.Song padded = padToUnit(song, loopFrame, unit);
+            if (padded != null && padded != song) {
+                song = padded;
+                loopFrame = loopFrame > 0 ? (int) song.loopFrame() : loopFrame;
             }
         }
 
@@ -139,6 +209,86 @@ public final class Yx6 {
         }
 
         report(song, result);
+    }
+
+    /**
+     * Pads the tune so its length and loop split are whole {@code unit}s, by
+     * duplicating safe frames: one that neither writes R13 nor triggers a
+     * drum can hold the chip state one tick longer without being heard. The
+     * split is evened by duplicating a safe frame inside the intro, the
+     * length by duplicating one at the tail. Returns the song itself when
+     * the shape already fits, the padded song otherwise - or null when no
+     * safe frame exists within 64 frames of a boundary that needs one.
+     */
+    static Ym6Reader.@Nullable Song padToUnit(Ym6Reader.Song song, int loopFrame, int unit) {
+        int split = loopFrame > 0 ? loopFrame : 0;
+        int splitPad = split > 0 ? (unit - split % unit) % unit : 0;
+        int frames = song.frames() + splitPad;
+        int endPad = (unit - frames % unit) % unit;
+        if (splitPad == 0 && endPad == 0) {
+            return song;
+        }
+        int atSplit = splitPad > 0 ? safeFrame(song, split - 1, 0) : -1;
+        if (splitPad > 0 && atSplit < 0) {
+            return null;
+        }
+        int atEnd = endPad > 0 ? safeFrame(song, song.frames() - 1,
+                Math.max(split, song.frames() - 64)) : -1;
+        if (endPad > 0 && atEnd < 0) {
+            return null;
+        }
+        int total = song.frames() + splitPad + endPad;
+        byte[][] out = new byte[song.registers().length][];
+        for (int r = 0; r < out.length; r++) {
+            byte[] v = song.registers()[r];
+            byte[] cut = new byte[total];
+            int at = 0;
+            for (int f = 0; f < song.frames(); f++) {
+                cut[at++] = v[f];
+                if (f == atSplit) {
+                    for (int d = 0; d < splitPad; d++) {
+                        cut[at++] = v[f];
+                    }
+                }
+                if (f == atEnd) {
+                    for (int d = 0; d < endPad; d++) {
+                        cut[at++] = v[f];
+                    }
+                }
+            }
+            out[r] = cut;
+        }
+        long loop = split > 0 ? split + splitPad : song.loopFrame();
+        System.out.printf("Padded %d frame%s (duplicates of safe frames) so the "
+                + "shape is whole %d-byte units%n", splitPad + endPad,
+                splitPad + endPad == 1 ? "" : "s", unit);
+        return new Ym6Reader.Song(song.format(), total, song.playerHz(),
+                song.masterClock(), loop, song.interleaved(), song.attributes(),
+                song.drums(), song.name(), song.author(), song.comment(), out);
+    }
+
+    /**
+     * The nearest frame at or before {@code from} (not before {@code floor})
+     * that is safe to duplicate: R13 quiet, no drum code in either slot's
+     * effect field - a duplicated drum code would trigger the drum again.
+     */
+    private static int safeFrame(Ym6Reader.Song song, int from, int floor) {
+        byte[][] r = song.registers();
+        boolean ym6 = song.format().startsWith("YM6");
+        for (int f = from; f >= Math.max(floor, from - 63); f--) {
+            if ((r[13][f] & 0xFF) != 0xFF) {
+                continue;                       // this frame restarts the
+            }                                   // envelope: not twice
+            int c1 = r[1][f] & 0xF0;
+            int c3 = r[3][f] & 0xF0;
+            boolean drum = ym6 ? (c1 & 0xC0) == 0x40 && (c1 & 0x30) != 0
+                    || (c3 & 0xC0) == 0x40 && (c3 & 0x30) != 0
+                    : (c3 & 0x30) != 0;
+            if (!drum) {
+                return f;
+            }
+        }
+        return -1;
     }
 
     private static void report(Ym6Reader.Song song, Yx6Encoder.Result result) {

@@ -145,8 +145,10 @@
 
 ; A host that never runs user-mode code while the player is live - a demo
 ; under its own takeover, say - may define YX6_SUPER_HOST equ 1 before
-; including this file: the drum tick then parks a0 in the then-unused USP
-; (4 cycles each way instead of 12 through the stack). The park restores a0
+; including this file: the slot-2 drum tick then parks a0 in the then-unused
+; USP (4 cycles each way instead of 12 through the stack; slot 1's drum
+; always uses the stack, because Timer A nests into Timer D's parked
+; windows and must never overwrite one). The park restores a0
 ; but not the USP: a host that ever returns to user mode must save its USP
 ; before YX6_init and restore it after YX6_stop, with the rest of the
 ; machine state assumption 5 lists. Default off, because a program that
@@ -819,10 +821,21 @@ yx6_desc2:
 ; congruence from the symbol table. The park entries - where YX6_init aims
 ; the vectors while no effect runs - are the handlers' own tails.
 ;
+; The timers STACK: each handler drops the IPL to 5 as soon as its PSG
+; select/data pair is complete, so the MFP's higher-priority channel -
+; Timer A over Timer D - can nest instead of waiting a whole tick. The
+; nesting is strictly one-way: Timer A interrupts Timer D's handlers,
+; never the reverse (SEI mode admits only higher MFP priorities while an
+; in-service bit is set), and nothing of the player's sits above Timer A.
+; That direction is why the USP park belongs to the D-side drum alone: the
+; A-side drum - the one that can nest into a parked window - always uses
+; the stack, so a parked USP survives. The drop must never come before
+; the handler's LAST chip write: a nested tick re-selects the PSG.
+;
 ; The patch offsets are load-bearing:
 ;   drum:  select immediate at +3, sample address at +8, flag mask at _clear+3
 ;   sid:   select at +2 and volume at +4 inside the imm long; the partner's
-;          address low word at +10, patched once by yx6_link
+;          address low word at +14, past the IPL drop, patched by yx6_link
 ;   buzz:  the shape at +4
 ; The SID vector swap patches the vector's LOW word only, so the two halves
 ; of a block must share their address high word: keep the player inside one
@@ -836,36 +849,22 @@ yx6_drumA:
         move.b  #8,$FFFF8800.w          ; SMC +3: select the drummed volume
         move.b  $12345678,$FFFF8802.w   ; SMC +8: the next sample byte
         bmi.s   .ended
-        .if YX6_SUPER_HOST
-        move    a0,usp                  ; the USP is the host's spare register
-        .else
-        move.l  a0,-(sp)
-        .endif
-        lea     yx6_drumA+8(pc),a0
+        move.w  #$2500,sr               ; pair done: the other timer may stack
+        move.l  a0,-(sp)                ; the stack, never the USP: this side
+        lea     yx6_drumA+8(pc),a0      ; nests into parked windows
         addq.l  #1,(a0)                 ; step the operand itself
-        .if YX6_SUPER_HOST
-        move    usp,a0
-        .else
         movea.l (sp)+,a0
-        .endif
         move.b  #$DF,$FFFFFA0F.w
         rte
 .ended:
         move.b  #$D,$FFFF8802.w         ; middle volume: no click
         andi.b  #$F0,$FFFFFA19.w        ; the sample ran out: stop Timer A
-        .if YX6_SUPER_HOST
-        move    a0,usp
-        .else
+        move.w  #$2500,sr
         move.l  a0,-(sp)
-        .endif
         lea     yx6_drums(pc),a0
 yx6_drumA_clear:
         andi.b  #$FF,(a0)               ; SMC +3: drop the voice's drum flag
-        .if YX6_SUPER_HOST
-        move    usp,a0
-        .else
         movea.l (sp)+,a0
-        .endif
 yx6_parkA:
         move.b  #$DF,$FFFFFA0F.w
         rte
@@ -876,12 +875,14 @@ yx6_parkA:
 ; $8800 (select) and $8802 (data) by bus layout.
 yx6_sidA_on:
         move.l  #$08000F00,$FFFF8800.w  ; SMC +2 select, +4 volume
-        move.w  #0,$136.w               ; SMC +10: the quiet half is next
+        move.w  #$2500,sr
+        move.w  #0,$136.w               ; SMC +14: the quiet half is next
         move.b  #$DF,$FFFFFA0F.w
         rte
 yx6_sidA_off:
         move.l  #$08000000,$FFFF8800.w  ; SMC +2 select; silence
-        move.w  #0,$136.w               ; SMC +10: the loud half is next
+        move.w  #$2500,sr
+        move.w  #0,$136.w               ; SMC +14: the loud half is next
         move.b  #$DF,$FFFFFA0F.w
         rte
 
@@ -889,6 +890,7 @@ yx6_sidA_off:
 ; that restart at the timer's rate is the whole effect.
 yx6_buzzA:
         move.l  #$0D000000,$FFFF8800.w  ; SMC +4: the shape
+        move.w  #$2500,sr
         move.b  #$DF,$FFFFFA0F.w
         rte
 
@@ -898,8 +900,9 @@ yx6_drumD:
         move.b  #8,$FFFF8800.w
         move.b  $12345678,$FFFF8802.w
         bmi.s   .ended
-        .if YX6_SUPER_HOST
-        move    a0,usp
+        move.w  #$2500,sr               ; Timer A may nest from here on, and
+        .if YX6_SUPER_HOST              ; never parks the USP itself - so
+        move    a0,usp                  ; this side may
         .else
         move.l  a0,-(sp)
         .endif
@@ -915,6 +918,7 @@ yx6_drumD:
 .ended:
         move.b  #$D,$FFFF8802.w
         andi.b  #$F0,$FFFFFA1D.w
+        move.w  #$2500,sr
         .if YX6_SUPER_HOST
         move    a0,usp
         .else
@@ -934,17 +938,20 @@ yx6_parkD:
 
 yx6_sidD_on:
         move.l  #$08000F00,$FFFF8800.w
+        move.w  #$2500,sr
         move.w  #0,$112.w
         move.b  #$EF,$FFFFFA11.w
         rte
 yx6_sidD_off:
         move.l  #$08000000,$FFFF8800.w
+        move.w  #$2500,sr
         move.w  #0,$112.w
         move.b  #$EF,$FFFFFA11.w
         rte
 
 yx6_buzzD:
         move.l  #$0D000000,$FFFF8800.w
+        move.w  #$2500,sr
         move.b  #$EF,$FFFFFA11.w
         rte
 
@@ -961,10 +968,10 @@ ISR_CLEAR       equ     (yx6_drumA_clear-yx6_drumA)+3
 ISR_SIDON       equ     yx6_sidA_on-yx6_drumA
 ISR_SIDON_SEL   equ     ISR_SIDON+2
 ISR_SID_VOL     equ     ISR_SIDON+4
-ISR_SIDON_NEXT  equ     ISR_SIDON+10
+ISR_SIDON_NEXT  equ     ISR_SIDON+14
 ISR_SIDOFF      equ     yx6_sidA_off-yx6_drumA
 ISR_SIDOFF_SEL  equ     ISR_SIDOFF+2
-ISR_SIDOFF_NEXT equ     ISR_SIDOFF+10
+ISR_SIDOFF_NEXT equ     ISR_SIDOFF+14
 ISR_BUZZ        equ     yx6_buzzA-yx6_drumA
 ISR_BUZZ_SHAPE  equ     ISR_BUZZ+4
 
@@ -1025,14 +1032,14 @@ yx6_slot:
         lsr.b   #4,d5
         and.w   #3,d5
         subq.w  #1,d5                   ; the voice, 0..2
-        move.w  d5,d4
-        addq.w  #8,d4
-        mulu.w  YX6_N(a3),d4
-        move.l  d4,SD_PARM(a5)
+        move.w  d5,d2
+        addq.w  #8,d2
+        mulu.w  YX6_N(a3),d2
+        move.l  d2,SD_PARM(a5)
         movea.l YX6_CURSOR(a3),a1
-        adda.l  d4,a1                   ; a1 = the slot's parameter byte
-        move.b  d0,d2
-        and.b   #$C0,d2
+        adda.l  d2,a1                   ; a1 = the slot's parameter byte
+        move.b  d0,d2                   ; (d4 still holds the OLD code, for
+        and.b   #$C0,d2                 ; the retune test below)
         beq.s   .sid
         cmp.b   #$40,d2
         beq.s   .drum
@@ -1047,14 +1054,24 @@ yx6_slot:
 ; SID stays un-armed and the cleared last-code makes every following frame
 ; retry, so it comes back by itself the frame after the drum ends. That is
 ; the reference player's priority, where the drum overrides the volume.
-        moveq   #1,d4
-        lsl.b   d5,d4
-        and.b   yx6_drums(pc),d4
+        moveq   #1,d2                   ; (d4 still holds the OLD code)
+        lsl.b   d5,d2
+        and.b   yx6_drums(pc),d2
         beq.s   .sid_free
         clr.b   (a5)
         rts
 .sid_free:
-        move.w  d5,d4                   ; the SID start: the voice's volume
+; A code that differs from the old one ONLY in its prescaler is the same
+; SID sliding across a prescaler boundary - real tunes wobble across one
+; many times a second. The reference player free-runs the square's phase
+; through frequency changes, so keep the installed half: retune the timer
+; without touching the vector. A full restart here would reset the phase
+; to the loud half every flip - an audible ticking.
+        move.b  d0,d2
+        eor.b   d4,d2
+        and.b   #$F0,d2                 ; type and voice unchanged?
+        beq.s   .sid_retune
+        move.w  d5,d4                   ; a fresh SID: the voice's volume
         addq.w  #8,d4                   ; register into both halves' selects
         movea.l SD_ISR(a5),a0
         move.b  d4,ISR_SIDON_SEL(a0)
@@ -1063,6 +1080,14 @@ yx6_slot:
         and.b   #15,d4
         move.b  d4,ISR_SID_VOL(a0)      ; the loud half's volume
         lea     ISR_SIDON(a0),a0
+        bra.s   .armed
+.sid_retune:
+        move.b  (a1),d4                 ; the volume still tracks the ring
+        and.b   #15,d4
+        movea.l SD_ISR(a5),a0
+        move.b  d4,ISR_SID_VOL(a0)
+        movea.w SD_VEC(a5),a0           ; keep whichever half is installed:
+        movea.l (a0),a0                 ; .armed writes the same value back
         bra.s   .armed
 .drum:
         bsr     yx6_drum_start

@@ -24,13 +24,17 @@ other player including the format author's.
 
 **Unit sizes.** `yx6 -kK` (and `play.sh -kK`) packs the register sections at
 ST4 units of 1, 2 or 4 bytes: wider units hand the decoder half or a quarter
-as many units per refill, at some ratio cost. The default is 2 where the
-tune's shape allows it and 1 otherwise - measured on a real tune, 2 buys most
-of 4's speed for a fraction of its size cost. The tune length, the loop frame and C must be
-whole units — a padded section would decode one extra value into the ring, and
-it would be played — and the packer refuses anything else. The player is built
-for one unit size and checks every section's ST4 signature against it at init;
-`mkprg.sh` reads the unit out of the file's first section automatically.
+as many units per refill, at some ratio cost. The default is 2 - measured on
+a real tune, 2 buys most of 4's speed for a fraction of its size cost. The
+tune length, the loop frame and C must be whole units — a padded section
+would decode one extra value into the ring, and it would be played — so a
+tune with an odd length or loop frame is PADDED to the shape: the packer
+duplicates a frame that neither writes R13 nor triggers a drum, which holds
+the chip state one inaudible tick longer, and says what it did. Only when no
+safe frame exists near a boundary does it fall back to `-k1`. The player is
+built for one unit size and checks every section's ST4 signature against it
+at init; `mkprg.sh` reads the unit out of the file's first section
+automatically.
 
 ## Test driving one
 
