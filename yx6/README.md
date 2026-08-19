@@ -239,6 +239,7 @@ at PSG-ready volume bytes, each sample closed by a byte with bit 7 set.
 ```sh
 mvn test                                  # the packer: format, effects, shapes
 python3 yx6/test/emu/test_yx6.py          # the player, against the YM data
+python3 yx6/test/sweep.py songs/*.ym      # a whole collection, differentially
 HATARI=... TOS=... yx6/test/run.sh        # the player, on emulated hardware
 ```
 
@@ -258,6 +259,13 @@ and release, a drum pair naming two samples on back-to-back frames, a drum
 seizing a SID's voice, the sync-buzzer, the sanitized burst and the forced
 mixer, and the ring getting every borrowed byte back - plus each tick handler
 run to its `rte`.
+
+[test/sweep.py](test/sweep.py) turns the same machinery on real tunes: it
+packs each one at k=1 and replays it under Unicorn, comparing every chip
+write against the YM data frame by frame - loop crossing included - one
+status line per tune. The whole 544-tune jatari collection verifies clean
+with it; the honest limits (effect-owned volume registers and R7 are
+excluded, long tunes play their first 1200 frames) are in its header.
 
 [test/run.sh](test/run.sh) goes further than emulation can: it plays a looping
 tune on the emulated chip and **reads all fourteen registers back off the YM2149
