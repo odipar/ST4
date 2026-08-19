@@ -56,11 +56,11 @@ fi
 ring=$(( $(byte 16) * 256 + $(byte 17) ))   # header: N at 16, C at 18
 chunk=$(( $(byte 18) * 256 + $(byte 19) ))
 # The unit size lives in the sections' own ST4 signatures, not the yx6 header:
-# find the first section - intro table at 28, loop table at 84 for a tune that
+# find the first section - intro table at 34, loop table at 106 for a tune that
 # loops from frame 0 - and read the signature's fourth byte.
-first=$(( ($(byte 28) * 16777216) + ($(byte 29) * 65536)         + ($(byte 30) * 256) + $(byte 31) ))
+first=$(( ($(byte 34) * 16777216) + ($(byte 35) * 65536)         + ($(byte 36) * 256) + $(byte 37) ))
 if [ "$first" -eq 0 ]; then
-    first=$(( ($(byte 84) * 16777216) + ($(byte 85) * 65536)             + ($(byte 86) * 256) + $(byte 87) ))
+    first=$(( ($(byte 106) * 16777216) + ($(byte 107) * 65536)             + ($(byte 108) * 256) + $(byte 109) ))
 fi
 unit=$(byte $(( first + 3 )))
 # Big-endian by hand: od -tu4 would read it in the host's byte order.

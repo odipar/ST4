@@ -105,6 +105,8 @@ start:
         bsr     putdec
         bsr     crlf
 
+        lea     workspace,a0
+        bsr     YX6_stop                ; hand the MFP back before going again
         lea     song,a0
         lea     workspace,a1
         bsr     YX6_init
@@ -125,6 +127,7 @@ start:
         bsr     elapsed
         bsr     putdec
         bsr     crlf
+        lea     workspace,a0
         bsr     YX6_stop
 
         lea     m_done,a0

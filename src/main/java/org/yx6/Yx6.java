@@ -146,12 +146,31 @@ public final class Yx6 {
                 song.name().isBlank() ? "(untitled)" : song.name(),
                 song.author().isBlank() ? "" : " by " + song.author(),
                 song.interleaved() ? "" : " (de-interleaved)");
-        if (song.digidrums() > 0) {
-            System.out.printf("Warning: %d digidrum sample%s dropped; yx6 plays no effects%n",
-                    song.digidrums(), song.digidrums() == 1 ? "" : "s");
+        YmEffects.Extraction effects = result.effects();
+        if (effects.drums().length > 0) {
+            int bytes = 0;
+            for (byte[] drum : effects.drums()) {
+                bytes += drum.length + 1;
+            }
+            System.out.printf("%d digidrum%s, %d bytes%n", effects.drums().length,
+                    effects.drums().length == 1 ? "" : "s", bytes);
+        }
+        if (effects.sinus() > 0) {
+            System.out.printf("Warning: %d Sinus-SID frame%s dropped (unimplemented "
+                    + "everywhere, the reference player included)%n",
+                    effects.sinus(), effects.sinus() == 1 ? "" : "s");
+        }
+        if (effects.tooFast() > 0) {
+            System.out.printf("Warning: %d effect frame%s dropped: timer above %d Hz%n",
+                    effects.tooFast(), effects.tooFast() == 1 ? "" : "s",
+                    YmEffects.MAX_TIMER_HZ);
+        }
+        if (effects.missingDrum() > 0) {
+            System.out.printf("Warning: %d drum trigger%s dropped: no such sample%n",
+                    effects.missingDrum(), effects.missingDrum() == 1 ? "" : "s");
         }
 
-        int raw = song.frames() * Yx6Format.STREAMS;
+        int raw = song.frames() * Yx6Format.STREAMS;    // registers and effects alike
         System.out.printf("%d frames at %d Hz (%d:%02d), %d rings of %d bytes, %d per call%n",
                 song.frames(), song.playerHz(),
                 song.frames() / song.playerHz() / 60, song.frames() / song.playerHz() % 60,
@@ -162,8 +181,12 @@ public final class Yx6 {
                         : "Plays frames 0-" + (result.loopFrame() - 1)
                                 + ", then loops from frame " + result.loopFrame()
                 : "Plays once, then stops");
+        String[] effectNames = {"E1", "T1", "E2", "T2"};
         for (Yx6Encoder.Stream stream : result.streams()) {
-            System.out.printf("  R%-2d %-5s %6d -> %6d bytes (%5.1f%%)%n", stream.register(),
+            String name = stream.register() < Yx6Format.REGISTER_STREAMS
+                    ? String.format("R%-2d", stream.register())
+                    : effectNames[stream.register() - Yx6Format.REGISTER_STREAMS] + " ";
+            System.out.printf("  %s %-5s %6d -> %6d bytes (%5.1f%%)%n", name,
                     stream.loop() ? "loop" : "intro", stream.frames(), stream.packedSize(),
                     100.0 * stream.packedSize() / stream.frames());
         }

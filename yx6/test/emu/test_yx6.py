@@ -19,7 +19,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-from unicorn import Uc, UC_ARCH_M68K, UC_MODE_BIG_ENDIAN, UC_HOOK_MEM_WRITE
+from unicorn import Uc, UC_ARCH_M68K, UC_MODE_BIG_ENDIAN, UC_HOOK_MEM_WRITE, UcError
 from unicorn.m68k_const import (
     UC_CPU_M68K_M68000, UC_M68K_REG_A0, UC_M68K_REG_A1, UC_M68K_REG_A2,
     UC_M68K_REG_A3, UC_M68K_REG_A4, UC_M68K_REG_A5, UC_M68K_REG_A6,
@@ -50,6 +50,10 @@ STACK_TOP = 0x090000
 MAGIC = 0x0A0000
 PSG = 0xFFFF8800
 PSG_PAGE = 0xFFFF8000
+MFP_PAGE = 0xFFFFF000           # $FFFFFAxx: the effect stage's timers
+VECTORS = 0x000000              # $110/$134: the two timer vectors
+STREAMS = 18                    # what a v4 file carries
+YX6_FIXED = 96 + STREAMS * 64   # the workspace before the rings
 
 QUICK = '--quick' in sys.argv
 
@@ -138,7 +142,8 @@ class Player:
         self.uc.ctl_set_cpu_model(UC_CPU_M68K_M68000)
         for base, size in ((CODE, 0x4000), (FILE, 0x30000), (WORK, 0x40000),
                            (STACK_TOP - 0x8000, 0x8000), (MAGIC, 0x1000),
-                           (PSG_PAGE, 0x1000)):
+                           (PSG_PAGE, 0x1000), (MFP_PAGE, 0x1000),
+                           (VECTORS, 0x1000)):
             self.uc.mem_map(base, size)
         self.binary, self.symbols = assemble(unit)
         self.uc.mem_write(CODE, self.binary)
@@ -150,12 +155,23 @@ class Player:
         self.uc.mem_write(self.file, packed)
         self.uc.mem_write(self.work, b'\xA5' * workspace_size)
         self.writes = []
+        self.mfp = []                   # (address, value) writes to the MFP
         self.stray = []
         self.uc.hook_add(UC_HOOK_MEM_WRITE, self._watch)
 
     def _watch(self, uc, access, address, size, value, data):
         if PSG_PAGE <= address < PSG_PAGE + 0x1000:
-            self.writes.append((address, value & 0xFF))
+            # A wide write lands one byte per bus lane: a move.l to $8800 is
+            # the select at $8800 and the data at $8802, exactly as the chip
+            # sees it; the odd lanes fall into shadow.
+            for i in range(size):
+                self.writes.append((address + i, (value >> (8 * (size - 1 - i))) & 0xFF))
+        elif MFP_PAGE <= address < MFP_PAGE + 0x1000:
+            self.mfp.append((address, value & 0xFF))
+        elif address < 0x1000:
+            pass                        # the timer vectors
+        elif CODE <= address < CODE + len(self.binary):
+            pass                        # the skeletons' self-modified operands
         elif not (self.work <= address and address + size <= self.work_end
                   or STACK_TOP - 0x8000 <= address < STACK_TOP):
             self.stray.append((address, size))
@@ -194,6 +210,7 @@ class Player:
     def frame(self):
         """Plays one frame; returns (result, [(register, value), ...])."""
         self.writes.clear()
+        self.mfp.clear()
         result = self.call('YX6_play', ((UC_M68K_REG_A0, self.work),))
         return result, self._decode_writes()
 
@@ -208,14 +225,15 @@ class Player:
                 if selected is None:
                     raise AssertionError('wrote a value before selecting a register')
                 pairs.append((selected, value))
+            elif address in (PSG + 1, PSG + 3):
+                pass                    # a wide write's shadow lanes
             else:
                 raise AssertionError(f'wrote to {address:#x}, not the sound chip')
         return pairs
 
 
 def workspace_size(ring: int) -> int:
-    fixed = 48 + gen_ym.PLAY_REGISTERS * 64          # YX6_FIXED
-    return fixed + gen_ym.PLAY_REGISTERS * ring
+    return YX6_FIXED + STREAMS * ring
 
 
 def apply_writes(state, writes):
@@ -292,33 +310,249 @@ def run_shape(frames: int, ring: int, chunk: int, label: str,
     return ''
 
 
+TACR, TADR = 0xFFFFFA19, 0xFFFFFA1F
+TCDCR, TDDR = 0xFFFFFA1D, 0xFFFFFA25
+
+
+def run_effects() -> str:
+    """The effect stage, frame by frame: a SID held and released on slot 1,
+    a drum started on slot 2 - checking the timer writes, the sanitized
+    burst, the forced mixer, and the drum skeleton by direct invocation."""
+    frames = 72
+    values = [bytearray(frames) for _ in range(16)]
+    for frame in range(frames):
+        values[7][frame] = 0x38                     # tone on, noise off
+        values[8][frame] = 10                       # steady volumes
+        values[9][frame] = 11
+        values[10][frame] = 12
+        values[13][frame] = gen_ym.NO_ENVELOPE_CHANGE
+    for frame in range(5, 21):                      # SID voice A on slot 1
+        values[1][frame] |= 0x10
+        values[6][frame] |= 1 << 5
+        values[14][frame] = 80 if frame >= 15 else 100
+    values[3][30] = 0x70                            # drum voice C on slot 2
+    values[8][30] |= 1 << 5                         # its prescaler rides R8
+    values[15][30] = 122                            # ...at 5036 Hz
+    # Real dumps trigger drums on back-to-back frames - an attack sample,
+    # then a body sample - so frame 31 codes the same drum again with a
+    # different number underneath: a held code must retrigger.
+    values[3][31] = 0x70
+    values[8][31] |= 1 << 5
+    values[15][31] = 122
+    # The ring-integrity trap: an 11-byte R10 pattern spanning the drum frame,
+    # repeated 30 frames later - the packer emits a match that copies the
+    # sanitized byte's ring position, so frame 60 only plays right if the
+    # effect stage gave the ring its byte back after the burst. Frame 30's
+    # value doubles as the drum number: sample 1.
+    pattern = [3, 4, 5, 6, 7, 1, 0, 6, 5, 4, 3]     # 31's byte doubles as the
+    for i, v in enumerate(pattern):                 # retrigger's number: 0
+        values[10][25 + i] = v
+        values[10][55 + i] = v
+    for frame in range(40, 43):                     # sync-buzzer voice B, 123 Hz
+        values[1][frame] = 0xE0
+        values[6][frame] |= 6 << 5
+        values[14][frame] = 200
+    # The arbitration scene: a SID runs on voice B from slot 2, and at frame
+    # 48 a drum fires on the SAME voice from slot 1. The drum must stop the
+    # SID's timer and own the volume register; the SID retries every frame
+    # while the voice stays flagged, silently.
+    for frame in range(45, 53):
+        values[3][frame] |= 0x20
+        values[8][frame] |= 1 << 5
+        values[15][frame] = 90
+    values[1][48] = 0x60
+    values[6][48] |= 1 << 5
+    values[14][48] = 60
+    values[9][48] = 0                               # its number: sample 0
+    drums = (bytes([0x80, 0x40]), bytes([0x10, 0xF0, 0x50]))
+
+    packed = pack(gen_ym.ym6_file(frames, values, drums=drums), 960, 24, 0, 1)
+    player = Player(packed, workspace_size(960))
+    if player.init() != 0:
+        return 'effects: YX6_init rejected the file'
+
+    code = CODE + player.symbols['yx6_drumD']
+    clear = CODE + player.symbols['yx6_drumD_clear']
+    flags = CODE + player.symbols['yx6_drums']
+    for frame in range(72):
+        _, writes = player.frame()
+        mfp = player.mfp
+        registers = dict(writes)
+        if frame == 5:                              # SID start: stop, count, run
+            if mfp != [(TACR, 0), (TADR, 100), (TACR, 1)]:
+                return f'effects: frame 5 programmed {mfp}'
+        elif 6 <= frame <= 20 and frame != 15:      # held, same count: silence -
+            if mfp:                                 # a redundant reload can land
+                return f'effects: frame {frame} wrote {mfp}'
+        elif frame == 15:                           # while the counter passes 01
+            if mfp != [(TADR, 80)]:                 # a changed count does reload
+                return f'effects: frame 15 wrote {mfp}'
+        elif frame == 21:                           # released: stopped
+            if mfp != [(TACR, 0)]:
+                return f'effects: frame 21 wrote {mfp}'
+        elif frame == 30:                           # the drum start, slot 2
+            if mfp != [(TCDCR, 0), (TDDR, 122), (TCDCR, 1)]:
+                return f'effects: frame 30 programmed {mfp}'
+            if registers.get(10) != 0:
+                return f'effects: frame 30 played volume {registers.get(10)}'
+            if registers.get(7) != 0x38 | 0xC0 | 0x24:
+                return f'effects: frame 30 mixer {registers.get(7):#x}'
+            position = int.from_bytes(player.uc.mem_read(code + 8, 4), 'big')
+            drum = int.from_bytes(player.uc.mem_read(
+                player.file + Yx6_DRUM_TABLE(player) + 6, 4), 'big')
+            if position != player.file + drum:
+                return 'effects: the skeleton points at the wrong sample'
+        elif frame == 31:                           # the same code again: a
+            if mfp != [(TCDCR, 0), (TDDR, 122), (TCDCR, 1)]:    # fresh trigger
+                return f'effects: frame 31 programmed {mfp}'
+            if registers.get(10) != 0:
+                return f'effects: frame 31 played volume {registers.get(10)}'
+            position = int.from_bytes(player.uc.mem_read(code + 8, 4), 'big')
+            drum = int.from_bytes(player.uc.mem_read(
+                player.file + Yx6_DRUM_TABLE(player), 4), 'big')
+            if position != player.file + drum:
+                return 'effects: the retrigger points at the wrong sample'
+        elif frame == 32:                           # the drum outlives its code
+            if mfp:
+                return f'effects: frame 32 wrote {mfp}'
+            if registers.get(7) != 0x38 | 0xC0 | 0x24:
+                return 'effects: frame 32 released the mixer too early'
+        elif frame == 40:                           # buzzer start on slot 1
+            if mfp != [(TACR, 0), (TADR, 200), (TACR, 6)]:
+                return f'effects: frame 40 programmed {mfp}'
+        elif frame in (41, 42):                     # held, same count: silence
+            if mfp:
+                return f'effects: frame {frame} wrote {mfp}'
+        elif frame == 43:
+            if mfp != [(TACR, 0)]:
+                return f'effects: frame 43 wrote {mfp}'
+        elif frame == 45:                           # the scene's SID, slot 2
+            if mfp != [(TCDCR, 0), (TDDR, 90), (TCDCR, 1)]:
+                return f'effects: frame 45 programmed {mfp}'
+        elif frame == 48:                           # the same-voice drum: stops
+            want = [(TCDCR, 0),                     # the SID's timer first,
+                    (TACR, 0), (TADR, 60), (TACR, 1)]   # then arms its own
+            if mfp != want:
+                return f'effects: frame 48 programmed {mfp}'
+            if registers.get(9) != 0:
+                return f'effects: frame 48 played volume {registers.get(9)}'
+            if registers.get(7) != 0x38 | 0xC0 | 0x24 | 0x12:
+                return f'effects: frame 48 mixer {registers.get(7):#x}'
+        elif mfp:
+            return f'effects: frame {frame} unexpectedly wrote {mfp}'
+        if frame == 60 and registers.get(10) != 1:
+            return (f'effects: frame 60 played {registers.get(10)} - the ring '
+                    'lost the byte the sanitize borrowed')
+
+    # The handlers themselves, tick by tick. The drum writes each sample byte
+    # to the drummed voice's volume register (voice C = R10); the marker tick
+    # writes the marker, parks the volume at $D, stops the timer and drops the
+    # flag. The retrigger left sample 0 armed: 0x80, 0x40 -> nibbles 8, 4.
+    if player.uc.mem_read(flags, 1)[0] != 4 | 2:
+        return 'effects: voices B and C should be flagged'
+    for tick, value in enumerate((8, 4)):
+        pairs = invoke_isr(player, code)
+        if pairs != [(10, value)]:
+            return f'effects: drum tick {tick} wrote {pairs}'
+    if player.uc.mem_read(flags, 1)[0] != 4 | 2:
+        return 'effects: the drum ended early'
+    pairs = invoke_isr(player, code)                # the marker tick
+    if pairs != [(10, 0x80), (10, 0x0D)]:
+        return f'effects: the marker tick wrote {pairs}'
+    if player.uc.mem_read(flags, 1)[0] != 2:
+        return 'effects: the marker did not drop the flag'
+    if player.mfp[-2:] != [(TCDCR, 0), (0xFFFFFA11, 0)]:
+        return f'effects: the marker tick programmed {player.mfp[-2:]}'
+
+    # The scene's drum on slot 1, the same way: sample 0 is 0x80, 0x40 ->
+    # nibbles 8, 4 on voice B's register, then its marker parks Timer A.
+    code = CODE + player.symbols['yx6_drumA']
+    for tick, value in enumerate((8, 4)):
+        pairs = invoke_isr(player, code)
+        if pairs != [(9, value)]:
+            return f'effects: slot 1 drum tick {tick} wrote {pairs}'
+    pairs = invoke_isr(player, code)
+    if pairs != [(9, 0x80), (9, 0x0D)]:
+        return f'effects: slot 1 marker tick wrote {pairs}'
+    if player.uc.mem_read(flags, 1)[0] != 0:
+        return 'effects: slot 1 marker did not drop the flag'
+    if player.mfp[-2:] != [(TACR, 0), (0xFFFFFA0F, 0)]:
+        return f'effects: slot 1 marker programmed {player.mfp[-2:]}'
+
+    # The SID square from frame 5's start: the loud half writes the volume
+    # and installs the quiet half one word into the vector, and back.
+    sid_on = CODE + player.symbols['yx6_sidA_on']
+    sid_off = CODE + player.symbols['yx6_sidA_off']
+    pairs = invoke_isr(player, sid_on)
+    vector = int.from_bytes(player.uc.mem_read(0x136, 2), 'big')
+    if pairs != [(8, 10)] or vector != (sid_off & 0xFFFF):
+        return f'effects: the loud half wrote {pairs}, vector {vector:#x}'
+    pairs = invoke_isr(player, sid_off)
+    vector = int.from_bytes(player.uc.mem_read(0x136, 2), 'big')
+    if pairs != [(8, 0)] or vector != (sid_on & 0xFFFF):
+        return f'effects: the quiet half wrote {pairs}, vector {vector:#x}'
+
+    # And the buzzer from frame 40: every tick rewrites the shape to R13.
+    pairs = invoke_isr(player, CODE + player.symbols['yx6_buzzA'])
+    if pairs != [(13, 11)]:
+        return f'effects: the buzzer tick wrote {pairs}'
+
+    # And the next frame plays a clean mixer again.
+    _, writes = player.frame()
+    if dict(writes).get(7) != 0x38 | 0xC0:
+        return 'effects: the mixer stayed forced after the drum'
+    return ''
+
+
+def Yx6_DRUM_TABLE(player) -> int:
+    """The drum table's offset, straight from the packed file's header."""
+    return int.from_bytes(player.uc.mem_read(player.file + 28, 4), 'big')
+
+
+def invoke_isr(player, address):
+    """Runs one tick handler to its rte, which this Unicorn build cannot
+    execute - reaching it is the completed tick. Returns the chip writes."""
+    stack = STACK_TOP - 512
+    player.writes.clear()
+    player.uc.reg_write(UC_M68K_REG_SR, 0x2600)
+    player.uc.reg_write(UC_M68K_REG_A7, stack)
+    try:
+        player.uc.emu_start(address, MAGIC, count=1_000)
+    except UcError:
+        pass
+    pc = player.uc.reg_read(UC_M68K_REG_PC)
+    if bytes(player.uc.mem_read(pc, 2)) != b'\x4e\x73':
+        raise AssertionError(f'the tick handler faulted at {pc:#x}')
+    return player._decode_writes()
+
+
 def main() -> int:
     # frames, ring, chunk, label, loop frame (None = play once), passes, unit
     shapes = [
-        (600, 1024, 16, 'default 1024/16', 0, 1),
-        (600, 1024, 16, 'plays once', None, 0),
-        (600, 1024, 16, 'loops from frame 397', 397, 2),
-        (600, 256, 16, 'small ring 256/16', 0, 1),
-        (600, 32, 16, 'two-group ring 32/16', 128, 1),
-        (600, 1024, 64, 'long calls 1024/64', 401, 1),
-        (600, 28, 14, 'tightest legal 28/14', 13, 1),
-        (37, 1024, 16, 'shorter than a ring', 5, 3),
-        (40, 1024, 16, 'loop shorter than a group', 35, 4),
-        (16, 1024, 16, 'exactly one group', 0, 2),
-        (9, 1024, 16, 'shorter than one group', 0, 3),
-        (1, 1024, 16, 'a single frame', 0, 5),
-        (1, 1024, 16, 'a single frame, once', None, 0),
+        (600, 960, 24, 'default 960/24', 0, 1),
+        (600, 960, 24, 'plays once', None, 0),
+        (600, 960, 24, 'loops from frame 397', 397, 2),
+        (600, 240, 24, 'small ring 240/24', 0, 1),
+        (600, 48, 24, 'two-group ring 48/24', 128, 1),
+        (600, 960, 64, 'long calls 960/64', 401, 1),
+        (600, 36, 18, 'tightest legal 36/18', 13, 1),
+        (37, 960, 24, 'shorter than a ring', 5, 3),
+        (40, 960, 24, 'loop shorter than a group', 35, 4),
+        (24, 960, 24, 'exactly one group', 0, 2),
+        (9, 960, 24, 'shorter than one group', 0, 3),
+        (1, 960, 24, 'a single frame', 0, 5),
+        (1, 960, 24, 'a single frame, once', None, 0),
         # Wider units: cheaper refills, and the packer's whole-unit rules for
         # the tune length, the loop frame and C must hold. The decoder is a
         # different build for each.
-        (600, 1024, 16, 'unit 2, loops at 398', 398, 2, 2),
-        (600, 1024, 16, 'unit 2, plays once', None, 0, 2),
-        (600, 1024, 16, 'unit 4, loops at 396', 396, 1, 4),
+        (600, 960, 24, 'unit 2, loops at 398', 398, 2, 2),
+        (600, 960, 24, 'unit 2, plays once', None, 0, 2),
+        (600, 960, 24, 'unit 4, loops at 396', 396, 1, 4),
     ]
     if not QUICK:
-        shapes.append((4000, 1024, 16, 'four thousand frames', 1234, 1))
+        shapes.append((4000, 960, 24, 'four thousand frames', 1234, 1))
         shapes.append((4000, 2048, 32, 'four thousand, 2048/32', 0, 1))
-        shapes.append((4000, 1024, 16, 'four thousand, unit 2', 1234, 1, 2))
+        shapes.append((4000, 960, 24, 'four thousand, unit 2', 1234, 1, 2))
         shapes.append((4000, 2048, 32, 'four thousand, unit 4', 0, 1, 4))
 
     failures = 0
@@ -332,6 +566,13 @@ def main() -> int:
         else:
             where = 'plays once' if loop is None else f'loops at {loop}'
             print(f'OK   {label:26s} ({frames} frames, {ring}-byte rings, {where})')
+
+    problem = run_effects()
+    if problem:
+        print(f'FAIL {problem}')
+        failures += 1
+    else:
+        print('OK   the effect stage         (timers, sanitize, mixer, skeleton)')
 
     print('ALL YX6 PLAYER TESTS PASS' if not failures else f'{failures} FAILURES')
     return 1 if failures else 0

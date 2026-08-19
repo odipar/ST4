@@ -23,8 +23,8 @@ REPO=$(cd "$YX6_DIR/.." && pwd)
 
 HATARI=${HATARI:-hatari}
 TOS=${TOS:-$HOME/hatari-2.6.1_macos/tos-2.06.rom}
-RING=1024
-CHUNK=16
+RING=960
+CHUNK=24
 UNIT=""
 LOOP=""
 
