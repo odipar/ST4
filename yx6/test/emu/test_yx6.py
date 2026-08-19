@@ -340,6 +340,14 @@ def run_effects(super_host: bool = False) -> str:
         values[1][frame] |= 0x10
         values[6][frame] |= 1 << 5
         values[14][frame] = 80 if frame >= 15 else 100
+    # The retune scene: the same SID slides across a prescaler boundary -
+    # E $11 to $12 at frame 25 - as wobbling basses do many times a second.
+    # The player must retune the timer WITHOUT resetting the square's phase:
+    # the vector keeps whichever half was installed.
+    for frame in range(22, 27):
+        values[1][frame] |= 0x10
+        values[6][frame] |= (1 if frame < 25 else 2) << 5
+        values[14][frame] = 90
     values[3][30] = 0x70                            # drum voice C on slot 2
     values[8][30] |= 1 << 5                         # its prescaler rides R8
     values[15][30] = 122                            # ...at 5036 Hz
@@ -395,8 +403,12 @@ def run_effects(super_host: bool = False) -> str:
     code = CODE + player.symbols['yx6_drumD']
     clear = CODE + player.symbols['yx6_drumD_clear']
     flags = CODE + player.symbols['yx6_drums']
+    sid_on = CODE + player.symbols['yx6_sidA_on']
+    sid_off = CODE + player.symbols['yx6_sidA_off']
     for frame in range(72):
-        _, writes = player.frame()
+        if frame == 25:                             # the square sits in its
+            invoke_isr(player, sid_on)              # quiet half when the
+        _, writes = player.frame()                  # prescaler flips
         mfp = player.mfp
         registers = dict(writes)
         if frame == 5:                              # SID start: stop, count, run
@@ -411,6 +423,25 @@ def run_effects(super_host: bool = False) -> str:
         elif frame == 21:                           # released: stopped
             if mfp != [(TACR, 0)]:
                 return f'effects: frame 21 wrote {mfp}'
+        elif frame == 22:                           # the scene's SID start
+            if mfp != [(TACR, 0), (TADR, 90), (TACR, 1)]:
+                return f'effects: frame 22 programmed {mfp}'
+        elif frame in (23, 24):                     # held, same count
+            if mfp:
+                return f'effects: frame {frame} wrote {mfp}'
+        elif frame == 25:                           # prescaler-only change:
+            if mfp != [(TACR, 0), (TADR, 90), (TACR, 2)]:   # full timer
+                return f'effects: frame 25 programmed {mfp}'    # reprogram...
+            vector = int.from_bytes(player.uc.mem_read(0x134, 4), 'big')
+            if vector != sid_off:                   # ...but the phase lives:
+                return ('effects: the retune reset the square to '
+                        f'{vector:#x}, not the installed quiet half')
+        elif frame == 26:
+            if mfp:
+                return f'effects: frame 26 wrote {mfp}'
+        elif frame == 27:                           # the scene's release
+            if mfp != [(TACR, 0)]:
+                return f'effects: frame 27 wrote {mfp}'
         elif frame == 30:                           # the drum start, slot 2
             if mfp != [(TCDCR, 0), (TDDR, 122), (TCDCR, 1)]:
                 return f'effects: frame 30 programmed {mfp}'

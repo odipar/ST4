@@ -7,6 +7,8 @@
 #   yx6/play.sh -l0 song.ym              # loop from the start, whatever the
 #                                        # YM header says
 #   yx6/play.sh -o song.ym               # play once and stop
+#   yx6/play.sh -min13 -sec52 song.ym    # trim: start deep in a long tune
+#   yx6/play.sh -startframe41403 -frames1729 song.ym
 #
 # Press SPACE in the Hatari window to stop; the program asks Hatari to quit on
 # its way out, so the script returns. Everything it builds lands in a work
@@ -27,9 +29,12 @@ RING=960
 CHUNK=24
 UNIT=""
 LOOP=""
+TRIM=""
 
 while [ $# -gt 0 ]; do
     case $1 in
+        -min*|-sec*|-startframe*|-endframe*|-frames*)
+              TRIM="$TRIM $1" ;;
         -n*)  RING=${1#-n} ;;
         -c*)  CHUNK=${1#-c} ;;
         -k*)  UNIT=${1#-k} ;;
@@ -71,7 +76,7 @@ fi
 
 echo "play.sh: packing $tune"
 java -ea -cp "$REPO/target/classes" org.yx6.Yx6 -f \
-     "-n$RING" "-c$CHUNK" ${UNIT:+-k$UNIT} $LOOP "$tune" "$work/$stem.yx6" \
+     "-n$RING" "-c$CHUNK" ${UNIT:+-k$UNIT} $LOOP $TRIM "$tune" "$work/$stem.yx6" \
     | grep -vE '^  R' || true                   # the per-register table is noise here
 
 "$YX6_DIR/mkprg.sh" -m "$work/$stem.yx6" "$work/PLAY.PRG"

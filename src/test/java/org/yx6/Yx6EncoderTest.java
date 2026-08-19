@@ -2,7 +2,11 @@ package org.yx6;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -145,6 +149,24 @@ final class Yx6EncoderTest {
         // The burst reads register k's ring through an assembled-in k*N
         // displacement: 13*N must fit a signed word, so N stops at 2520.
         assertThrows(IllegalArgumentException.class, () -> Yx6Encoder.encode(source, 2544, 24, false));
+    }
+
+    @Test
+    void padsOddShapesWithSafeDuplicateFrames() {
+        Ym6Reader.Song source = song(true);         // an even-shaped tune:
+        assertSame(source, Yx6.padToUnit(source, 200, 2));  // nothing to do
+
+        // An odd loop split: one duplicated frame evens it, and the whole
+        // tune grows by one more to keep the length even too.
+        Ym6Reader.Song padded = Yx6.padToUnit(source, 201, 2);
+        assertNotNull(padded);
+        assertEquals(source.frames() + 2, padded.frames());
+        assertEquals(202, padded.loopFrame());
+        // The intro gained a duplicate near the split: frame content around
+        // it is a copy, and everything before is untouched.
+        for (int r = 0; r < 14; r++) {
+            assertEquals(source.registers()[r][0], padded.registers()[r][0]);
+        }
     }
     @Test
     void widerUnitsRoundTripAndAreRejectedWhenTheyCannot() {
