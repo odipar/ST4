@@ -19,6 +19,7 @@ other player including the format author's.
 | [`org.yx6.Yx6`](../src/main/java/org/yx6/Yx6.java) | the packer: YM5!/YM6! in, `.yx6` out - one tune or a whole set |
 | [YX6.S](YX6.S) | the player library, 2,264 bytes plus ST4_wrap's 292 |
 | [YX6_sndh.S](YX6_sndh.S) + [mksndh.sh](mksndh.sh) | the canonical container: an SNDH v2.2 file, subtunes included |
+| [ym_sndh.sh](ym_sndh.sh) | `.ym` dumps straight to one SNDH, packer flags and all |
 | [YX6_player.S](YX6_player.S) + [mkprg.sh](mkprg.sh) | a thin TOS shell around those same SNDH bytes |
 | [play.sh](play.sh) | one command: pack a `.ym`, build it, play it under Hatari |
 
@@ -76,6 +77,7 @@ or more `.yx6` files:
 java ... org.yx6.Yx6 -f one.ym two.ym three.ym build/   # a set, one config
 yx6/mksndh.sh -t"My Set" myset.sndh build/*.yx6         # -> subtunes 1..3
 yx6/mkprg.sh MYSET.PRG build/*.yx6                      # the same, runnable
+yx6/ym_sndh.sh -t"My Set" myset.sndh one.ym two.ym      # both steps in one
 ```
 
 The SNDH glue is the polite host the player's assumption 5 describes: INIT
@@ -86,8 +88,15 @@ used, the USP is never touched, and INIT called twice without an EXIT
 cleans up after itself. The header carries `TC50` (play is driven at 50 Hz
 from whatever the host hangs on it), `FLAG ~ady`, and a `FRMS` table -
 looping tunes are marked endless, play-once tunes declare their frames -
-and the subtune names (the tunes' file stems), which is what a jukebox
-shows as its track list: SNDH's subtunes ARE its multi-song format.
+and the subtune names, which is what a jukebox shows as its track list:
+SNDH's subtunes ARE its multi-song format. Where the YM header carries
+metadata, [ym_sndh.sh](ym_sndh.sh) carries it across: each tune's YM name
+becomes its subtune name (the file stem when the dump says "unknown"), a
+shared YM author becomes the SNDH composer (COMM), the YM player rate
+becomes the TC tag (one rate per file, validated), a lone tune's name
+becomes the title and a set titles itself with its songs joined - unless
+-t says otherwise - and CONV records the provenance: converted from YM.
+YEAR has no YM source and is honestly absent.
 The file is raw and position independent; pack it with ICE 2.4 for the
 archive if you like, players unpack that themselves.
 
