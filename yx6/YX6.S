@@ -108,9 +108,16 @@
 ; mode - which a VBL handler already does. It masks interrupts around the
 ; fourteen writes, because selecting a register and writing it are two bus
 ; cycles and TOS's own handlers use the chip too. Its effect stage programs
-; the two timers YX6_init claimed, vectors included, and beyond those it
-; performs no side effect: no memory allocation, nothing outside the
-; workspace, the chip and the claimed timers.
+; the two timers YX6_init claimed, vectors included. Beyond the chip, those
+; timers and the workspace, the player writes only ITSELF: it is
+; self-modifying code. The slot descriptors and the tick handlers' operands
+; live in this blob, init patches the burst's ring displacements and the
+; run-time addresses into it, and the effect stage keeps patching as
+; effects come and go. Three consequences: the player must run from RAM;
+; one loaded copy is one player - two workspaces cannot share it; and it
+; must sit inside one 64K segment, because the SID tick swaps only the low
+; word of its vector. Every self-reference is pc-relative or patched at
+; run time, so the blob still loads anywhere.
 ;
 ; ASSUMPTIONS (unchecked beyond the magic, version and stream count):
 ;
@@ -278,8 +285,9 @@ YX6_ENVELOPE    equ     13
 
 ; -----------------------------------------------------------------------------
 ; YX6_init: a0 = .yx6 file, a1 = workspace. Sets up eighteen decoders, decodes
-; each stream's first group so frame 0 can be played immediately, and takes
-; over MFP Timers A and D for the effect slots.
+; each stream's first group so frame 0 can be played immediately, patches the
+; blob's run-time addresses and the burst's ring displacements, and claims
+; MFP Timers A and D for the effect slots - saving nothing, per assumption 5.
 ; -----------------------------------------------------------------------------
 YX6_init:
         movea.l a1,a3                   ; a3 is the workspace throughout
