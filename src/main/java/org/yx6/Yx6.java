@@ -18,7 +18,7 @@ public final class Yx6 {
     private Yx6() {}
 
     public static void main(String[] args) {
-        System.out.println("YX6: YM chiptune packer v0.6 by Robbert van Dalen, "
+        System.out.println("YX6: YM chiptune packer v0.7 by Robbert van Dalen, "
                 + "streaming ST4");
 
         int ringSize = Yx6Format.DEFAULT_RING_SIZE;

@@ -17,7 +17,7 @@ other player including the format author's.
 | Piece | What it is |
 |---|---|
 | [`org.yx6.Yx6`](../src/main/java/org/yx6/Yx6.java) | the packer: YM5!/YM6! in, `.yx6` out |
-| [YX6.S](YX6.S) | the player library, 1,972 bytes plus ST4_wrap's 292 |
+| [YX6.S](YX6.S) | the player library, 2,260 bytes plus ST4_wrap's 292 |
 | [YX6_player.S](YX6_player.S) | a VBL front end: a complete TOS program |
 | [mkprg.sh](mkprg.sh) | links the two around a song into a runnable `.PRG` |
 | [play.sh](play.sh) | one command: pack a `.ym`, build it, play it under Hatari |
