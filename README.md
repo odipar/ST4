@@ -184,13 +184,16 @@ dotnet run --project csharp/src/Nt4.Cli -- [-f] [-kK] [-mN] [-lN] input [output.
 ## YX6: the YM chiptune player
 
 [yx6/](yx6/README.md) puts the streaming decoders to work: a Java packer turns
-a YM6 chiptune dump into fourteen ST4 containers — one per YM2149 sound
-register, each a stream of that register's values — and an 888-byte 68000
-player decodes them through fourteen small rings with ST4_wrap, one refill per
-frame. On one measured tune that costs about 1,850 cycles a frame on real
-hardware. The packer picks k = 2 by itself when the tune's shape allows it: a
-few percent fewer cycles for a few percent more bytes. Loop points restart a
-register's stream mid-refill; YM6 effects are masked out at pack time.
+a YM chiptune dump — YM5 or YM6, LHA-archived or not — into eighteen ST4
+containers: one per YM2149 sound register, plus each effect slot's code and
+timer-count streams, with the digidrum samples appended as a table. A
+2,512-byte 68000 player decodes them through eighteen small rings with
+ST4_wrap, one refill per frame, and plays the effects — digidrums, SID
+voices, the sync-buzzer — on MFP Timers A and D. On one measured tune that
+costs about 2,050 cycles a frame on real hardware, effect stage included.
+The packer picks k = 2 by itself when the tune's shape allows it: a few
+percent fewer cycles for a few percent more bytes. Loop points restart a
+stream mid-refill.
 
 ```sh
 mvn -q compile exec:exec@yx6 -Dargs="-f song.ym song.yx6"
@@ -234,7 +237,9 @@ The ZX1 format and algorithm are by Einar Saukas. The ST4 format and additions
 are © 2026 Robbert van Dalen. Claude (Anthropic's Claude Code) wrote the Java
 and C# tools, the 68000 decoders, the YM player, the tests, and the
 optimization work, under Robbert's direction. ST4_wrap.S is based on
-ST1_wrap.S, which OpenAI Codex wrote for ST1.
+ST1_wrap.S, which OpenAI Codex wrote for ST1. The YM reader's `-lh5-`
+depacker is ported from Arnaud Carré's ST-Sound library, itself based on
+LZH code by Haruhiko Okumura and Kerwin F. Medina; see [LICENSE](LICENSE).
 
 Special thanks to Sandor Drieënhuizen and Wietze Spijkerman for their support,
 proofreading, and ideas.
