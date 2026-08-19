@@ -48,3 +48,8 @@ __pycache__/
 # .NET build output
 csharp/**/bin/
 csharp/**/obj/
+
+# the SNDH/PRG build scripts leave their scratch next to the output
+.sndh_work/
+.ym_work/
+.prg_work/
