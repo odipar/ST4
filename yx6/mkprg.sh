@@ -1,8 +1,11 @@
 #!/bin/sh
 # mkprg.sh - a runnable TOS program around one or more packed tunes.
 #
-#   yx6/mkprg.sh [-m] output.prg tune1.yx6 [tune2.yx6 ...]
+#   yx6/mkprg.sh [-m] [-perf] [-tTitle] [-cComposer] [-Nnamesfile] output.prg tunes...
 #   yx6/mkprg.sh [-m] tune.yx6 output.prg        # the old order still works
+#
+# -t, -c and -N flow into the embedded SNDH's tags (mksndh.sh has the
+# details); without them the title is the output's stem.
 #
 # The tunes are built into an SNDH container first (yx6/mksndh.sh - the
 # canonical form of the player) and the PRG is a thin shell around those
@@ -16,9 +19,20 @@ set -e
 YX6_DIR=$(cd "$(dirname "$0")" && pwd)
 
 MARKER=0
-case $1 in
-    -m) MARKER=1; shift ;;
-esac
+TITLE=""
+COMPOSER=""
+NAMES=""
+PERF=""
+while true; do
+    case $1 in
+        -m)  MARKER=1; shift ;;
+        -perf) PERF=-perf; shift ;;
+        -t*) TITLE=${1#-t}; shift ;;
+        -c*) COMPOSER=${1#-c}; shift ;;
+        -N*) NAMES=${1#-N}; shift ;;
+        *)   break ;;
+    esac
+done
 
 # both argument orders: the .prg names the output wherever it stands
 case $1 in
@@ -34,8 +48,9 @@ fi
 work=$(dirname "$output")/.prg_work
 mkdir -p "$work"
 
-title=$(basename "$output" | sed 's/\.[Pp][Rr][Gg]$//')
-sh "$YX6_DIR/mksndh.sh" -t"$title" "$work/tune.sndh" "$@"
+[ -n "$TITLE" ] || TITLE=$(basename "$output" | sed 's/\.[Pp][Rr][Gg]$//')
+sh "$YX6_DIR/mksndh.sh" $PERF -t"$TITLE" ${COMPOSER:+-c"$COMPOSER"} \
+   ${NAMES:+-N"$NAMES"} "$work/tune.sndh" "$@"
 
 # subtune count and the first tune's frame count (0 when it loops), for the
 # shell's key handling and play-once end detection

@@ -157,6 +157,28 @@
 YX6_SUPER_HOST  equ     0
         .endif
 
+; YX6_PERF equ 1 turns on the raster monitor: the frame's work paints the
+; background red for exactly as long as it runs (one scanline = 512 cycles),
+; each tick handler paints its own sliver - Timer A green, Timer D blue -
+; wherever the beam happens to be, and because slivers are hard to read, the
+; handlers also accumulate an estimated cost that the next frame burns off
+; as a solid yellow bar ahead of the red one: the timers' total, in
+; scanlines. The frame step waits for the display to start before it paints
+; anything - the VBL fires far above the visible screen, so an unsynced
+; monitor draws its bands into the top border where nothing can be seen -
+; and the wait is a constant, so nothing it measures is distorted. An
+; estimate - the quanta are ~10-cycle loop turns - and pure debug: with the
+; flag off (the default) not one cycle or byte remains.
+        .if ^^defined YX6_PERF
+        .else
+YX6_PERF        equ     0
+        .endif
+PERF_PAD        equ     YX6_PERF*10     ; the color prologue's bytes, sitting
+                                        ; ahead of every fixed patch offset
+PERF_SYNC       equ     8000            ; the sync loop's ceiling: a whole
+                                        ; frame's worth of turns, so a host
+                                        ; that calls from anywhere still runs
+
 YX6_STREAMS     equ     18              ; R0..R13, then E1 T1 E2 T2: the two
                                         ; effect slots' control and timer-count
                                         ; streams, decoded like any register
@@ -596,6 +618,27 @@ YX6_play:
 .frame:
         moveq   #0,d3
         move.w  YX6_N(a3),d3            ; one ring to the next
+        .if YX6_PERF
+        move.w  $FFFF8240.w,-(sp)       ; the raster monitor. The background
+        move.b  $FFFF8209.w,d0          ; goes on the stack first, before any
+        move.w  #PERF_SYNC,d1           ; tick can paint over it; then wait
+.perf_sync:                             ; for the beam. The VBL fires in the
+        cmp.b   $FFFF8209.w,d0          ; blanking, dozens of lines above the
+        dbne    d1,.perf_sync           ; screen, and only the video counter
+                                        ; knows when the display starts: it
+                                        ; moves when, and only when, the chip
+                                        ; is fetching pixels. Bounded, so a
+                                        ; host that plays mid-screen - or a
+                                        ; machine whose counter never moves -
+                                        ; gives up rather than hangs.
+        move.w  #$770,$FFFF8240.w       ; then the timers' bar, yellow...
+        lea     yx6_perf_acc(pc),a0
+        move.w  (a0),d0
+        clr.w   (a0)
+.perf_bar:
+        dbra    d0,.perf_bar
+        move.w  #$700,$FFFF8240.w       ; ...then this frame's work, red
+        .endif
 
 ; The effect stage, inlined: it runs BEFORE the burst so it may rewrite this
 ; frame's ring bytes. Each slot is gated on E | E-last: a slot that has, and
@@ -742,9 +785,15 @@ yx6_w13:
         tst.w   YX6_LOOPS(a3)
         beq.s   .played                 ; zero and no loop: the next call ends
         move.l  YX6_LOOPLEN(a3),YX6_LEFTFR(a3)
+        .if YX6_PERF
+        move.w  (sp)+,$FFFF8240.w
+        .endif
         moveq   #1,d0                   ; played, and wrapped to the loop point
         rts
 .played:
+        .if YX6_PERF
+        move.w  (sp)+,$FFFF8240.w
+        .endif
         moveq   #0,d0
         rts
 
@@ -837,7 +886,8 @@ yx6_desc2:
 ; the stack, so a parked USP survives. The drop must never come before
 ; the handler's LAST chip write: a nested tick re-selects the PSG.
 ;
-; The patch offsets are load-bearing:
+; The patch offsets are load-bearing (all fixed ones shift by PERF_PAD when
+; the raster monitor's color prologue sits at each block's top):
 ;   drum:  select immediate at +3, sample address at +8, flag mask at
 ;          _clear+3, the burst gate's address at _gate+4
 ;   sid:   select at +2 and volume at +4 inside the imm long; the partner's
@@ -849,14 +899,25 @@ yx6_desc2:
 ; The byte after the last has bit 7 set, so the same move answers "done": park
 ; the volume mid-scale against the click, stop the timer, drop the flag.
 yx6_drumA:
-        move.b  #8,$FFFF8800.w          ; SMC +3: select the drummed volume
-        move.b  $12345678,$FFFF8802.w   ; SMC +8: the next sample byte
+        .if YX6_PERF
+        move.w  $FFFF8240.w,-(sp)       ; Timer A works in green
+        move.w  #$070,$FFFF8240.w
+        .endif
+        move.b  #8,$FFFF8800.w          ; SMC PERF_PAD+3: select the volume
+        move.b  $12345678,$FFFF8802.w   ; SMC PERF_PAD+8: the next sample
         bmi.s   .ended
         move.w  #$2500,sr               ; pair done: the other timer may stack
         move.l  a0,-(sp)                ; the stack, never the USP: this side
-        lea     yx6_drumA+8(pc),a0      ; nests into parked windows
+        lea     yx6_drumA+8+PERF_PAD(pc),a0 ; nests into parked windows
         addq.l  #1,(a0)                 ; step the operand itself
+        .if YX6_PERF
+        lea     yx6_perf_acc(pc),a0
+        add.w   #21,(a0)                ; ~a drum tick, in 10-cycle quanta
+        .endif
         movea.l (sp)+,a0
+        .if YX6_PERF
+        move.w  (sp)+,$FFFF8240.w
+        .endif
         move.b  #$DF,$FFFFFA0F.w
         rte
 .ended:
@@ -869,7 +930,14 @@ yx6_drumA_clear:
         andi.b  #$FF,(a0)               ; SMC +3: drop the voice's drum flag
 yx6_drumA_gate:
         move.w  #2,$12345678            ; SMC +4: the voice's burst write
+        .if YX6_PERF
+        lea     yx6_perf_acc(pc),a0
+        add.w   #23,(a0)
+        .endif
         movea.l (sp)+,a0                ; comes back
+        .if YX6_PERF
+        move.w  (sp)+,$FFFF8240.w
+        .endif
 yx6_parkA:
         move.b  #$DF,$FFFFFA0F.w
         rte
@@ -879,29 +947,66 @@ yx6_parkA:
 ; vector. Select and data land in one move.l: the immediate's bytes hit
 ; $8800 (select) and $8802 (data) by bus layout.
 yx6_sidA_on:
-        move.l  #$08000F00,$FFFF8800.w  ; SMC +2 select, +4 volume
+        .if YX6_PERF
+        move.w  $FFFF8240.w,-(sp)
+        move.w  #$070,$FFFF8240.w
+        .endif
+        move.l  #$08000F00,$FFFF8800.w  ; SMC PERF_PAD+2 select, +4 volume
         move.w  #$2500,sr
-        move.l  #0,$134.w               ; SMC +14: the quiet half is next -
-        move.b  #$DF,$FFFFFA0F.w        ; the whole vector, so the blob may
-        rte                             ; straddle a 64K boundary
+        move.l  #0,$134.w               ; SMC PERF_PAD+14: the quiet half is
+        .if YX6_PERF                    ; next - the whole vector, so the
+        move.l  a0,-(sp)                ; blob may straddle a 64K boundary
+        lea     yx6_perf_acc(pc),a0
+        add.w   #15,(a0)                ; ~a SID half, in 10-cycle quanta
+        movea.l (sp)+,a0
+        move.w  (sp)+,$FFFF8240.w
+        .endif
+        move.b  #$DF,$FFFFFA0F.w
+        rte
 yx6_sidA_off:
-        move.l  #$08000000,$FFFF8800.w  ; SMC +2 select; silence
+        .if YX6_PERF
+        move.w  $FFFF8240.w,-(sp)
+        move.w  #$070,$FFFF8240.w
+        .endif
+        move.l  #$08000000,$FFFF8800.w  ; SMC PERF_PAD+2 select; silence
         move.w  #$2500,sr
-        move.l  #0,$134.w               ; SMC +14: the loud half is next
+        move.l  #0,$134.w               ; SMC PERF_PAD+14: the loud half next
+        .if YX6_PERF
+        move.l  a0,-(sp)
+        lea     yx6_perf_acc(pc),a0
+        add.w   #15,(a0)
+        movea.l (sp)+,a0
+        move.w  (sp)+,$FFFF8240.w
+        .endif
         move.b  #$DF,$FFFFFA0F.w
         rte
 
 ; The sync-buzzer tick: writing the shape to R13 restarts the envelope, and
 ; that restart at the timer's rate is the whole effect.
 yx6_buzzA:
-        move.l  #$0D000000,$FFFF8800.w  ; SMC +4: the shape
+        .if YX6_PERF
+        move.w  $FFFF8240.w,-(sp)
+        move.w  #$070,$FFFF8240.w
+        .endif
+        move.l  #$0D000000,$FFFF8800.w  ; SMC PERF_PAD+4: the shape
         move.w  #$2500,sr
+        .if YX6_PERF
+        move.l  a0,-(sp)
+        lea     yx6_perf_acc(pc),a0
+        add.w   #12,(a0)                ; ~a buzzer tick, in 10-cycle quanta
+        movea.l (sp)+,a0
+        move.w  (sp)+,$FFFF8240.w
+        .endif
         move.b  #$DF,$FFFFFA0F.w
         rte
 
 ; Slot 2's instances: Timer D's stop, vector and in-service bit, otherwise
 ; the A block byte for byte.
 yx6_drumD:
+        .if YX6_PERF
+        move.w  $FFFF8240.w,-(sp)       ; Timer D works in blue
+        move.w  #$007,$FFFF8240.w
+        .endif
         move.b  #8,$FFFF8800.w
         move.b  $12345678,$FFFF8802.w
         bmi.s   .ended
@@ -911,12 +1016,19 @@ yx6_drumD:
         .else
         move.l  a0,-(sp)
         .endif
-        lea     yx6_drumD+8(pc),a0
+        lea     yx6_drumD+8+PERF_PAD(pc),a0
         addq.l  #1,(a0)
+        .if YX6_PERF
+        lea     yx6_perf_acc(pc),a0
+        add.w   #21,(a0)
+        .endif
         .if YX6_SUPER_HOST
         move    usp,a0
         .else
         movea.l (sp)+,a0
+        .endif
+        .if YX6_PERF
+        move.w  (sp)+,$FFFF8240.w
         .endif
         move.b  #$EF,$FFFFFA11.w
         rte
@@ -934,54 +1046,98 @@ yx6_drumD_clear:
         andi.b  #$FF,(a0)
 yx6_drumD_gate:
         move.w  #2,$12345678
+        .if YX6_PERF
+        lea     yx6_perf_acc(pc),a0
+        add.w   #23,(a0)
+        .endif
         .if YX6_SUPER_HOST
         move    usp,a0
         .else
         movea.l (sp)+,a0
+        .endif
+        .if YX6_PERF
+        move.w  (sp)+,$FFFF8240.w
         .endif
 yx6_parkD:
         move.b  #$EF,$FFFFFA11.w
         rte
 
 yx6_sidD_on:
+        .if YX6_PERF
+        move.w  $FFFF8240.w,-(sp)
+        move.w  #$007,$FFFF8240.w
+        .endif
         move.l  #$08000F00,$FFFF8800.w
         move.w  #$2500,sr
         move.l  #0,$110.w
+        .if YX6_PERF
+        move.l  a0,-(sp)
+        lea     yx6_perf_acc(pc),a0
+        add.w   #15,(a0)
+        movea.l (sp)+,a0
+        move.w  (sp)+,$FFFF8240.w
+        .endif
         move.b  #$EF,$FFFFFA11.w
         rte
 yx6_sidD_off:
+        .if YX6_PERF
+        move.w  $FFFF8240.w,-(sp)
+        move.w  #$007,$FFFF8240.w
+        .endif
         move.l  #$08000000,$FFFF8800.w
         move.w  #$2500,sr
         move.l  #0,$110.w
+        .if YX6_PERF
+        move.l  a0,-(sp)
+        lea     yx6_perf_acc(pc),a0
+        add.w   #15,(a0)
+        movea.l (sp)+,a0
+        move.w  (sp)+,$FFFF8240.w
+        .endif
         move.b  #$EF,$FFFFFA11.w
         rte
 
 yx6_buzzD:
+        .if YX6_PERF
+        move.w  $FFFF8240.w,-(sp)
+        move.w  #$007,$FFFF8240.w
+        .endif
         move.l  #$0D000000,$FFFF8800.w
         move.w  #$2500,sr
+        .if YX6_PERF
+        move.l  a0,-(sp)
+        lea     yx6_perf_acc(pc),a0
+        add.w   #12,(a0)
+        movea.l (sp)+,a0
+        move.w  (sp)+,$FFFF8240.w
+        .endif
         move.b  #$EF,$FFFFFA11.w
         rte
 
 yx6_drums:
         dc.b    0                       ; voice bits 0-2: a drum is running
         even
+        .if YX6_PERF
+yx6_perf_acc:
+        dc.w    0                       ; the ticks' estimated cost since the
+        .endif                          ; last frame, in 10-cycle quanta
 
 ; Where the patched operands sit, measured on the A block; the D block is
 ; byte-congruent, so the same offsets serve both through SD_ISR.
 ; rmac evaluates left to right: the parentheses are load-bearing.
-ISR_DRUM_SEL    equ     3
-ISR_DRUM_PTR    equ     8
+ISR_DRUM_SEL    equ     PERF_PAD+3
+ISR_DRUM_PTR    equ     PERF_PAD+8
 ISR_CLEAR       equ     (yx6_drumA_clear-yx6_drumA)+3
 ISR_GATE        equ     (yx6_drumA_gate-yx6_drumA)+4
 ISR_SIDON       equ     yx6_sidA_on-yx6_drumA
-ISR_SIDON_SEL   equ     ISR_SIDON+2
-ISR_SID_VOL     equ     ISR_SIDON+4
-ISR_SIDON_NEXT  equ     ISR_SIDON+14
+ISR_SIDON_SEL   equ     ISR_SIDON+PERF_PAD+2
+ISR_SID_VOL     equ     ISR_SIDON+PERF_PAD+4
+ISR_SIDON_NEXT  equ     ISR_SIDON+PERF_PAD+14
 ISR_SIDOFF      equ     yx6_sidA_off-yx6_drumA
-ISR_SIDOFF_SEL  equ     ISR_SIDOFF+2
-ISR_SIDOFF_NEXT equ     ISR_SIDOFF+14
+ISR_SIDOFF_SEL  equ     ISR_SIDOFF+PERF_PAD+2
+ISR_SIDOFF_NEXT equ     ISR_SIDOFF+PERF_PAD+14
 ISR_BUZZ        equ     yx6_buzzA-yx6_drumA
-ISR_BUZZ_SHAPE  equ     ISR_BUZZ+4
+ISR_BUZZ_SHAPE  equ     ISR_BUZZ+PERF_PAD+4
 
 ; -----------------------------------------------------------------------------
 ; yx6_link, from YX6_init: the run-time addresses only a loaded player knows.

@@ -1,7 +1,11 @@
 #!/bin/sh
 # mksndh.sh - build an SNDH container around one or more .yx6 files.
 #
-#   yx6/mksndh.sh [-t"Title"] output.sndh tune1.yx6 [tune2.yx6 ...]
+#   yx6/mksndh.sh [-perf] [-t"Title"] [-c"Composer"] [-Nnamesfile] out.sndh tunes...
+#
+# -c fills the COMM (composer) tag; -N names the subtunes from a file, one
+# per line in tune order, instead of the file stems. -perf builds the raster
+# monitor in (YX6.S has the colors). Flags come first.
 #
 # The tunes become subtunes 1..N (SNDH '##' tag) and must be packed with one
 # configuration - same ring, chunk and unit - which `yx6 ... directory/` does
@@ -18,8 +22,10 @@ REPO=$(cd "$YX6_DIR/.." && pwd)
 TITLE=""
 COMPOSER=""
 NAMES=""
+PERF=0
 while true; do
     case $1 in
+        -perf) PERF=1; shift ;;
         -t*) TITLE=${1#-t}; shift ;;
         -c*) COMPOSER=${1#-c}; shift ;;
         -N*) NAMES=${1#-N}; shift ;;
@@ -105,6 +111,7 @@ nn=$(printf '%02d' "$n")
     printf 'ST4_UNIT    equ     %d\n' "$unit"
     printf 'RING_SIZE   equ     %d\n' "$ring"
     printf 'YX6_TUNES   equ     %d\n' "$n"
+    printf 'YX6_PERF    equ     %d\n' "$PERF"
     clean=$(echo "$TITLE" | tr -d '"' | tr -cd '[:print:]')
     printf '        dc.b    %s\n' "'TITL',\"$clean\",0"
     if [ -n "$COMPOSER" ]; then

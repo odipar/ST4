@@ -19,8 +19,10 @@ REPO=$(cd "$YX6_DIR/.." && pwd)
 
 TITLE=""
 FLAGS=""
+PERF=""
 while true; do
     case $1 in
+        -perf) PERF=-perf; shift ;;
         -t*) TITLE=$1; shift ;;
         -*)  FLAGS="$FLAGS $1"; shift ;;
         *)   break ;;
@@ -30,7 +32,7 @@ done
 output=$1
 shift
 if [ -z "$output" ] || [ $# -lt 1 ]; then
-    echo "usage: ym_sndh.sh [-tTitle] [packer flags] output.sndh tunes.ym..." >&2
+    echo "usage: ym_sndh.sh [-perf] [-tTitle] [packer flags] output.sndh tunes.ym..." >&2
     exit 1
 fi
 
@@ -95,5 +97,5 @@ else
     shift        # the leading empty field
 fi
 
-sh "$YX6_DIR/mksndh.sh" "$TITLE" ${COMPOSER:+-c"$COMPOSER"} \
+sh "$YX6_DIR/mksndh.sh" $PERF "$TITLE" ${COMPOSER:+-c"$COMPOSER"} \
    -N"$work/names.txt" "$output" "$@"
