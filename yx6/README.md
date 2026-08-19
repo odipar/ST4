@@ -17,7 +17,7 @@ other player including the format author's.
 | Piece | What it is |
 |---|---|
 | [`org.yx6.Yx6`](../src/main/java/org/yx6/Yx6.java) | the packer: YM5!/YM6! in, `.yx6` out |
-| [YX6.S](YX6.S) | the player library, 2,046 bytes plus ST4_wrap's 292 |
+| [YX6.S](YX6.S) | the player library, 1,914 bytes plus ST4_wrap's 292 |
 | [YX6_player.S](YX6_player.S) | a VBL front end: a complete TOS program |
 | [mkprg.sh](mkprg.sh) | links the two around a song into a runnable `.PRG` |
 | [play.sh](play.sh) | one command: pack a `.ym`, build it, play it under Hatari |
@@ -96,15 +96,19 @@ packs 188784 register bytes into 5064 (2.7%).
         lea     workspace,a0
         bsr     YX6_play                ; d0 = 0 played, 1 wrapped, -1 ended
         lea     workspace,a0
-        bsr     YX6_stop                ; chip quiet, timers handed back
+        bsr     YX6_stop                ; chip quiet, timers stopped
 ```
 
 `YX6_play` clobbers `d0`–`d5` and `a0`–`a5`, and leaves `d6`, `d7` and
 `a6` alone, the same promise ST4 makes - its decoder state spans `a4` and
-`a5`. `YX6_init` takes over MFP Timers A and D for the effect slots, saving
-everything `YX6_stop` hands back; Timer B stays free for rasters and Timer C
-stays the system's. Include both `YX6.S` and `ST4_wrap.S`, with
-`ST4_UNIT equ 1` first.
+`a5`. `YX6_init` claims MFP Timers A and D for the effect slots and
+`YX6_stop` quiesces them again; neither saves nor restores any machine
+state - that is the host's, and the player's header lists exactly what a
+polite host must keep (vectors, timer registers, the four enable/mask bits,
+the USP under `YX6_SUPER_HOST`), with [YX6_player.S](YX6_player.S) as the
+worked example. Timer B stays free for rasters and Timer C stays the
+system's. Include both `YX6.S` and `ST4_wrap.S`, with `ST4_UNIT equ 1`
+first.
 
 ### The schedule
 

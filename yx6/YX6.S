@@ -68,14 +68,14 @@
 ;       bsr     YX6_play                ; d0 = 0 played, 1 wrapped, -1 ended
 ;       ...
 ;       lea     workspace,a0
-;       bsr     YX6_stop                ; chip quiet, timers handed back
+;       bsr     YX6_stop                ; chip quiet, timers stopped
 ;
 ; The workspace holds the player's own fields, the eighteen decoder states and
 ; the eighteen rings, so its size depends on the ring size in the file:
 ;
-;   YX6_SIZE = YX6_FIXED + 18 * N       ; 1240 + 18 * N bytes
+;   YX6_SIZE = YX6_FIXED + 18 * N       ; 1222 + 18 * N bytes
 ;
-; For the default 960-byte rings that is 18520 bytes. A program that knows N
+; For the default 960-byte rings that is 18502 bytes. A program that knows N
 ; at build time can reserve it with
 ;
 ;       ds.b    YX6_FIXED+(YX6_STREAMS*960)
@@ -87,9 +87,10 @@
 ;   YX6_init   in   a0 = .yx6 file, at an even address, a1 = workspace
 ;              out  d0 = 0 accepted, -1 not a v4 yx6 file with 18 streams
 ;                        packed at this build's unit size
-;              Takes over MFP Timers A and D for the effect slots: vectors,
-;              control and data registers, enable and mask bits - all saved
-;              and restored by YX6_stop. Timer B stays free for rasters,
+;              Claims MFP Timers A and D for the effect slots: stops them,
+;              parks their vectors, drops stale pendings, enables and
+;              unmasks both. It saves NOTHING - the machine state is the
+;              host's, see assumption 5. Timer B stays free for rasters,
 ;              Timer C stays the system's. Pair every init with a stop
 ;   YX6_play   in   a0 = workspace
 ;              out  d0 = 0 played a frame
@@ -97,7 +98,9 @@
 ;                          next one is the loop frame L
 ;                   d0 = -1 the tune is over and nothing was written, which
 ;                          only a tune packed with -o can report
-;   YX6_stop   in   a0 = workspace: the MFP state to hand back
+;   YX6_stop   in   a0 = workspace
+;              Quiesces: stops both timers, disables their interrupts,
+;              drops pendings, silences the three voices. Restores nothing
 ;   CLOBBERED  d0-d5, a0-a5. d6, d7 and a6 survive, as with ST4 - whose
 ;              decoder state spans a4 and a5, which is why they no longer do.
 ;
@@ -121,16 +124,24 @@
 ;      is what keeps ST4_wrap's "never call the decoder again" rule intact
 ;   4. a looping tune plays for as long as you keep calling: d0 = 1 marks each
 ;      time round, and YX6_init is only needed to start again from frame 0
+;   5. the HOST owns the machine state - the player saves and restores none
+;      of it. A host that wants the machine back afterwards saves, around
+;      init..stop, exactly what the player touches: the vectors $134 and
+;      $110, TACR, TADR, TDDR, TCDCR's low (Timer D) nibble, bit 5 of IERA
+;      and IMRA, bit 4 of IERB and IMRB - and, built with YX6_SUPER_HOST,
+;      the USP, which the drum tick parks a0 in. A demo that has already
+;      taken the machine over saves nothing at all. YX6_player.S is the
+;      worked example of the polite version
 ; -----------------------------------------------------------------------------
 
 ; A host that never runs user-mode code while the player is live - a demo
 ; under its own takeover, say - may define YX6_SUPER_HOST equ 1 before
 ; including this file: the drum tick then parks a0 in the then-unused USP
 ; (4 cycles each way instead of 12 through the stack). The park restores a0
-; but not the USP, so YX6_init saves the USP and YX6_stop hands it back -
-; the host's only obligation is that nothing runs in user mode between the
-; two. Default off, because a program that hooks the VBL from user mode has
-; a live USP at every tick.
+; but not the USP: a host that ever returns to user mode must save its USP
+; before YX6_init and restore it after YX6_stop, with the rest of the
+; machine state assumption 5 lists. Default off, because a program that
+; hooks the VBL from user mode has a live USP at every tick.
         .if ^^defined YX6_SUPER_HOST
         .else
 YX6_SUPER_HOST  equ     0
@@ -161,29 +172,14 @@ YX6_INDEX       equ     42              ; word  stream index, during init only
 YX6_LOOPS       equ     44              ; word  nonzero when the tune loops
 YX6_EFXOFF      equ     46              ; long  14*N: the cursor's ring to E1's
 YX6_R7OFF       equ     50              ; long  7*N: the cursor's ring to R7's
-; The MFP state YX6_init takes over and YX6_stop hands back: both timer
-; vectors, both control registers, both data registers, and which of the four
-; enable/mask bits were set (bit 0 IERA5, 1 IMRA5, 2 IERB4, 3 IMRB4).
-YX6_OLDTA       equ     54              ; long  vector $134, Timer A
-YX6_OLDTD       equ     58              ; long  vector $110, Timer D
-YX6_OLDTACR     equ     62              ; byte
-YX6_OLDTCDCR    equ     63              ; byte
-YX6_OLDTADR     equ     64              ; byte
-YX6_OLDTDDR     equ     65              ; byte
-YX6_OLDMFP      equ     66              ; byte  the four enable/mask bits
 ; The sanitize log. The effect stage edits ring bytes so the burst plays a
 ; sanitized frame - but the ring is decode history, and a later match may
 ; copy from any byte of it. So every edit is recorded here and undone right
 ; after the burst: the chip sees the edit, the ring never keeps it.
-YX6_PATCHES     equ     67              ; byte  how many edits this frame, 0..3
-YX6_PATCH_VAL   equ     68              ; 3 bytes: the originals
-                                        ; (71 pads the longs below even)
-YX6_PATCH_ADDR  equ     72              ; 3 longs: where they go back
-YX6_OLDUSP      equ     84              ; long  the USP across the session: a
-                                        ; YX6_SUPER_HOST drum tick parks a0
-                                        ; there, so init borrows it and stop
-                                        ; hands it back - saved in every build
-YX6_STATE       equ     88              ; 18 decoder states, from an even base
+YX6_PATCHES     equ     54              ; byte  how many edits this frame, 0..3
+YX6_PATCH_VAL   equ     55              ; 3 bytes: the originals
+YX6_PATCH_ADDR  equ     58              ; 3 longs: where they go back
+YX6_STATE       equ     70              ; 18 decoder states, from an even base
 
 ; Each effect slot's own state - its code and count from last frame, its
 ; parameter ring offset, its timer and its handlers - lives in a descriptor
@@ -401,31 +397,12 @@ YX6_init:
         clr.b   (a0)
         bsr     yx6_link                ; descriptors: pointers and last codes
 
-; Take over Timers A and D: save everything YX6_stop must hand back, park our
-; handlers on the vectors, leave both timers stopped but enabled and unmasked.
-; bset/bclr only - Timer C's bits and the ACIA's live in the same registers.
+; Claim Timers A and D: park our handlers on the vectors and leave both
+; timers stopped but enabled and unmasked. Nothing is saved - the machine
+; state is the host's, see assumption 5 in the header. bset/bclr only:
+; Timer C's bits and the ACIA's live in the same registers.
         move.w  sr,-(sp)
         ori.w   #$0700,sr
-        move    usp,a0                  ; the drum tick may park a0 in it
-        move.l  a0,YX6_OLDUSP(a3)
-        move.l  $134.w,YX6_OLDTA(a3)
-        move.l  $110.w,YX6_OLDTD(a3)
-        move.b  $FFFFFA19.w,YX6_OLDTACR(a3)
-        move.b  $FFFFFA1D.w,YX6_OLDTCDCR(a3)
-        move.b  $FFFFFA1F.w,YX6_OLDTADR(a3)
-        move.b  $FFFFFA25.w,YX6_OLDTDDR(a3)
-        lea     yx6_mfpbits(pc),a0      ; which of the four enable/mask bits
-        moveq   #0,d0                   ; are set - the countdown numbers them
-        moveq   #3,d2                   ; so the encoding is unchanged:
-.mfpbit:                                ; bit 0 IERA5 .. bit 3 IMRB4
-        movea.w (a0)+,a1
-        move.w  (a0)+,d1
-        btst    d1,(a1)
-        beq.s   .mfpoff
-        bset    d2,d0
-.mfpoff:
-        dbra    d2,.mfpbit
-        move.b  d0,YX6_OLDMFP(a3)
         clr.b   $FFFFFA19.w             ; Timer A stopped
         andi.b  #$F0,$FFFFFA1D.w        ; Timer D stopped; Timer C untouched
         lea     yx6_parkA(pc),a0
@@ -729,44 +706,29 @@ YX6_play:
         rts
 
 ; -----------------------------------------------------------------------------
-; YX6_stop: a0 = workspace. Hands the MFP back exactly as YX6_init found it -
-; timers quiesced first, vectors, data, control and the four enable/mask bits
-; restored, pendings dropped - then silences the three voices. Tone and
-; envelope settings stay, and a fresh YX6_init starts the tune over.
+; YX6_stop: a0 = workspace. Quiesces what YX6_init claimed - both timers
+; stopped, their interrupts disabled and masked, pendings dropped - then
+; silences the three voices. It restores NOTHING: the host that saved the
+; machine state hands it back itself, after this returns. Tone and envelope
+; settings stay, and a fresh YX6_init starts the tune over.
 ; -----------------------------------------------------------------------------
 YX6_stop:
         movea.l a0,a3
         move.w  sr,-(sp)
         ori.w   #$0700,sr
-        clr.b   $FFFFFA19.w             ; quiesce before handing back
+        clr.b   $FFFFFA19.w             ; both timers stopped,
         andi.b  #$F0,$FFFFFA1D.w
-        move.l  YX6_OLDTA(a3),$134.w
-        move.l  YX6_OLDTD(a3),$110.w
-        move.b  YX6_OLDTADR(a3),$FFFFFA1F.w
-        move.b  YX6_OLDTDDR(a3),$FFFFFA25.w
-        move.b  YX6_OLDTACR(a3),$FFFFFA19.w
-        move.b  YX6_OLDTCDCR(a3),d0     ; only Timer D's nibble is ours
-        and.b   #$0F,d0
-        or.b    d0,$FFFFFA1D.w
-        movea.l YX6_OLDUSP(a3),a0       ; the USP, as init found it
-        move    a0,usp
-        move.b  YX6_OLDMFP(a3),d0       ; re-clear what init found clear,
-        lea     yx6_mfpbits(pc),a0      ; through the same table init read
-        moveq   #3,d2
-.mfpbit:
-        movea.w (a0)+,a1
-        move.w  (a0)+,d1
-        btst    d2,d0
-        bne.s   .mfpkeep
-        bclr    d1,(a1)
-.mfpkeep:
-        dbra    d2,.mfpbit
+        bclr    #5,$FFFFFA07.w          ; disabled and masked - the claim
+        bclr    #5,$FFFFFA13.w          ; handed back bit by bit
+        bclr    #4,$FFFFFA09.w
+        bclr    #4,$FFFFFA15.w
         bclr    #5,$FFFFFA0B.w          ; and no pending ticks of ours
         bclr    #4,$FFFFFA0D.w
         lea     yx6_drums(pc),a0
         clr.b   (a0)
 ; The silence stays inside the mask: selecting a register and writing it are
-; two bus cycles, and the system interrupts just handed back use the chip.
+; two bus cycles, and a polite host's system interrupts - about to get their
+; state back - use the chip too.
         lea     YX6_PSG,a0
         moveq   #8,d0                   ; R8, R9, R10 are the voice volumes
 .silence:
@@ -783,15 +745,6 @@ YX6_stop:
 ; follows is everything it drives: the two slot descriptors, the tick
 ; handlers, and the one slot machine that serves both timers.
 ; -----------------------------------------------------------------------------
-
-; The four enable/mask bits YX6_init borrows and YX6_stop hands back, as
-; {register, bit} rows. Walked with a 3..0 countdown, so the OLDMFP encoding
-; reads: bit 0 IERA5, bit 1 IMRA5, bit 2 IERB4, bit 3 IMRB4.
-yx6_mfpbits:
-        dc.w    $FA15,4                 ; IMRB, Timer D's mask
-        dc.w    $FA09,4                 ; IERB, its enable
-        dc.w    $FA13,5                 ; IMRA, Timer A's mask
-        dc.w    $FA07,5                 ; IERA, its enable
 
 ; The slot descriptors - see the SD_ equates. Slot 1 owns Timer A, slot 2
 ; Timer D, whose control nibble is shared with Timer C and only ever changed

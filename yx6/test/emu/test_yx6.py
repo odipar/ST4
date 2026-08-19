@@ -53,7 +53,7 @@ PSG_PAGE = 0xFFFF8000
 MFP_PAGE = 0xFFFFF000           # $FFFFFAxx: the effect stage's timers
 VECTORS = 0x000000              # $110/$134: the two timer vectors
 STREAMS = 18                    # what a v4 file carries
-YX6_FIXED = 88 + STREAMS * 64   # the workspace before the rings
+YX6_FIXED = 70 + STREAMS * 64   # the workspace before the rings
 
 QUICK = '--quick' in sys.argv
 
@@ -215,19 +215,6 @@ class Player:
 
     def stop(self):
         return self.call('YX6_stop', ((UC_M68K_REG_A0, self.work),))
-
-    def set_usp(self, value):
-        """Runs move a0,usp in supervisor mode: Unicorn has no USP register."""
-        self.uc.mem_write(MAGIC + 0x100, bytes.fromhex('4E60'))
-        self.uc.reg_write(UC_M68K_REG_SR, 0x2700)
-        self.uc.reg_write(UC_M68K_REG_A0, value)
-        self.uc.emu_start(MAGIC + 0x100, MAGIC + 0x102, count=1)
-
-    def usp(self):
-        self.uc.mem_write(MAGIC + 0x100, bytes.fromhex('4E68'))
-        self.uc.reg_write(UC_M68K_REG_SR, 0x2700)
-        self.uc.emu_start(MAGIC + 0x100, MAGIC + 0x102, count=1)
-        return self.uc.reg_read(UC_M68K_REG_A0)
 
     def frame(self):
         """Plays one frame; returns (result, [(register, value), ...])."""
@@ -391,9 +378,8 @@ def run_effects(super_host: bool = False) -> str:
 
     packed = pack(gen_ym.ym6_file(frames, values, drums=drums), 960, 24, 0, 1)
     player = Player(packed, workspace_size(960), super_host=super_host)
-    player.set_usp(0x00012345)          # a sentinel the session must not lose:
-    if player.init() != 0:              # the USP-parking drum tick clobbers
-        return 'effects: YX6_init rejected the file'    # it, stop hands it back
+    if player.init() != 0:
+        return 'effects: YX6_init rejected the file'
 
     # The two tick-handler blocks must be byte-congruent: the slot machine
     # reaches every patched operand through offsets measured on the A block.
@@ -537,11 +523,16 @@ def run_effects(super_host: bool = False) -> str:
     if dict(writes).get(7) != 0x38 | 0xC0:
         return 'effects: the mixer stayed forced after the drum'
 
-    # The drum ticks above parked a0 in the USP on the super-host build;
-    # YX6_stop must hand the USP back exactly as YX6_init found it.
+    # The library's stop contract: it quiesces its claim - timers stopped,
+    # their interrupt bits disabled and masked - and restores nothing; the
+    # host owns the machine state (YX6.S assumption 5).
     player.stop()
-    if player.usp() != 0x00012345:
-        return f'effects: the session lost the USP ({player.usp():#x})'
+    mfp = lambda a: player.uc.mem_read(a, 1)[0]
+    if mfp(0xFFFFFA19) & 0x0F or mfp(0xFFFFFA1D) & 0x0F:
+        return 'effects: stop left a timer running'
+    if mfp(0xFFFFFA07) & 0x20 or mfp(0xFFFFFA13) & 0x20 \
+            or mfp(0xFFFFFA09) & 0x10 or mfp(0xFFFFFA15) & 0x10:
+        return 'effects: stop left its claim enabled'
     return ''
 
 
