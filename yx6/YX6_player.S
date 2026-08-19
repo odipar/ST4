@@ -22,16 +22,16 @@
 ; -----------------------------------------------------------------------------
 
 GEMDOS      equ     1
-Cnecin      equ     8
 Fcreate     equ     $3C
 Fclose      equ     $3E
 Cconws      equ     9
-Cconis      equ     11
 Mshrink     equ     $4A
 XBIOS       equ     14
 Supexec     equ     38
 VBL_VECTOR  equ     $70
-SPACE       equ     32
+ACIA_CTRL   equ     $FFFFFC00       ; the keyboard ACIA, polled directly
+ACIA_DATA   equ     $FFFFFC02
+SPACE_MAKE  equ     $39             ; the space bar's make code
 
         .text
 
@@ -51,41 +51,23 @@ start:
 
         lea     m_banner,a0
         bsr     puts
+        lea     m_playing,a0                    ; printed while TOS still owns
+        bsr     puts                            ; the machine - see below
 
-        lea     song,a0                         ; the packed tune
-        lea     workspace,a1
-        bsr     YX6_init
-        tst.l   d0
-        beq.s   .accepted
-        lea     m_bad,a0
-        bsr     puts
-        bra     .quit
-.accepted:
-        move.l  #install,-(sp)                  ; the VBL vector is supervisor
-        move.w  #Supexec,-(sp)                  ; territory
-        trap    #XBIOS
-        addq.l  #6,sp
-
-        lea     m_playing,a0
-        bsr     puts
-.wait:
-        tst.w   finished                        ; the handler reports the end
-        bne.s   .stop
-        move.w  #Cconis,-(sp)                   ; a key waiting?
-        trap    #GEMDOS
-        addq.l  #2,sp
-        tst.w   d0
-        beq.s   .wait
-        move.w  #Cnecin,-(sp)                   ; read it without echoing
-        trap    #GEMDOS
-        addq.l  #2,sp
-        cmp.b   #SPACE,d0                       ; space stops; anything else
-        bne.s   .wait                           ; keeps it playing
-.stop:
-        move.l  #remove,-(sp)
+; From here to remove, the machine is ours alone. install silences every
+; interrupt TOS runs - the 200 Hz tick, the keyboard, the lot - takes the VBL,
+; and only then initialises the player, whose YX6_init needs supervisor mode
+; anyway for the MFP timers it claims. TOS never touches the sound chip or a
+; timer while the tune plays, and space is read straight off the keyboard
+; ACIA. play holds the whole session; d0 comes back -1 for a bad file.
+        move.l  #play,-(sp)
         move.w  #Supexec,-(sp)
         trap    #XBIOS
         addq.l  #6,sp
+        tst.l   d0
+        beq.s   .quit
+        lea     m_bad,a0
+        bsr     puts
 
 .quit:
         lea     m_bye,a0
@@ -112,35 +94,96 @@ start:
         trap    #GEMDOS
 
 ; -----------------------------------------------------------------------------
-; The VBL handler runs in supervisor mode at 50 Hz, which is exactly what
-; YX6_play wants: one call per frame, in order, and never after it reports the
-; end. A looping tune never reports one - it returns 1 each time it goes round
-; and plays until the key press stops it.
+; play, under Supexec: the takeover, the whole playing session, and the
+; handback. Every MFP interrupt is disabled and its enable state saved - the
+; system tick, the keyboard, the disk, the serial port - so nothing but this
+; player touches the sound chip or a timer; YX6_init then enables exactly the
+; two timers the effects own. The VBL is ours alone, no chaining: TOS's VBL
+; work (the floppy deselect among it, a sound-chip access) stays silenced
+; with the rest. The space bar is read straight off the keyboard ACIA.
 ; -----------------------------------------------------------------------------
-install:
+play:
+        move.w  sr,-(sp)
+        move.w  #$2700,sr
+        move.b  $FFFFFA07.w,old_iera
+        move.b  $FFFFFA09.w,old_ierb
+        move.b  $FFFFFA13.w,old_imra
+        move.b  $FFFFFA15.w,old_imrb
+        clr.b   $FFFFFA07.w                     ; every MFP interrupt dead
+        clr.b   $FFFFFA09.w
+        clr.b   $FFFFFA13.w
+        clr.b   $FFFFFA15.w
+
+        lea     song,a0                         ; the packed tune; init claims
+        lea     workspace,a1                    ; Timers A and D on top of the
+        bsr     YX6_init                        ; silence just made
+        tst.l   d0
+        beq.s   .accepted
+        move.b  old_iera,$FFFFFA07.w            ; rejected: hand it all back
+        move.b  old_ierb,$FFFFFA09.w
+        move.b  old_imra,$FFFFFA13.w
+        move.b  old_imrb,$FFFFFA15.w
+        move.w  (sp)+,sr
+        moveq   #-1,d0
+        rts
+.accepted:
         move.l  VBL_VECTOR,old_vbl
         move.l  #handler,VBL_VECTOR
-        rts
+        move.w  #$2300,sr                       ; VBL and our timers, only
 
-remove:
+        clr.w   mouse_skip
+.wait:
+        tst.w   finished                        ; the handler reports the end
+        bne.s   .stop
+        btst    #0,ACIA_CTRL.w                  ; a byte from the keyboard?
+        beq.s   .wait
+        move.b  ACIA_DATA.w,d0
+        tst.w   mouse_skip                      ; inside a mouse packet: its
+        beq.s   .fresh                          ; delta bytes are not keys
+        subq.w  #1,mouse_skip
+        bra.s   .wait
+.fresh:
+        cmp.b   #$F8,d0                         ; $F8-$FB open a relative
+        bcs.s   .key                            ; mouse packet of two deltas
+        cmp.b   #$FC,d0
+        bcc.s   .key
+        move.w  #2,mouse_skip
+        bra.s   .wait
+.key:
+        cmp.b   #SPACE_MAKE,d0                  ; space stops; anything else
+        bne.s   .wait                           ; keeps it playing
+
+.stop:
+        move.w  #$2700,sr
+        lea     workspace,a0
+        bsr     YX6_stop                        ; chip quiet, timers handed back
         move.l  old_vbl,VBL_VECTOR
-        bsr     YX6_stop                        ; leave the chip quiet
+        move.b  old_iera,$FFFFFA07.w            ; and TOS's interrupts revived
+        move.b  old_ierb,$FFFFFA09.w
+        move.b  old_imra,$FFFFFA13.w
+        move.b  old_imrb,$FFFFFA15.w
+        move.w  (sp)+,sr
+        moveq   #0,d0
         rts
 
+; The VBL handler runs in supervisor mode at 50 Hz, which is exactly what
+; YX6_play wants: one call per frame, in order, and never after it reports
+; the end. A looping tune never reports one - it returns 1 each time round
+; and plays until the space bar stops it.
 handler:
         movem.l d0-d7/a0-a6,-(sp)
         tst.w   finished
-        bne.s   .chain
+        bne.s   .done
         lea     workspace,a0
         bsr     YX6_play
         tst.l   d0
-        bpl.s   .chain                          ; 0 played, 1 went round again
+        bpl.s   .done                           ; 0 played, 1 went round again
         move.w  #1,finished                     ; -1: a play-once tune ran out
+        lea     workspace,a0
         bsr     YX6_stop
-.chain:
+.done:
         movem.l (sp)+,d0-d7/a0-a6
-        move.l  old_vbl,-(sp)
-        rts                                     ; on to whoever was there
+        rte                                     ; ours alone: no TOS behind us
 
 puts:
         move.l  a0,-(sp)
@@ -159,7 +202,7 @@ m_playing:  dc.b    "Playing. Press SPACE to stop.",13,10,0
         .if YX6_EXIT_MARKER
 m_marker:   dc.b    "YX6DONE.MRK",0
         .endif
-m_bad:      dc.b    "Not a v2 yx6 file.",13,10,0
+m_bad:      dc.b    "Not a v4 yx6 file for this build.",13,10,0
 m_bye:      dc.b    "Done.",13,10,0
         even
 
@@ -167,6 +210,12 @@ m_bye:      dc.b    "Done.",13,10,0
         even
 old_vbl:    ds.l    1
 finished:   ds.w    1
+old_iera:   ds.b    1
+old_ierb:   ds.b    1
+old_imra:   ds.b    1
+old_imrb:   ds.b    1
+        even
+mouse_skip: ds.w    1
         even
 ; The parentheses matter: rmac evaluates expressions strictly left to right.
 workspace:  ds.b    YX6_FIXED+(YX6_STREAMS*RING_SIZE)

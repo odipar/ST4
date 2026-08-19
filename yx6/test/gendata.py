@@ -20,8 +20,8 @@ sys.path.insert(0, str(HERE))
 import gen_ym                                                       # noqa: E402
 
 FRAMES = 1500
-RING = 1024
-CHUNK = 16
+RING = 960
+CHUNK = 24
 LOOP = 601                  # deliberately not a multiple of CHUNK
 EXTRA = 200                 # frames played past the end, through the loop
 

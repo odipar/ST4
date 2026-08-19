@@ -1,13 +1,18 @@
 # YX6 — streaming YM chiptunes on a plain 68000
 
-YX6 is a MinYMiser-style player, now ST4-native: a YM tune packed as fourteen ST4
-streams, one per sound register, each decoded through its own small ring by
-[ST4_wrap.S](../68k/ST4_wrap.S). The music never exists in memory as a whole —
-only fourteen rings of a few hundred bytes, refilled one register per frame.
+YX6 is a MinYMiser-style player, now ST4-native: a YM tune packed as eighteen ST4
+streams — one per sound register, plus four effect streams — each decoded
+through its own small ring by [ST4_wrap.S](../68k/ST4_wrap.S). The music never
+exists in memory as a whole — only rings of a few hundred bytes, refilled one
+stream per frame.
 
 It grew inside the ST1 project and moved here with it; it plays the fourteen
-standard YM2149 registers and loops. The YM6 special effects (SID voice,
-digidrum, sinus-SID, sync-buzzer) are **not** played.
+standard YM2149 registers, loops, and plays the YM6 special effects: SID
+voice, digidrum and sync-buzzer run on MFP Timers A and D exactly as the
+original replay routines ran them, from effect streams the packer normalizes
+out of either YM dialect. [EFFECTS.md](EFFECTS.md) is the design; sinus-SID
+is the one effect deliberately left unplayed, in the good company of every
+other player including the format author's.
 
 | Piece | What it is |
 |---|---|
@@ -29,10 +34,10 @@ for one unit size and checks every section's ST4 signature against it at init;
 
 ## Test driving one
 
-Distributed `.ym` files are LHA archives; unpack one first. Then:
+Distributed `.ym` files are LHA archives; the packer unpacks them itself:
 
 ```sh
-yx6/play.sh song.ym                   # 1024-byte rings, 16 values per call
+yx6/play.sh song.ym                   # 960-byte rings, 24 values per call
 yx6/play.sh -n256 song.ym             # smaller rings: less RAM, worse ratio
 yx6/play.sh -n2048 -c32 song.ym       # longer calls: cheaper on average
 yx6/play.sh -o song.ym                # play once instead of looping
@@ -60,15 +65,16 @@ The packer's parameters are the ring size and the chunk size:
 
 ```
 yx6 [-f] [-o] [-nN] [-cC] [-lF] input.ym [output.yx6]
-  -nN   ring size per register, in bytes (default 1024)
-  -cC   values decoded per call, and the round-robin group size (default 16)
+  -nN   ring size per stream, in bytes (default 960)
+  -cC   values decoded per call, and the round-robin group size (default 24)
   -lF   loop from frame F, overriding the YM header
   -o    play once: pack no loop section
 ```
 
-`N` decides how much RAM the player needs (`14 × N`) and how far back the
-packer may reference, so it trades memory for compression. `C` must be at least
-14 — one refill slot per register — and must divide `N`, which is what lets the
+`N` decides how much RAM the player needs (`14 × N` today; `18 × N` once the
+effect engine decodes its streams) and how far back the packer may reference,
+so it trades memory for compression. `C` must be at least
+18 — one refill slot per stream — and must divide `N`, which is what lets the
 player use ST4_wrap rather than the bigger general ring decoder. The packer
 enforces both, packs every stream with `-mN` so no back-reference reaches
 outside the ring, and with `-l65535` so no operation outruns the 68000
@@ -177,21 +183,26 @@ Big-endian, fixed header, then the packed streams in register order:
 | offset | size | field |
 |---:|---:|---|
 | 0 | 4 | `'YX6!'` |
-| 4 | 2 | format version (2) |
+| 4 | 2 | format version (4) |
 | 6 | 2 | flags: bit 0 set when the tune loops |
 | 8 | 4 | `O`, the frame count |
 | 12 | 2 | player frequency in Hz |
-| 14 | 2 | `S`, the stream count (14) |
+| 14 | 2 | `S`, the stream count (18: R0..R13, then E1 T1 E2 T2) |
 | 16 | 2 | `N`, the ring size |
 | 18 | 2 | `C`, values per call |
 | 20 | 4 | `L`, the loop frame; equal to `O` when the tune plays once |
 | 24 | 4 | YM master clock (informational) |
-| 28 | 4·S | byte offset of each intro stream, covering frames `[0, L)` |
-| 84 | 4·S | byte offset of each loop stream, covering frames `[L, O)` |
-| 140 | … | the packed streams |
+| 28 | 4 | byte offset of the drum table; zero when there are no drums |
+| 32 | 2 | drum count |
+| 34 | 4·S | byte offset of each intro stream, covering frames `[0, L)` |
+| 106 | 4·S | byte offset of each loop stream, covering frames `[L, O)` |
+| 178 | … | the packed streams, then the drum table |
 
 Packed sizes are not stored: ST4 counts output units, not input bytes, so the
-player never needs them.
+player never needs them. An effect stream's E byte is the YM6 code nibble over
+the MFP prescaler (zero = idle) and its T byte the timer count, normalized
+from either YM dialect; the drum table is `{offset, length}` entries pointing
+at PSG-ready volume bytes, each sample closed by a byte with bit 7 set.
 
 ## Tests
 

@@ -11,8 +11,8 @@ import org.st4.Units;
 
 /**
  * Turns a parsed YM tune into a {@code .yx6} file: fourteen register vectors,
- * masked down to what a plain YM2149 sees, each packed as its own embedded ST4
- * container at unit size 1.
+ * masked down to what a plain YM2149 sees, plus the four effect streams and
+ * the drum table, each vector packed as its own embedded ST4 container.
  *
  * <p>Packing the registers separately is the whole point. A register's value
  * usually repeats from frame to frame, and a vector holds one register's values
@@ -37,12 +37,13 @@ import org.st4.Units;
  */
 public final class Yx6Encoder {
 
-    /** What packing one register vector produced. */
+    /** What packing one stream's vector produced; the first fourteen stream
+     * indices are registers, then E1, T1, E2, T2. */
     public record Stream(int register, boolean loop, int frames, int packedSize, int longestOp) {}
 
     /** The finished file plus the per-stream numbers the CLI reports. */
     public record Result(byte[] file, List<Stream> streams, int ringSize, int chunk,
-                         int loopFrame, boolean loops, int unit) {
+                         int loopFrame, boolean loops, int unit, YmEffects.Extraction effects) {
 
         public int packedSize() {
             return streams.stream().mapToInt(Stream::packedSize).sum();
@@ -121,20 +122,33 @@ public final class Yx6Encoder {
         // still applies above that.
         int offsetLimit = Math.min(ringSize / unit, St4Format.maxOffsetUnits(unit));
 
+        // The eighteen vectors: the masked registers, then the effect streams
+        // exactly as the player wants them - same length, same split, same
+        // rules, just different content.
+        YmEffects.Extraction effects = YmEffects.extract(song);
+        byte[][] vectors = new byte[Yx6Format.STREAMS][];
+        for (int register = 0; register < Yx6Format.REGISTER_STREAMS; register++) {
+            vectors[register] = Ym2149.mask(register, song.registers()[register]);
+        }
+        System.arraycopy(effects.streams(), 0, vectors,
+                Yx6Format.REGISTER_STREAMS, effects.streams().length);
+
         var streams = new ArrayList<Stream>(2 * Yx6Format.STREAMS);
         var intro = new byte[Yx6Format.STREAMS][];
         var loop = new byte[Yx6Format.STREAMS][];
-        for (int register = 0; register < Yx6Format.STREAMS; register++) {
-            byte[] values = Ym2149.mask(register, song.registers()[register]);
-            intro[register] = pack(streams, register, false, progress,
+        for (int stream = 0; stream < Yx6Format.STREAMS; stream++) {
+            byte[] values = vectors[stream];
+            intro[stream] = pack(streams, stream, false, progress,
                     Arrays.copyOfRange(values, 0, split), offsetLimit, unit);
-            loop[register] = pack(streams, register, true, progress,
+            loop[stream] = pack(streams, stream, true, progress,
                     loops ? Arrays.copyOfRange(values, split, values.length) : new byte[0],
                     offsetLimit, unit);
         }
 
-        byte[] file = build(song, ringSize, chunk, split, loops, intro, loop);
-        return new Result(file, List.copyOf(streams), ringSize, chunk, split, loops, unit);
+        byte[] file = build(song, ringSize, chunk, split, loops, intro, loop,
+                effects.drums());
+        return new Result(file, List.copyOf(streams), ringSize, chunk, split, loops, unit,
+                effects);
     }
 
     /**
@@ -158,7 +172,8 @@ public final class Yx6Encoder {
     }
 
     private static byte[] build(Ym6Reader.Song song, int ringSize, int chunk, int split,
-                                boolean loops, byte[][] intro, byte[][] loop) {
+                                boolean loops, byte[][] intro, byte[][] loop,
+                                byte[][] drums) {
         // Containers carry alignment promises of their own - stream A and D
         // are read a word at a time - so each is placed on a long boundary.
         int total = Yx6Format.HEADER_SIZE;
@@ -167,6 +182,13 @@ public final class Yx6Encoder {
         }
         for (byte[] container : loop) {
             total = align(total) + container.length;
+        }
+        int drumTable = drums.length == 0 ? 0 : align(total);
+        if (drums.length > 0) {
+            total = drumTable + Yx6Format.DRUM_ENTRY_SIZE * drums.length;
+            for (byte[] drum : drums) {
+                total += drum.length + 1;               // the end marker byte
+            }
         }
 
         byte[] file = new byte[align(total)];
@@ -180,10 +202,26 @@ public final class Yx6Encoder {
         putWord(file, Yx6Format.OFFSET_CHUNK, chunk);
         putLong(file, Yx6Format.OFFSET_LOOP_FRAME, split);
         putLong(file, Yx6Format.OFFSET_MASTER_CLOCK, song.masterClock());
+        putLong(file, Yx6Format.OFFSET_DRUM_TABLE, drumTable);
+        putWord(file, Yx6Format.OFFSET_DRUM_COUNT, drums.length);
 
         int at = Yx6Format.HEADER_SIZE;
         at = place(file, Yx6Format.OFFSET_INTRO_TABLE, intro, at);
-        place(file, Yx6Format.OFFSET_LOOP_TABLE, loop, at);
+        at = place(file, Yx6Format.OFFSET_LOOP_TABLE, loop, at);
+
+        // The drum table: entries first, then the samples, each closed by the
+        // end marker the drum interrupt routine stops on.
+        if (drums.length > 0) {
+            int sample = drumTable + Yx6Format.DRUM_ENTRY_SIZE * drums.length;
+            for (int i = 0; i < drums.length; i++) {
+                putLong(file, drumTable + Yx6Format.DRUM_ENTRY_SIZE * i, sample);
+                putWord(file, drumTable + Yx6Format.DRUM_ENTRY_SIZE * i + 4,
+                        drums[i].length);
+                System.arraycopy(drums[i], 0, file, sample, drums[i].length);
+                sample += drums[i].length;
+                file[sample++] = (byte) Yx6Format.DRUM_END_MARK;
+            }
+        }
         return file;
     }
 

@@ -13,17 +13,30 @@ import java.nio.charset.StandardCharsets;
  * the shape yx6 packs.
  *
  * <p>Distributed {@code .ym} files are usually LHA archives holding this data;
- * this reader wants the unpacked file and says so when it sees an archive.
+ * the reader unpacks them itself, through {@link Lha}.
  */
 public final class Ym6Reader {
 
     /** One parsed tune. {@code registers[r][frame]} is R{@code r}'s raw value. */
     public record Song(String format, int frames, int playerHz, long masterClock, long loopFrame,
-                       boolean interleaved, int digidrums, String name, String author,
-                       String comment, byte[][] registers) {
+                       boolean interleaved, long attributes, byte[][] drums, String name,
+                       String author, String comment, byte[][] registers) {
 
         /** Register count in the file: R0..R15, the last two being the I/O ports. */
         public static final int YM_REGISTERS = 16;
+
+        /** Attribute bit 2: drum samples hold 4-bit values, one per byte. */
+        public static final int A_DRUM4BITS = 4;
+
+        /** The digidrum samples exactly as stored: 8-bit unsigned by default,
+         * 4-bit values in bytes when {@link #A_DRUM4BITS} is set. */
+        public byte[][] drums() {
+            return drums;
+        }
+
+        public int digidrums() {
+            return drums.length;
+        }
     }
 
     /** Thrown for anything this reader will not accept, with a usable message. */
@@ -41,14 +54,18 @@ public final class Ym6Reader {
     }
 
     public static Song read(byte[] data) {
+        if (Lha.isArchive(data)) {
+            try {
+                data = Lha.unpack(data);
+            } catch (IllegalArgumentException e) {
+                throw new FormatException("cannot unpack this .ym's LHA wrapper: "
+                        + e.getMessage());
+            }
+        }
         return new Ym6Reader(data).run();
     }
 
     private Song run() {
-        if (data.length >= 7 && data[2] == '-' && data[3] == 'l' && data[4] == 'h') {
-            throw new FormatException("this is an LHA archive, the usual .ym wrapper; "
-                    + "unpack it first (for example: lha x song.ym)");
-        }
         String format = ascii(4);
         if (!format.equals("YM6!") && !format.equals("YM5!")) {
             throw new FormatException("not a YM5!/YM6! file (starts with \"" + format
@@ -68,9 +85,16 @@ public final class Ym6Reader {
         int additional = u16();
         skip(additional, "additional data");
 
+        byte[][] drums = new byte[digidrums][];
         for (int i = 0; i < digidrums; i++) {
             long size = u32();
-            skip((int) size, "digidrum " + i);
+            if (size < 0 || size > data.length - at) {
+                throw new FormatException("truncated file: digidrum " + i + " claims "
+                        + size + " bytes");
+            }
+            drums[i] = new byte[(int) size];
+            System.arraycopy(data, at, drums[i], 0, (int) size);
+            at += size;
         }
         String name = string();
         String author = string();
@@ -91,8 +115,8 @@ public final class Ym6Reader {
         if (at + 4 <= data.length && !ascii(4).equals("End!")) {
             System.err.println("Warning: no End! marker after the frames");
         }
-        return new Song(format, count, playerHz, masterClock, loopFrame, interleaved, digidrums,
-                name, author, comment, registers);
+        return new Song(format, count, playerHz, masterClock, loopFrame, interleaved,
+                attributes, drums, name, author, comment, registers);
     }
 
     private byte[][] readInterleaved(int frames) {

@@ -67,8 +67,10 @@ final class Ym6ReaderTest {
 
     @Test
     void namesTheProblemWithFilesItCannotRead() {
-        byte[] lha = "..-lh5-junk".getBytes(StandardCharsets.US_ASCII);
-        assertTrue(message(lha).contains("LHA archive"));
+        byte[] lha = new byte[24];                  // a damaged -lh5- archive:
+        lha[0] = 22;                                // plausible header size,
+        System.arraycopy("-lh5-".getBytes(StandardCharsets.US_ASCII), 0, lha, 2, 5);
+        assertTrue(message(lha).contains("LHA"));   // checksum cannot match
 
         byte[] ym3 = "YM3!and then some".getBytes(StandardCharsets.US_ASCII);
         assertTrue(message(ym3).contains("not a YM5!/YM6! file"));

@@ -5,8 +5,8 @@
 YX6_FRAMES  equ     1500
 YX6_PLAY    equ     1700
 YX6_WRAPS   equ     1
-RING_SIZE   equ     1024
-YX6_CHUNK   equ     16
+RING_SIZE   equ     960
+YX6_CHUNK   equ     24
 YX6_SUM     equ     $AF521284
 
         .data

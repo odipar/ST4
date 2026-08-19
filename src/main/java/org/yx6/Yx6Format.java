@@ -10,19 +10,33 @@ package org.yx6;
  *
  * <pre>
  *   0   4  'YX6!'
- *   4   2  format version (2)
+ *   4   2  format version (4)
  *   6   2  flags: bit 0 set when the tune loops
  *   8   4  O, the number of frames
  *  12   2  player frequency in Hz (50 for a standard ST tune)
- *  14   2  S, the stream count (14: R0..R13)
+ *  14   2  S, the stream count (18: R0..R13, then E1 T1 E2 T2)
  *  16   2  N, the ring size in bytes each stream decodes through
  *  18   2  C, the chunk size one ST4_resume call produces
  *  20   4  L, the loop frame; equal to O when the tune does not loop
  *  24   4  YM master clock in Hz, informational
- *  28   4*S  byte offset of each intro section, covering frames [0, L)
- *  84   4*S  byte offset of each loop section, covering frames [L, O)
- * 140   ...  the packed sections
+ *  28   4  byte offset of the drum table; zero when there are no drums
+ *  32   2  drum count
+ *  34   4*S  byte offset of each intro section, covering frames [0, L)
+ * 106   4*S  byte offset of each loop section, covering frames [L, O)
+ * 178   ...  the packed sections, then the drum table
  * </pre>
+ *
+ * <p>Streams 14-17 are the effect streams, one byte per frame like the
+ * registers: E holds an effect slot's control byte - the YM6 code nibble in
+ * bits 7-4 and the MFP timer prescaler in bits 2-0, zero when the slot is
+ * idle - and T its timer count. The packer normalizes YM5's different
+ * encoding, and every inert or unplayable code, into this one shape; see
+ * EFFECTS.md for the whole design.
+ *
+ * <p>The drum table is {@code count} entries of {byte offset (long), sample
+ * length (word)}, each offset pointing at PSG-ready volume bytes 0..15
+ * followed by one end marker with bit 7 set - the marker the drum interrupt
+ * routine stops on, so it needs no counter.
  *
  * <p>Each section is a complete, standard ST4 container - twenty-byte header,
  * then its four streams - packed at unit size 1, placed on a long boundary so
@@ -46,15 +60,24 @@ public final class Yx6Format {
     /** {@code 'YX6!'}, the first four bytes of every file. */
     public static final int MAGIC = 0x59583621;
 
-    /** The only version this release writes or reads: 3 moved the payload
-     * from ZX1 streams to embedded ST4 containers. */
-    public static final int VERSION = 3;
+    /** The only version this release writes or reads: 4 added the effect
+     * streams and the drum table. */
+    public static final int VERSION = 4;
 
     /** Flag bit 0: the tune loops back to {@code L} instead of ending. */
     public static final int FLAG_LOOPS = 1;
 
-    /** R0..R13: the YM2149 sound registers. R14/R15 are I/O ports, never played. */
-    public static final int STREAMS = 14;
+    /** R0..R13 plus E1/T1/E2/T2, the two YM6 effect slots. */
+    public static final int STREAMS = 18;
+
+    /** The first fourteen streams: the YM2149 sound registers. */
+    public static final int REGISTER_STREAMS = 14;
+
+    /** Stream indices of the effect streams. */
+    public static final int STREAM_E1 = 14;
+    public static final int STREAM_T1 = 15;
+    public static final int STREAM_E2 = 16;
+    public static final int STREAM_T2 = 17;
 
     public static final int OFFSET_MAGIC = 0;
     public static final int OFFSET_VERSION = 4;
@@ -66,20 +89,32 @@ public final class Yx6Format {
     public static final int OFFSET_CHUNK = 18;
     public static final int OFFSET_LOOP_FRAME = 20;
     public static final int OFFSET_MASTER_CLOCK = 24;
-    public static final int OFFSET_INTRO_TABLE = 28;
+    public static final int OFFSET_DRUM_TABLE = 28;
+    public static final int OFFSET_DRUM_COUNT = 32;
+    public static final int OFFSET_INTRO_TABLE = 34;
     public static final int OFFSET_LOOP_TABLE = OFFSET_INTRO_TABLE + 4 * STREAMS;
 
     public static final int HEADER_SIZE = OFFSET_LOOP_TABLE + 4 * STREAMS;
 
+    /** A drum table entry: a long offset and a word length. */
+    public static final int DRUM_ENTRY_SIZE = 6;
+
+    /** The byte after a drum's last sample value has this bit set; the drum
+     * interrupt routine's own move.b sees it as negative and stops. */
+    public static final int DRUM_END_MARK = 0x80;
+
+    /** The format's ceiling: a drum number is five bits. */
+    public static final int MAX_DRUMS = 32;
+
     /** Default ring size: the size the timings in the README are quoted for. */
-    public static final int DEFAULT_RING_SIZE = 1024;
+    public static final int DEFAULT_RING_SIZE = 960;
 
     /**
      * Default chunk size, and the group size the round-robin player is built
-     * around: one refill per VBL covers all {@value #STREAMS} registers within
-     * a 16-VBL cycle, with two VBLs to spare.
+     * around: one refill per VBL covers all {@value #STREAMS} streams within
+     * a 24-VBL cycle, with six VBLs to spare.
      */
-    public static final int DEFAULT_CHUNK = 16;
+    public static final int DEFAULT_CHUNK = 24;
 
     private Yx6Format() {}
 
