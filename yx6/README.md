@@ -172,13 +172,10 @@ never steps a pointer:
 ```
 
 That is also why `N` stops at 2520: `13*N` must fit the signed 16-bit
-displacement. (Writing two registers per interrupt with `movep.l` was measured
-and rejected: the values arrive one byte per ring, and packing them costs at
-least the cycles the trick saves. Storing the streams pre-packed for movep was
-measured too - ST4 stores literals raw, so the constant select bytes bloat the
-corpus by 25% - and packing the streams as ready-to-run 68000 code makes it
-worse: speedcode needs one joint stream, which can only match when every
-register's history repeats at once.)
+displacement. Faster forms - `movep`, streams pre-formatted for it, streams
+of ready-to-run 68000 code - were measured and declined; the numbers live in
+[doc/experiments](../doc/experiments/README.md), next to the register
+clustering experiment.
 
 Two registers are not written that way. R7 gets the ST's I/O port direction bits
 (`$C0`) back, because on an ST port A drives the floppy select lines. R13 is

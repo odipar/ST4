@@ -218,6 +218,12 @@ the real decoders, decode under emulation as a plain 68000, and check every
 output byte, exact consumption of all four streams, ring guard bands and the
 packed register metadata.
 
+## Experiments
+
+[doc/experiments/](doc/experiments/README.md) records ideas that were
+measured against the real corpus and declined, with the numbers — so a good
+idea that is not worth its complexity never has to be measured twice.
+
 ## ST1
 
 ST1 — the ZX1 decoders this grew from, and the jx1 packer — lives in
