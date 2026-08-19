@@ -18,6 +18,20 @@ public final class Yx6 {
     private Yx6() {}
 
     public static void main(String[] args) {
+        // -meta: the YM header's strings and rate, one per line, for the
+        // build scripts to carry into SNDH tags - no banner, no packing.
+        if (args.length == 2 && args[0].equals("-meta")) {
+            Ym6Reader.Song song;
+            try {
+                song = Ym6Reader.read(Files.readAllBytes(Path.of(args[1])));
+            } catch (IOException | Ym6Reader.FormatException e) {
+                throw error(args[1] + ": " + e.getMessage());
+            }
+            System.out.println(song.name().strip());
+            System.out.println(song.author().strip());
+            System.out.println(song.playerHz());
+            return;
+        }
         System.out.println("YX6: YM chiptune packer v0.7 by Robbert van Dalen, "
                 + "streaming ST4");
 

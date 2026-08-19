@@ -16,9 +16,16 @@ YX6_DIR=$(cd "$(dirname "$0")" && pwd)
 REPO=$(cd "$YX6_DIR/.." && pwd)
 
 TITLE=""
-case $1 in
-    -t*) TITLE=${1#-t}; shift ;;
-esac
+COMPOSER=""
+NAMES=""
+while true; do
+    case $1 in
+        -t*) TITLE=${1#-t}; shift ;;
+        -c*) COMPOSER=${1#-c}; shift ;;
+        -N*) NAMES=${1#-N}; shift ;;
+        *)   break ;;
+    esac
+done
 
 output=$1
 shift
@@ -44,7 +51,7 @@ field() {
 work=$(dirname "$output")/.sndh_work
 mkdir -p "$work"
 
-ring=""; chunk=""; unit=""
+ring=""; chunk=""; unit=""; hz=""
 frms=""
 n=0
 : > "$work/sndh_tunes.inc.tmp"
@@ -52,6 +59,7 @@ for tune in "$@"; do
     [ -f "$tune" ] || { echo "mksndh.sh: no such file: $tune" >&2; exit 1; }
     t_ring=$(field "$tune" 16 2)
     t_chunk=$(field "$tune" 18 2)
+    t_hz=$(field "$tune" 12 2)
     t_flags=$(field "$tune" 6 2)
     t_frames=$(field "$tune" 8 4)
     t_intro=$(field "$tune" 34 4)
@@ -60,7 +68,11 @@ for tune in "$@"; do
     [ "$section" -eq 0 ] && section=$t_loop0
     t_unit=$(field "$tune" $((section + 3)) 1)
     if [ -z "$ring" ]; then
-        ring=$t_ring; chunk=$t_chunk; unit=$t_unit
+        ring=$t_ring; chunk=$t_chunk; unit=$t_unit; hz=$t_hz
+    elif [ "$t_hz" != "$hz" ]; then
+        echo "mksndh.sh: $tune plays at $t_hz Hz, the set at $hz - one SNDH" \
+             "declares one rate" >&2
+        exit 1
     elif [ "$t_ring" != "$ring" ] || [ "$t_chunk" != "$chunk" ] || [ "$t_unit" != "$unit" ]; then
         echo "mksndh.sh: $tune is packed n$t_ring c$t_chunk k$t_unit, the set" \
              "started n$ring c$chunk k$unit - one player build needs one" \
@@ -71,7 +83,11 @@ for tune in "$@"; do
     # a looping tune is endless: FRMS 0; a play-once tune declares its frames
     if [ $((t_flags & 1)) -eq 1 ]; then frms="$frms,0"; else frms="$frms,$t_frames"; fi
     cp "$tune" "$work/tune$n.yx6"
-    basename "$tune" | sed 's/\.[Yy][Xx]6$//' >> "$work/names.tmp"
+    if [ -n "$NAMES" ]; then
+        sed -n "${n}p" "$NAMES" >> "$work/names.tmp"
+    else
+        basename "$tune" | sed 's/\.[Yy][Xx]6$//' >> "$work/names.tmp"
+    fi
     printf '        dc.l    sndh_tune%d-sndh_start\n' "$n" >> "$work/sndh_tunes.inc.tmp"
 done
 {
@@ -89,10 +105,15 @@ nn=$(printf '%02d' "$n")
     printf 'ST4_UNIT    equ     %d\n' "$unit"
     printf 'RING_SIZE   equ     %d\n' "$ring"
     printf 'YX6_TUNES   equ     %d\n' "$n"
-    printf "        dc.b    'TITL','%s',0\n" "$(echo "$TITLE" | sed "s/'/'\\\\''/g")"
-    printf "        dc.b    'CONV','YX6 (ZX1 through ST4)',0\n"
+    clean=$(echo "$TITLE" | tr -d '"' | tr -cd '[:print:]')
+    printf '        dc.b    %s\n' "'TITL',\"$clean\",0"
+    if [ -n "$COMPOSER" ]; then
+        clean=$(echo "$COMPOSER" | tr -d '"' | tr -cd '[:print:]')
+        printf '        dc.b    %s\n' "'COMM',\"$clean\",0"
+    fi
+    printf "        dc.b    'CONV','Converted from YM by YX6 (ZX1 through ST4)',0\n"
     printf "        dc.b    '##%s',0\n" "$nn"
-    printf "        dc.b    'TC50',0\n"
+    printf "        dc.b    'TC%d',0\n" "$hz"
     printf "        dc.b    'FLAG','~','ady',0\n"
     printf '        even\n'
     printf "        dc.b    'FRMS'\n"
@@ -110,8 +131,8 @@ nn=$(printf '%02d' "$n")
     done
     i=1
     while read name; do
-        printf "sndh_sn%d:\n        dc.b    '%s',0\n" "$i" \
-               "$(echo "$name" | sed "s/'/'\\\\''/g")"
+        clean=$(echo "$name" | tr -d '"' | tr -cd '[:print:]')
+        printf 'sndh_sn%d:\n        dc.b    "%s",0\n' "$i" "$clean"
         i=$((i + 1))
     done < "$work/names.tmp"
 } > "$work/sndh_tags.inc"
