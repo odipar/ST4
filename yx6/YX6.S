@@ -1,16 +1,18 @@
 ; -----------------------------------------------------------------------------
 ; YX6.S - streaming YM chiptune player for the plain 68000 (Atari ST)
 ;
-; By Robbert van Dalen. Plays a .yx6 file: fourteen YM2149 register streams,
-; each packed as its own embedded ST4 container and decoded through its own
-; small ring by ST4_wrap.S. Written by Claude (Anthropic's Claude Code) under
-; Robbert's direction, based on ZX1 v1.5 by Einar Saukas and inspired by Steve
-; Clarets' MinYMiser. Use it freely, including commercially, as long as your
-; documentation says you used ZX1 through ST4 (see LICENSE).
+; By Robbert van Dalen. Plays a .yx6 file: eighteen streams - the fourteen
+; YM2149 registers plus each effect slot's control byte and timer count -
+; every one packed as its own embedded ST4 container and decoded through its
+; own small ring by ST4_wrap.S. Written by Claude (Anthropic's Claude Code)
+; under Robbert's direction, based on ZX1 v1.5 by Einar Saukas and inspired
+; by Steve Clarets' MinYMiser. Use it freely, including commercially, as long
+; as your documentation says you used ZX1 through ST4 (see LICENSE).
 ;
-; It plays the fourteen standard sound registers, and loops. The YM6 special
-; effects - SID voice, digidrum, sinus-SID, sync-buzzer - are not played, and
-; the yx6 packer has already masked their bits out of the register values.
+; It plays the fourteen standard sound registers, loops, and plays the YM
+; special effects - digidrums, SID voices, the sync-buzzer - on MFP Timers
+; A and D. Sinus-SID, which no player has ever implemented, is dropped at
+; pack time. EFFECTS.md, next to this file, holds the design.
 ;
 ; REQUIRES ST4_wrap.S, built for the SAME unit size the tune was packed with
 ; (yx6 -kK; byte units unless the packer was told otherwise). Include both, in
@@ -25,16 +27,24 @@
 ; a different one is rejected, not garbled.
 ;
 ; -----------------------------------------------------------------------------
-; THE DESIGN, in one paragraph. A tune is O frames long. Each of the fourteen
-; registers gets its own ring of N bytes and its own saved decoder state, and
-; is decoded C values at a time (C = 16 by default). On every VBL the player
-; uses one value from each of the fourteen rings and refills exactly one
-; register - register k on the VBL where the frame number modulo C is k. With
-; C >= 14 every register is refilled once per C frames, one refill per VBL, so
-; the work per frame is flat: fourteen register writes plus one ST4_resume of
-; C bytes. Since C divides N and a call never reaches the ring end, ST4_wrap.S
-; is the decoder that fits: the player counts the calls itself and wraps the
-; write pointer when it lands on the ring end.
+; THE DESIGN, in one paragraph. A tune is O frames long. Each of the eighteen
+; streams gets its own ring of N bytes and its own saved decoder state, and
+; is decoded C values at a time (C = 24 by default). On every VBL the player
+; uses one value from each of the eighteen rings and refills exactly one
+; stream - stream k on the VBL where the frame number modulo C is k. With
+; C >= 18 every stream is refilled once per C frames, one refill per VBL, so
+; the work per frame is flat: the effect stage, fourteen register writes and
+; one ST4_resume of C bytes. Since C divides N and a call never reaches the
+; ring end, ST4_wrap.S is the decoder that fits: the player counts the calls
+; itself and wraps the write pointer when it lands on the ring end.
+;
+; EFFECTS. The last four rings carry each slot's effect code and timer count,
+; one value per frame like everything else. Before the burst the effect stage
+; pops them and programs Timers A and D, whose tick handlers - digidrum, SID
+; square, sync-buzzer - write the sound chip between frames. A drum start
+; also edits this frame's ring bytes (the sample number, the mixer); every
+; such edit is logged and undone right after the burst, because a ring is
+; decode history that later matches copy from.
 ;
 ; LOOPING. A packed stream can only be restarted from its beginning, so the packer
 ; splits every register at the loop frame L: an intro stream for frames [0, L)
@@ -57,7 +67,8 @@
 ;       lea     workspace,a0
 ;       bsr     YX6_play                ; d0 = 0 played, 1 wrapped, -1 ended
 ;       ...
-;       bsr     YX6_stop                ; silence the three voices
+;       lea     workspace,a0
+;       bsr     YX6_stop                ; chip quiet, timers handed back
 ;
 ; The workspace holds the player's own fields, the eighteen decoder states and
 ; the eighteen rings, so its size depends on the ring size in the file:
@@ -93,13 +104,14 @@
 ; YX6_play writes to the sound chip at $FFFF8800, so it must run in supervisor
 ; mode - which a VBL handler already does. It masks interrupts around the
 ; fourteen writes, because selecting a register and writing it are two bus
-; cycles and TOS's own handlers use the chip too. Beyond that it performs no
-; side effect: no interrupt setup, no memory allocation, nothing outside the
-; workspace.
+; cycles and TOS's own handlers use the chip too. Its effect stage programs
+; the two timers YX6_init claimed, vectors included, and beyond those it
+; performs no side effect: no memory allocation, nothing outside the
+; workspace, the chip and the claimed timers.
 ;
 ; ASSUMPTIONS (unchecked beyond the magic, version and stream count):
 ;
-;   1. the file comes from the yx6 packer, which enforces C >= 14, N mod C = 0,
+;   1. the file comes from the yx6 packer, which enforces C >= 18, N mod C = 0,
 ;      N >= 2C, offsets that stay inside the ring, and - at ST4_UNIT above 1 -
 ;      a tune length, loop frame and C that are whole units, so every budget
 ;      this player passes to the decoder divides cleanly
@@ -237,8 +249,9 @@ YX6_ENVELOPE    equ     13
                 bra.w   YX6_stop
 
 ; -----------------------------------------------------------------------------
-; YX6_init: a0 = .yx6 file, a1 = workspace. Sets up fourteen decoders and
-; decodes each register's first group, so frame 0 can be played immediately.
+; YX6_init: a0 = .yx6 file, a1 = workspace. Sets up eighteen decoders, decodes
+; each stream's first group so frame 0 can be played immediately, and takes
+; over MFP Timers A and D for the effect slots.
 ; -----------------------------------------------------------------------------
 YX6_init:
         movea.l a1,a3                   ; a3 is the workspace throughout
@@ -533,7 +546,8 @@ YX6_start_loop:
         rts
 
 ; -----------------------------------------------------------------------------
-; YX6_play: a0 = workspace. One frame: write fourteen registers, refill one.
+; YX6_play: a0 = workspace. One frame: run the effect stage, write fourteen
+; registers, undo the stage's ring edits, refill one stream.
 ; -----------------------------------------------------------------------------
 YX6_play:
         movea.l a0,a3
@@ -597,8 +611,8 @@ YX6_play:
         bne.s   .restore
 .pristine:
 
-; Refill the register whose turn it is. Slots 14..C-1 exist when C is larger
-; than the register count; they simply have nothing to do.
+; Refill the stream whose turn it is. Slots 18..C-1 exist when C is larger
+; than the stream count; they simply have nothing to do.
         move.w  YX6_SLOT(a3),d0
         cmp.w   #YX6_STREAMS,d0
         bcc.s   .advance
