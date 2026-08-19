@@ -393,6 +393,7 @@ def run_effects(super_host: bool = False) -> str:
     # reaches every patched operand through offsets measured on the A block.
     sym = player.symbols
     for a, d in (('yx6_drumA_clear', 'yx6_drumD_clear'),
+                 ('yx6_drumA_gate', 'yx6_drumD_gate'),
                  ('yx6_sidA_on', 'yx6_sidD_on'),
                  ('yx6_sidA_off', 'yx6_sidD_off'),
                  ('yx6_buzzA', 'yx6_buzzD'),
@@ -408,7 +409,11 @@ def run_effects(super_host: bool = False) -> str:
     for frame in range(72):
         if frame == 25:                             # the square sits in its
             invoke_isr(player, sid_on)              # quiet half when the
-        _, writes = player.frame()                  # prescaler flips
+        if frame == 35:                             # the drum plays out, tick
+            problem = drum_ticks(player, code, flags)   # by tick, mid-run:
+            if problem:                             # the marker drops the
+                return problem                      # flag and reopens the
+        _, writes = player.frame()                  # burst gate
         mfp = player.mfp
         registers = dict(writes)
         if frame == 5:                              # SID start: stop, count, run
@@ -450,8 +455,8 @@ def run_effects(super_host: bool = False) -> str:
         elif frame == 30:                           # the drum start, slot 2
             if mfp != [(TCDCR, 0), (TDDR, 122), (TCDCR, 1)]:
                 return f'effects: frame 30 programmed {mfp}'
-            if registers.get(10) != 0:
-                return f'effects: frame 30 played volume {registers.get(10)}'
+            if 10 in registers:                     # the drum owns R10 now:
+                return 'effects: frame 30 wrote the drummed volume'  # gated
             if registers.get(7) != 0x38 | 0xC0 | 0x24:
                 return f'effects: frame 30 mixer {registers.get(7):#x}'
             position = int.from_bytes(player.uc.mem_read(code + 8, 4), 'big')
@@ -462,8 +467,8 @@ def run_effects(super_host: bool = False) -> str:
         elif frame == 31:                           # the same code again: a
             if mfp != [(TCDCR, 0), (TDDR, 122), (TCDCR, 1)]:    # fresh trigger
                 return f'effects: frame 31 programmed {mfp}'
-            if registers.get(10) != 0:
-                return f'effects: frame 31 played volume {registers.get(10)}'
+            if 10 in registers:
+                return 'effects: frame 31 wrote the drummed volume'
             position = int.from_bytes(player.uc.mem_read(code + 8, 4), 'big')
             drum = int.from_bytes(player.uc.mem_read(
                 player.file + Yx6_DRUM_TABLE(player), 4), 'big')
@@ -474,6 +479,11 @@ def run_effects(super_host: bool = False) -> str:
                 return f'effects: frame 32 wrote {mfp}'
             if registers.get(7) != 0x38 | 0xC0 | 0x24:
                 return 'effects: frame 32 released the mixer too early'
+        elif frame == 36:                           # the marker ran at 35: the
+            if registers.get(7) != 0x38 | 0xC0:     # flag dropped, the mixer
+                return 'effects: frame 36 mixer still forced'   # is clean...
+            if 10 not in registers:                 # ...and the voice's burst
+                return 'effects: frame 36 kept the drum gate shut'  # is back
         elif frame == 40:                           # buzzer start on slot 1
             if mfp != [(TACR, 0), (TADR, 200), (TACR, 6)]:
                 return f'effects: frame 40 programmed {mfp}'
@@ -494,37 +504,20 @@ def run_effects(super_host: bool = False) -> str:
                     (TACR, 0), (TADR, 60), (TACR, 1)]   # then arms its own
             if mfp != want:
                 return f'effects: frame 48 programmed {mfp}'
-            if registers.get(9) != 0:               # the drum reopened the gate:
-                return f'effects: frame 48 played volume {registers.get(9)}'
-            if registers.get(7) != 0x38 | 0xC0 | 0x24 | 0x12:
-                return f'effects: frame 48 mixer {registers.get(7):#x}'
+            if 9 in registers:                      # the drum holds the gate:
+                return 'effects: frame 48 wrote the drummed volume'
+            if registers.get(7) != 0x38 | 0xC0 | 0x12:  # only voice B: C's
+                return f'effects: frame 48 mixer {registers.get(7):#x}'    # flag fell at 35
         elif mfp:
             return f'effects: frame {frame} unexpectedly wrote {mfp}'
         if frame == 60 and registers.get(10) != 1:
             return (f'effects: frame 60 played {registers.get(10)} - the ring '
                     'lost the byte the sanitize borrowed')
 
-    # The handlers themselves, tick by tick. The drum writes each sample byte
-    # to the drummed voice's volume register (voice C = R10); the marker tick
-    # writes the marker, parks the volume at $D, stops the timer and drops the
-    # flag. The retrigger left sample 0 armed: 0x80, 0x40 -> nibbles 8, 4.
-    if player.uc.mem_read(flags, 1)[0] != 4 | 2:
-        return 'effects: voices B and C should be flagged'
-    for tick, value in enumerate((8, 4)):
-        pairs = invoke_isr(player, code)
-        if pairs != [(10, value)]:
-            return f'effects: drum tick {tick} wrote {pairs}'
-    if player.uc.mem_read(flags, 1)[0] != 4 | 2:
-        return 'effects: the drum ended early'
-    pairs = invoke_isr(player, code)                # the marker tick
-    if pairs != [(10, 0x80), (10, 0x0D)]:
-        return f'effects: the marker tick wrote {pairs}'
     if player.uc.mem_read(flags, 1)[0] != 2:
-        return 'effects: the marker did not drop the flag'
-    if player.mfp[-2:] != [(TCDCR, 0), (0xFFFFFA11, 0xEF)]:
-        return f'effects: the marker tick programmed {player.mfp[-2:]}'
+        return 'effects: only voice B should still be flagged after the loop'
 
-    # The scene's drum on slot 1, the same way: sample 0 is 0x80, 0x40 ->
+    # The scene's drum on slot 1, tick by tick: sample 0 is 0x80, 0x40 ->
     # nibbles 8, 4 on voice B's register, then its marker parks Timer A.
     code = CODE + player.symbols['yx6_drumA']
     for tick, value in enumerate((8, 4)):
@@ -538,6 +531,11 @@ def run_effects(super_host: bool = False) -> str:
         return 'effects: slot 1 marker did not drop the flag'
     if player.mfp[-2:] != [(TACR, 0), (0xFFFFFA0F, 0xDF)]:
         return f'effects: slot 1 marker programmed {player.mfp[-2:]}'
+
+    # And the next frame plays voice B's volume from the ring again.
+    _, writes = player.frame()
+    if 9 not in dict(writes):
+        return 'effects: slot 1 marker kept the burst gate shut'
 
     # The SID square from frame 5's start: the loud half writes the volume
     # and installs the quiet half one word into the vector, and back.
@@ -572,6 +570,28 @@ def run_effects(super_host: bool = False) -> str:
     if mfp(0xFFFFFA07) & 0x20 or mfp(0xFFFFFA13) & 0x20 \
             or mfp(0xFFFFFA09) & 0x10 or mfp(0xFFFFFA15) & 0x10:
         return 'effects: stop left its claim enabled'
+    return ''
+
+
+def drum_ticks(player, code, flags) -> str:
+    """Plays frame 31's retriggered drum out: two sample nibbles, then the
+    marker - which parks the volume, stops Timer D, drops voice C's flag and
+    reopens the voice's burst gate. Sample 0 is 0x80, 0x40 -> nibbles 8, 4."""
+    if player.uc.mem_read(flags, 1)[0] != 4:
+        return 'effects: voice C should be flagged at frame 35'
+    for tick, value in enumerate((8, 4)):
+        pairs = invoke_isr(player, code)
+        if pairs != [(10, value)]:
+            return f'effects: drum tick {tick} wrote {pairs}'
+    if player.uc.mem_read(flags, 1)[0] != 4:
+        return 'effects: the drum ended early'
+    pairs = invoke_isr(player, code)                # the marker tick
+    if pairs != [(10, 0x80), (10, 0x0D)]:
+        return f'effects: the marker tick wrote {pairs}'
+    if player.uc.mem_read(flags, 1)[0] != 0:
+        return 'effects: the marker did not drop the flag'
+    if player.mfp[-2:] != [(TCDCR, 0), (0xFFFFFA11, 0xEF)]:
+        return f'effects: the marker tick programmed {player.mfp[-2:]}'
     return ''
 
 
