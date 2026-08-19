@@ -191,8 +191,9 @@ block - so the two timers' only remaining difference is data. The tick
 handlers sign off with an immediate byte write to the in-service register
 (it ignores written ones), and a host that never runs user-mode code can
 build with YX6_SUPER_HOST=1 to park the drum tick's a0 in the USP, 16
-cycles under the stack; the park is one-way for the USP itself, so
-YX6_init saves it and YX6_stop hands it back in every build.
+cycles under the stack; the park is one-way for the USP itself, so a host
+that ever returns to user mode saves the USP with the rest of the machine
+state - YX6_player.S does.
 
 The per-frame volume write and a running SID cooperate by design: the nibble
 the burst writes IS the SID volume parameter, and the ISR overwrites the
@@ -224,9 +225,12 @@ Facts the engine leans on, all verified:
   instead flips to AEI and parks a dummy handler on the spurious-interrupt
   vector $60 to save those 20 cycles per interrupt — a documented option,
   not the default.
-- Init: save vectors, control/data, IER/IMR bits per timer; install dummy
-  vectors; enable + unmask with `bset` (never whole-byte writes — Timer C's
-  bits must survive); all under $2700. YX6_stop restores everything.
+- Init: install dummy vectors; enable + unmask with `bset` (never
+  whole-byte writes — Timer C's bits must survive); all under $2700.
+  YX6_stop quiesces the claim — timers stopped, bits disabled — and
+  restores nothing: the machine state is the HOST's to save and hand back
+  (YX6.S assumption 5; YX6_player.S is the worked example). A demo that
+  already owns the machine saves nothing at all.
 
 The ISRs follow maxYMiser's shipping forms — the PSG select+write in ONE
 instruction, `move.l #$rr00vv00,$FFFF8800.w` (byte lanes: select at 8800,

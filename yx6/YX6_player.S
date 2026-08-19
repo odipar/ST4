@@ -113,6 +113,18 @@ play:
         clr.b   $FFFFFA09.w
         clr.b   $FFFFFA13.w
         clr.b   $FFFFFA15.w
+; The library saves nothing - the machine state is ours to keep (YX6.S,
+; assumption 5). Save the rest of what the player touches: both timer
+; vectors, the timer registers, and - YX6_SUPER_HOST - the USP its drum
+; tick parks a0 in.
+        move.l  $134.w,old_ta
+        move.l  $110.w,old_td
+        move.b  $FFFFFA19.w,old_tacr
+        move.b  $FFFFFA1D.w,old_tcdcr
+        move.b  $FFFFFA1F.w,old_tadr
+        move.b  $FFFFFA25.w,old_tddr
+        move    usp,a0
+        move.l  a0,old_usp
 
         lea     song,a0                         ; the packed tune; init claims
         lea     workspace,a1                    ; Timers A and D on top of the
@@ -156,7 +168,17 @@ play:
 .stop:
         move.w  #$2700,sr
         lea     workspace,a0
-        bsr     YX6_stop                        ; chip quiet, timers handed back
+        bsr     YX6_stop                        ; chip quiet, timers stopped
+        movea.l old_usp,a0                      ; now hand the machine back:
+        move    a0,usp                          ; the state was ours to keep
+        move.l  old_ta,$134.w
+        move.l  old_td,$110.w
+        move.b  old_tadr,$FFFFFA1F.w
+        move.b  old_tddr,$FFFFFA25.w
+        move.b  old_tacr,$FFFFFA19.w
+        move.b  old_tcdcr,d0                    ; only Timer D's nibble was
+        and.b   #$0F,d0                         ; the player's
+        or.b    d0,$FFFFFA1D.w
         move.l  old_vbl,VBL_VECTOR
         move.b  old_iera,$FFFFFA07.w            ; and TOS's interrupts revived
         move.b  old_ierb,$FFFFFA09.w
@@ -217,7 +239,14 @@ old_iera:   ds.b    1
 old_ierb:   ds.b    1
 old_imra:   ds.b    1
 old_imrb:   ds.b    1
+old_tacr:   ds.b    1
+old_tcdcr:  ds.b    1
+old_tadr:   ds.b    1
+old_tddr:   ds.b    1
         even
+old_ta:     ds.l    1
+old_td:     ds.l    1
+old_usp:    ds.l    1
 mouse_skip: ds.w    1
         even
 ; The parentheses matter: rmac evaluates expressions strictly left to right.
