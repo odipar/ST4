@@ -203,11 +203,14 @@ write lands mid-phase and forces the loud half back for up to half a square
 period: inaudible at kHz SID rates, a click train under a 100–1100 Hz
 buzz-bass. The references agree the ISR owns the register — ST-Sound's
 per-sample SID overrides the frame write, maxYMiser's frame code skips SID
-channels — so while a slot holds a SID, the burst's write of that voice's
-volume register is gated off (one SMC word: the write's destination
-displacement lands on the select register instead, and the next select
-overrides it). The gate opens again on release, voice change, drum
-takeover, init and stop. SID phase deliberately free-runs across frames
+channels — so while a slot holds a SID **or a drum**, the burst's write of
+that voice's volume register is gated off (one SMC word: the write's
+destination displacement lands on the select register instead, and the
+next select overrides it). A SID's gate opens again on release, voice
+change, drum takeover, init and stop; a drum's opens where the drum ends —
+in the marker tick, through an address its start patched in — and a drum
+cut off mid-sample by a voice change has its flag and gate cleaned up by
+the drum that replaced it. SID phase deliberately free-runs across frames
 (ST-Sound never resets `sidPos`), including across a prescaler boundary —
 a code change that differs only in its prescaler retunes the timer without
 touching the vector, keeping the installed half. The buzzer's per-frame

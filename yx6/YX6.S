@@ -839,7 +839,8 @@ yx6_desc2:
 ; the handler's LAST chip write: a nested tick re-selects the PSG.
 ;
 ; The patch offsets are load-bearing:
-;   drum:  select immediate at +3, sample address at +8, flag mask at _clear+3
+;   drum:  select immediate at +3, sample address at +8, flag mask at
+;          _clear+3, the burst gate's address at _gate+4
 ;   sid:   select at +2 and volume at +4 inside the imm long; the partner's
 ;          address low word at +14, past the IPL drop, patched by yx6_link
 ;   buzz:  the shape at +4
@@ -870,7 +871,9 @@ yx6_drumA:
         lea     yx6_drums(pc),a0
 yx6_drumA_clear:
         andi.b  #$FF,(a0)               ; SMC +3: drop the voice's drum flag
-        movea.l (sp)+,a0
+yx6_drumA_gate:
+        move.w  #2,$12345678            ; SMC +4: the voice's burst write
+        movea.l (sp)+,a0                ; comes back
 yx6_parkA:
         move.b  #$DF,$FFFFFA0F.w
         rte
@@ -933,6 +936,8 @@ yx6_drumD:
         lea     yx6_drums(pc),a0
 yx6_drumD_clear:
         andi.b  #$FF,(a0)
+yx6_drumD_gate:
+        move.w  #2,$12345678
         .if YX6_SUPER_HOST
         move    usp,a0
         .else
@@ -971,6 +976,7 @@ yx6_drums:
 ISR_DRUM_SEL    equ     3
 ISR_DRUM_PTR    equ     8
 ISR_CLEAR       equ     (yx6_drumA_clear-yx6_drumA)+3
+ISR_GATE        equ     (yx6_drumA_gate-yx6_drumA)+4
 ISR_SIDON       equ     yx6_sidA_on-yx6_drumA
 ISR_SIDON_SEL   equ     ISR_SIDON+2
 ISR_SID_VOL     equ     ISR_SIDON+4
@@ -1139,7 +1145,10 @@ yx6_slot:
         move.b  d0,d5
         and.b   #$C0,d5
         cmp.b   #$40,d5
-        beq.s   .drum                   ; a held drum code triggers again
+        bne.s   .not_drum
+        move.b  d0,d4                   ; a held drum code triggers again;
+        bra.s   .drum                   ; old = new, nothing to clean up
+.not_drum:
         cmp.b   SD_TLAST(a5),d1         ; reload only a CHANGED count: a write
         beq.s   .track                  ; meeting the counter at 01 is
         move.b  d1,SD_TLAST(a5)         ; indeterminate, so do not roll dice
@@ -1197,6 +1206,38 @@ yx6_burst_open_old:
 ; keeps d0/d1/d3/a5.
 ; -----------------------------------------------------------------------------
 yx6_drum_start:
+; The slot may be replacing something. An old SID's burst gate reopens (its
+; timer is about to be re-aimed). An old drum on ANOTHER voice was cut off
+; mid-sample: the marker that would have dropped its flag and reopened its
+; gate will never run, so do both here.
+        cmp.b   d0,d4
+        beq.s   .no_old
+        tst.b   d4
+        beq.s   .no_old
+        move.b  d4,d2
+        and.b   #$C0,d2
+        beq.s   .old_sid
+        cmp.b   #$40,d2
+        bne.s   .no_old                 ; a buzzer holds no register
+        move.b  d4,d2                   ; an old drum: same voice keeps its
+        eor.b   d0,d2                   ; flag and gate, another voice was
+        and.b   #$30,d2                 ; orphaned
+        beq.s   .no_old
+        move.b  d4,d2
+        lsr.b   #4,d2
+        and.w   #3,d2
+        subq.w  #1,d2
+        moveq   #1,d4                   ; (the old code is spent now)
+        lsl.b   d2,d4
+        not.b   d4
+        lea     yx6_drums(pc),a0
+        and.b   d4,(a0)                 ; the orphan's flag drops
+        moveq   #2,d4
+        bsr     yx6_burst_gate          ; and its burst write returns
+        bra.s   .no_old
+.old_sid:
+        bsr     yx6_burst_open_old
+.no_old:
         movea.l YX6_CURSOR(a3),a0
         adda.l  SD_PARM(a5),a0
         bsr     yx6_borrow              ; the ring gets this byte back
@@ -1225,11 +1266,6 @@ yx6_drum_start:
         movea.w SD_CTRL(a4),a0
         andi.b  #$F0,(a0)               ; stop the other slot's SID
         clr.b   (a4)                    ; and let it retry every frame
-        move.w  d5,d2                   ; the drum owns the volume register
-        move.w  d4,-(sp)                ; through its own sanitize now: the
-        moveq   #2,d4                   ; burst write comes back
-        bsr     yx6_burst_gate
-        move.w  (sp)+,d4
 .keep:
         move.w  d5,d2
         addq.w  #8,d2                   ; the voice's volume register
@@ -1244,6 +1280,17 @@ yx6_drum_start:
         move.l  0(a0,d4.w),d2           ; the sample's offset in the file
         add.l   a2,d2
         move.l  d2,ISR_DRUM_PTR(a1)     ; the tick reads through its operand
+; The drum owns the voice's volume register now, like a SID does: the burst
+; write is gated off, and the END tick gives it back - the marker's reopen
+; instruction gets the gate word's address patched in here.
+        move.w  d5,d2
+        moveq   #0,d4
+        bsr     yx6_burst_gate
+        move.w  d5,d2
+        mulu.w  #10,d2
+        lea     yx6_wB+8(pc),a0
+        adda.w  d2,a0
+        move.l  a0,ISR_GATE(a1)
         movea.l a1,a0                   ; the handler is the block base
         rts
 
