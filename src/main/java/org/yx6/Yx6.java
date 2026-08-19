@@ -57,17 +57,17 @@ public final class Yx6 {
                     Usage: yx6 [-f] [-o] [-nN] [-cC] [-kK] [-lF] input.ym [output.yx6]
                       -f      Force overwrite of output file
                       -o      Play once: pack no loop section
-                      -nN     Ring size per register, in bytes (default 1024)
+                      -nN     Ring size per stream, in bytes (default 960)
                       -cC     Values decoded per call, and the round-robin group
-                              size (default 16; needs C >= 14 and N mod C = 0)
+                              size (default 24; needs C >= 18 and N mod C = 0)
                       -kK     ST4 unit size: 1, 2 or 4. The default is 2 when
                               the tune length, loop frame and C allow it -
                               they must be multiples of K - and 1 otherwise.
                               The player must be built with the same ST4_UNIT
                       -lF     Loop from frame F, overriding the YM header
 
-                    The input is an unpacked YM5!/YM6! dump. Distributed .ym files
-                    are LHA archives: unpack one first with `lha x song.ym`.""");
+                    The input is a YM5!/YM6! dump, LHA-archived or already
+                    unpacked - the reader tells them apart by itself.""");
             return;
         }
         String inputName = args[i];

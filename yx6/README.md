@@ -17,7 +17,7 @@ other player including the format author's.
 | Piece | What it is |
 |---|---|
 | [`org.yx6.Yx6`](../src/main/java/org/yx6/Yx6.java) | the packer: YM5!/YM6! in, `.yx6` out |
-| [YX6.S](YX6.S) | the player library, 888 bytes plus ST4_wrap's 238 |
+| [YX6.S](YX6.S) | the player library, 2,512 bytes plus ST4_wrap's 292 |
 | [YX6_player.S](YX6_player.S) | a VBL front end: a complete TOS program |
 | [mkprg.sh](mkprg.sh) | links the two around a song into a runnable `.PRG` |
 | [play.sh](play.sh) | one command: pack a `.ym`, build it, play it under Hatari |
@@ -64,59 +64,71 @@ touches the disk.
 The packer's parameters are the ring size and the chunk size:
 
 ```
-yx6 [-f] [-o] [-nN] [-cC] [-lF] input.ym [output.yx6]
+yx6 [-f] [-o] [-nN] [-cC] [-kK] [-lF] input.ym [output.yx6]
   -nN   ring size per stream, in bytes (default 960)
   -cC   values decoded per call, and the round-robin group size (default 24)
+  -kK   ST4 unit size: 1, 2 or 4 (default: 2 when the shape allows, else 1)
   -lF   loop from frame F, overriding the YM header
   -o    play once: pack no loop section
 ```
 
-`N` decides how much RAM the player needs (`14 × N` today; `18 × N` once the
-effect engine decodes its streams) and how far back the packer may reference,
-so it trades memory for compression. `C` must be at least
+`N` decides how much RAM the player needs (`18 × N` plus about 1.2 KB of
+fixed state) and how far back the packer may reference, so it trades memory
+for compression. `C` must be at least
 18 — one refill slot per stream — and must divide `N`, which is what lets the
 player use ST4_wrap rather than the bigger general ring decoder. The packer
 enforces both, packs every stream with `-mN` so no back-reference reaches
 outside the ring, and with `-l65535` so no operation outruns the 68000
 decoder's word counters.
 
-On a synthetic 1500-frame tune, the fourteen registers pack from 21000 bytes to
-about 2300 — the streams for registers that barely change cost a few bytes each.
+On a synthetic 1500-frame tune, the eighteen streams pack from 27000 bytes to
+about 3600 — the streams for registers that barely change cost a few bytes each.
+On a real one they do far better: Wings of Death's level 6, digidrums and all,
+packs 188784 register bytes into 5064 (2.7%).
 
 ## Playing it
 
 ```
         lea     song,a0                 ; the .yx6 file, loaded anywhere
-        lea     workspace,a1            ; even address, YX6_FIXED+(14*N) bytes
+        lea     workspace,a1            ; even address, YX6_FIXED+(18*N) bytes
         bsr     YX6_init                ; d0 = 0 when the file was accepted
    vbl:                                 ; once per frame, in supervisor mode
         lea     workspace,a0
         bsr     YX6_play                ; d0 = 0 played, 1 wrapped, -1 ended
-        bsr     YX6_stop                ; silence the three voices
+        lea     workspace,a0
+        bsr     YX6_stop                ; chip quiet, timers handed back
 ```
 
-`YX6_play` clobbers `d0`–`d5` and `a0`–`a3`, and leaves `d6`, `d7` and
+`YX6_play` clobbers `d0`–`d5` and `a0`–`a5`, and leaves `d6`, `d7` and
 `a6` alone, the same promise ST4 makes - its decoder state spans `a4` and
-`a5`. Include both `YX6.S` and `ST4_wrap.S`, with `ST4_UNIT equ 1` first.
+`a5`. `YX6_init` takes over MFP Timers A and D for the effect slots, saving
+everything `YX6_stop` hands back; Timer B stays free for rasters and Timer C
+stays the system's. Include both `YX6.S` and `ST4_wrap.S`, with
+`ST4_UNIT equ 1` first.
 
 ### The schedule
 
-A tune is `O` frames long. Each register owns a ring of `N` bytes and a saved
+A tune is `O` frames long. Each stream owns a ring of `N` bytes and a saved
 decoder state. On every VBL the player reads one value from each of the
-fourteen rings and refills exactly one register — register `k` on the frame
+eighteen rings and refills exactly one stream — stream `k` on the frame
 where `frame mod C` is `k`:
 
 ```text
-VBL  0: use value  0 from every register; refill R0
-VBL  1: use value  1 from every register; refill R1
+VBL  0: use value  0 from every stream; refill R0
+VBL  1: use value  1 from every stream; refill R1
 ...
-VBL 13: use value 13 from every register; refill R13
-VBL 14: use value 14 from every register; no refill
-VBL 15: use value 15 from every register; no refill
+VBL 13: use value 13 from every stream; refill R13
+VBL 14: use value 14 from every stream; refill E1
+...
+VBL 17: use value 17 from every stream; refill T2
+VBL 18: use value 18 from every stream; no refill
+...
+VBL 23: use value 23 from every stream; no refill
 ```
 
-Every register is therefore one full group ahead of what is being read, and the
-work per frame is flat: fourteen register writes plus one 16-byte decoder call.
+Every stream is therefore one full group ahead of what is being read, and the
+work per frame is flat: the effect stage, fourteen register writes and one
+24-byte decoder call.
 The player counts the calls itself and wraps a ring's write pointer when it
 lands on the ring end, which is exactly ST4_wrap's contract — there is no DONE
 state to poll and no bound check inside the decoder.
@@ -168,11 +180,12 @@ two bus cycles, and TOS's own handlers use the sound chip in between — its
 floppy motor timeout writes port A. Without the mask a write can land on
 whatever register the interrupt selected. It costs about 24 cycles a frame.
 
-## What v1.0 does not do
+## What it does not do
 
-* **No effects.** The packer masks the YM6 effect bits out of the register
-  values and warns when it drops digidrum samples. A tune that leans on SID
-  voices or digidrums will play, but thinner than it should.
+* **Sinus-SID.** Never seen in a dump, and never implemented by any player -
+  the packer warns and drops it.
+* **YM2.** Mad Max's forty drum samples live in the player, not the file;
+  supporting them means embedding the bank in the converter. Not yet.
 * **Trusted input.** Beyond the magic, version and stream count, the player
   checks nothing, like the ST4 decoders it is built on.
 
@@ -207,7 +220,7 @@ at PSG-ready volume bytes, each sample closed by a byte with bit 7 set.
 ## Tests
 
 ```sh
-mvn test                                  # the packer: format, masking, shapes
+mvn test                                  # the packer: format, effects, shapes
 python3 yx6/test/emu/test_yx6.py          # the player, against the YM data
 HATARI=... TOS=... yx6/test/run.sh        # the player, on emulated hardware
 ```
@@ -217,12 +230,17 @@ tool, assembles YX6.S with ST4_wrap.S, runs the player under Unicorn as a plain
 68000 and captures every write to `$FFFF8800`. What must match is the **chip's
 contents** after each frame — computed from the YM data with no knowledge of the
 packer or the player — plus the R13 writes themselves, since those restart the
-envelope and are observable in their own right. It covers the default 1024/16
-shape, a 256-byte ring, the smallest ring that holds two groups, 64-value calls,
-the tightest legal 28/14 shape, tunes shorter than a ring, a group and a single
+envelope and are observable in their own right. It covers the default 960/24
+shape, a 240-byte ring, the smallest ring that holds two groups, 64-value calls,
+the tightest legal 36/18 shape, tunes shorter than a ring, a group and a single
 frame, a loop point that is not on a group boundary, a loop section shorter than
-one group, several passes round the loop, playing a `-o` tune past its end, and
-re-initialising for a second pass.
+one group, several passes round the loop, playing a `-o` tune past its end,
+re-initialising for a second pass, and every unit size. A directed effect-stage
+test then walks a tune frame by frame past the MFP: SID start, hold, retrigger
+and release, a drum pair naming two samples on back-to-back frames, a drum
+seizing a SID's voice, the sync-buzzer, the sanitized burst and the forced
+mixer, and the ring getting every borrowed byte back - plus each tick handler
+run to its `rte`.
 
 [test/run.sh](test/run.sh) goes further than emulation can: it plays a looping
 tune on the emulated chip and **reads all fourteen registers back off the YM2149
@@ -233,21 +251,22 @@ and reports the cost:
 ```text
 SUM=OK wraps=1 sum=2941391492
 CALIB 12 241
-T 1700 90
+T 1700 107
 ```
 
-90 ticks of the 200 Hz clock for 1700 frames, with the calibration loop's
-7,864,630 cycles measured at 241 ticks, works out at about **1,730 cycles per
-frame** — roughly 1.1% of a 50 Hz frame on an 8 MHz ST, including the harness's
-own loop and the sound chip's bus wait states. Measure your own tune before
-budgeting: the byte limit is not a time limit, and how hard a chunk is to
-decode depends on the data.
+107 ticks of the 200 Hz clock for 1700 frames, with the calibration loop's
+7,864,630 cycles measured at 241 ticks, works out at about **2,050 cycles per
+frame** — roughly 1.3% of a 50 Hz frame on an 8 MHz ST, including the harness's
+own loop, the sound chip's bus wait states and the effect stage finding both
+slots idle (the harness tune's effect codes are deliberately inert, so the
+checksum stays deterministic). Measure your own tune before budgeting: the
+byte limit is not a time limit, and how hard a chunk is to decode depends on
+the data.
 
-Most of what is left is the decoder itself: at `C=16` a refill decodes 16 bytes
-on fourteen frames out of every sixteen. Raising `C` amortises the per-call cost
-over more bytes — `-c32` saves roughly another 6% on average — at the price of a
-refill frame that costs twice as much, which is the wrong trade if your frame
-budget is tight.
+Most of what is left is the decoder itself: at `C=24` a refill decodes 24 bytes
+on eighteen frames out of every twenty-four. Raising `C` amortises the per-call
+cost over more bytes at the price of a refill frame that costs proportionally
+more, which is the wrong trade if your frame budget is tight.
 
 The harness masks interrupts while it verifies, and so should anything that
 reads the chip back: selecting a register and reading it are two bus cycles, and
