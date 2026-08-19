@@ -17,7 +17,7 @@ other player including the format author's.
 | Piece | What it is |
 |---|---|
 | [`org.yx6.Yx6`](../src/main/java/org/yx6/Yx6.java) | the packer: YM5!/YM6! in, `.yx6` out |
-| [YX6.S](YX6.S) | the player library, 1,914 bytes plus ST4_wrap's 292 |
+| [YX6.S](YX6.S) | the player library, 1,972 bytes plus ST4_wrap's 292 |
 | [YX6_player.S](YX6_player.S) | a VBL front end: a complete TOS program |
 | [mkprg.sh](mkprg.sh) | links the two around a song into a runnable `.PRG` |
 | [play.sh](play.sh) | one command: pack a `.ym`, build it, play it under Hatari |
@@ -74,7 +74,8 @@ yx6 [-f] [-o] [-nN] [-cC] [-kK] [-lF] input.ym [output.yx6]
 
 `N` decides how much RAM the player needs (`18 × N` plus about 1.2 KB of
 fixed state) and how far back the packer may reference, so it trades memory
-for compression. `C` must be at least
+for compression; it stops at 2520, because the player reads register `k`'s
+ring through an assembled-in displacement of `k*N`. `C` must be at least
 18 — one refill slot per stream — and must divide `N`, which is what lets the
 player use ST4_wrap rather than the bigger general ring decoder. The packer
 enforces both, packs every stream with `-mN` so no back-reference reaches
@@ -160,13 +161,24 @@ tune when it loops from the middle.
 
 The fourteen writes are unrolled through a `YX6_WRITE` macro, one invocation per
 register, so the register number is an assembled-in immediate and the value goes
-straight from the ring to the chip without passing through a data register:
+straight from the ring to the chip without passing through a data register.
+Register k's ring byte sits `k*N` above the cursor, and N is known at init - so
+init patches each write's displacement into the instruction once, and the burst
+never steps a pointer:
 
 ```
         move.b  #\number,(a2)          ; select
-        move.b  (a1),2(a2)              ; and write
-        adda.l  d3,a1                   ; on to the next register's ring
+        move.b  $7FFF(a1),2(a2)         ; and write - k*N, patched at init
 ```
+
+That is also why `N` stops at 2520: `13*N` must fit the signed 16-bit
+displacement. (Writing two registers per interrupt with `movep.l` was measured
+and rejected: the values arrive one byte per ring, and packing them costs at
+least the cycles the trick saves. Storing the streams pre-packed for movep was
+measured too - ST4 stores literals raw, so the constant select bytes bloat the
+corpus by 25% - and packing the streams as ready-to-run 68000 code makes it
+worse: speedcode needs one joint stream, which can only match when every
+register's history repeats at once.)
 
 Two registers are not written that way. R7 gets the ST's I/O port direction bits
 (`$C0`) back, because on an ST port A drives the floppy select lines. R13 is
@@ -255,11 +267,11 @@ and reports the cost:
 ```text
 SUM=OK wraps=1 sum=2941391492
 CALIB 12 241
-T 1700 99
+T 1700 96
 ```
 
-99 ticks of the 200 Hz clock for 1700 frames, with the calibration loop's
-7,864,630 cycles measured at 241 ticks, works out at about **1,900 cycles per
+96 ticks of the 200 Hz clock for 1700 frames, with the calibration loop's
+7,864,630 cycles measured at 241 ticks, works out at about **1,850 cycles per
 frame** — roughly 1.2% of a 50 Hz frame on an 8 MHz ST, including the harness's
 own loop, the sound chip's bus wait states and the effect stage finding both
 slots idle (the harness tune's effect codes are deliberately inert, so the
