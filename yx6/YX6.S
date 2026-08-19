@@ -770,6 +770,12 @@ YX6_stop:
         bclr    #4,$FFFFFA0D.w
         lea     yx6_drums(pc),a0
         clr.b   (a0)
+        moveq   #2,d2                   ; every burst gate open again
+.gates: move.w  d2,-(sp)
+        moveq   #2,d4
+        bsr     yx6_burst_gate
+        move.w  (sp)+,d2
+        dbra    d2,.gates
 ; The silence stays inside the mask: selecting a register and writing it are
 ; two bus cycles, and a polite host's system interrupts - about to get their
 ; state back - use the chip too.
@@ -983,6 +989,12 @@ ISR_BUZZ_SHAPE  equ     ISR_BUZZ+4
 ; they are patched once here rather than on every SID start.
 ; -----------------------------------------------------------------------------
 yx6_link:
+        moveq   #2,d2                   ; every burst gate open: a previous
+.gates: move.w  d2,-(sp)                ; session's mute must not leak
+        moveq   #2,d4
+        bsr     yx6_burst_gate
+        move.w  (sp)+,d2
+        dbra    d2,.gates
         lea     yx6_desc1(pc),a0
         lea     yx6_desc2(pc),a1
         move.l  a1,SD_OTHER(a0)
@@ -1059,6 +1071,7 @@ yx6_slot:
         and.b   yx6_drums(pc),d2
         beq.s   .sid_free
         clr.b   (a5)
+        bsr     yx6_burst_open_old      ; a replaced SID's gate must not leak
         rts
 .sid_free:
 ; A code that differs from the old one ONLY in its prescaler is the same
@@ -1071,6 +1084,10 @@ yx6_slot:
         eor.b   d4,d2
         and.b   #$F0,d2                 ; type and voice unchanged?
         beq.s   .sid_retune
+        bsr     yx6_burst_open_old      ; a replaced SID's voice write resumes
+        move.w  d5,d2                   ; ...and the new voice's is muted:
+        moveq   #0,d4                   ; the square owns it now
+        bsr     yx6_burst_gate
         move.w  d5,d4                   ; a fresh SID: the voice's volume
         addq.w  #8,d4                   ; register into both halves' selects
         movea.l SD_ISR(a5),a0
@@ -1107,11 +1124,15 @@ yx6_slot:
         move.w  (sp)+,sr
         rts
 .released:
-        and.b   #$C0,d4                 ; the level dropped: stop the timer -
-        cmp.b   #$40,d4                 ; unless a drum is finishing by itself
+        move.b  d4,d2                   ; the level dropped: stop the timer -
+        and.b   #$C0,d2                 ; unless a drum is finishing by itself
+        cmp.b   #$40,d2
         beq.s   .out
         movea.w SD_CTRL(a5),a1
         andi.b  #$F0,(a1)
+        tst.b   d2                      ; an ended SID: the burst writes its
+        bne.s   .out                    ; voice's volume again
+        bsr     yx6_burst_open_old
 .out:
         rts
 .held:                                  ; E != 0 here: the caller's gate
@@ -1139,6 +1160,25 @@ yx6_slot:
         rts
 .vol:
         move.b  d4,ISR_SID_VOL(a0)
+        rts
+
+; Opens the burst gate of the voice the OLD code (d4) named, when that code
+; was a SID; anything else leaves the gates alone. Clobbers d2/a0, keeps d4.
+yx6_burst_open_old:
+        move.b  d4,d2
+        and.b   #$C0,d2
+        bne.s   .not_sid
+        tst.b   d4
+        beq.s   .not_sid
+        move.b  d4,d2
+        lsr.b   #4,d2
+        and.w   #3,d2
+        subq.w  #1,d2
+        move.w  d4,-(sp)
+        moveq   #2,d4
+        bsr     yx6_burst_gate
+        move.w  (sp)+,d4
+.not_sid:
         rts
 
 ; -----------------------------------------------------------------------------
@@ -1185,6 +1225,11 @@ yx6_drum_start:
         movea.w SD_CTRL(a4),a0
         andi.b  #$F0,(a0)               ; stop the other slot's SID
         clr.b   (a4)                    ; and let it retry every frame
+        move.w  d5,d2                   ; the drum owns the volume register
+        move.w  d4,-(sp)                ; through its own sanitize now: the
+        moveq   #2,d4                   ; burst write comes back
+        bsr     yx6_burst_gate
+        move.w  (sp)+,d4
 .keep:
         move.w  d5,d2
         addq.w  #8,d2                   ; the voice's volume register
@@ -1200,6 +1245,23 @@ yx6_drum_start:
         add.l   a2,d2
         move.l  d2,ISR_DRUM_PTR(a1)     ; the tick reads through its operand
         movea.l a1,a0                   ; the handler is the block base
+        rts
+
+; -----------------------------------------------------------------------------
+; yx6_burst_gate: while a SID owns a voice, the burst must NOT write that
+; voice's volume register - the write lands mid-phase and forces the loud
+; half back for up to half a square period, an audible tick at bass rates.
+; Both references agree: ST-Sound's per-sample SID overrides the register
+; write, maxYMiser's frame code skips SID channels outright. The gate is
+; one SMC word: the volume write's destination displacement, 2 for the PSG
+; data register, 0 to land harmlessly on the select register instead - the
+; next macro's select overrides it before anything is written.
+; in: d2.w = the voice 0..2, d4.w = 2 to open or 0 to mute; clobbers d2/a0.
+; -----------------------------------------------------------------------------
+yx6_burst_gate:
+        mulu.w  #10,d2                  ; a YX6_WRITE is ten bytes; R8's
+        lea     yx6_wB+8(pc),a0         ; destination word sits at +8
+        move.w  d4,0(a0,d2.w)
         rts
 
 ; Records a ring byte about to be edited, for the restore after the burst.

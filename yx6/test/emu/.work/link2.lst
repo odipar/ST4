@@ -796,449 +796,511 @@
   770  0000048E  08B80004FA0D                   bclr    #4,$FFFFFA0D.w
   771  00000494  41FAxxxx                       lea     yx6_drums(pc),a0
   772  00000498  4210                           clr.b   (a0)
-  773                                   ; The silence stays inside the mask: selecting a register and writing it are
-  774                                   ; two bus cycles, and a polite host's system interrupts - about to get their
-  775                                   ; state back - use the chip too.
-  776  0000049A  41F9FFFF8800                   lea     YX6_PSG,a0
-  777  000004A0  7008                           moveq   #8,d0                   ; R8, R9, R10 are the voice volumes
-  778                                   .silence:
-  779  000004A2  1080                           move.b  d0,(a0)
-  780  000004A4  42280002                       clr.b   2(a0)
-  781  000004A8  5200                           addq.b  #1,d0
-  782  000004AA  B03C000B                       cmp.b   #11,d0
-  783  000004AE  66F2                           bne.s   .silence
-  784  000004B0  46DF                           move.w  (sp)+,sr
-  785  000004B2  4E75                           rts
-  786                                   
-  787                                   ; -----------------------------------------------------------------------------
-  788                                   ; The effect machinery. The per-frame stage lives inlined in YX6_play; what
-  789                                   ; follows is everything it drives: the two slot descriptors, the tick
-  790                                   ; handlers, and the one slot machine that serves both timers.
-  791                                   ; -----------------------------------------------------------------------------
+  773  0000049A  7402                           moveq   #2,d2                   ; every burst gate open again
+  774  0000049C  3F02                   .gates: move.w  d2,-(sp)
+  775  0000049E  7802                           moveq   #2,d4
+  776  000004A0  6100xxxx                       bsr     yx6_burst_gate
+  777  000004A4  341F                           move.w  (sp)+,d2
+  778  000004A6  51CAFFF4                       dbra    d2,.gates
+  779                                   ; The silence stays inside the mask: selecting a register and writing it are
+  780                                   ; two bus cycles, and a polite host's system interrupts - about to get their
+  781                                   ; state back - use the chip too.
+  782  000004AA  41F9FFFF8800                   lea     YX6_PSG,a0
+  783  000004B0  7008                           moveq   #8,d0                   ; R8, R9, R10 are the voice volumes
+  784                                   .silence:
+  785  000004B2  1080                           move.b  d0,(a0)
+  786  000004B4  42280002                       clr.b   2(a0)
+  787  000004B8  5200                           addq.b  #1,d0
+  788  000004BA  B03C000B                       cmp.b   #11,d0
+  789  000004BE  66F2                           bne.s   .silence
+  790  000004C0  46DF                           move.w  (sp)+,sr
+  791  000004C2  4E75                           rts
   792                                   
-  793                                   ; The slot descriptors - see the SD_ equates. Slot 1 owns Timer A, slot 2
-  794                                   ; Timer D, whose control nibble is shared with Timer C and only ever changed
-  795                                   ; read-modify-write; the slot machine uses that form for both, which on
-  796                                   ; Timer A writes the same values a clear would.
-  797                                           even
-  798                                   yx6_desc1:
-  799  000004B4  0000                           dc.b    0,0                     ; E last, T last
-  800  000004B6  FA19FA1F0134                   dc.w    $FA19,$FA1F,$0134       ; control, data, vector
-  801  000004BC  00000000                       dc.l    0                       ; PARM, set per effect
-  802  000004C0  0000000000000000               dc.l    0,0                     ; ISR block, other slot: yx6_link
-  803                                   yx6_desc2:
-  804  000004C8  0000                           dc.b    0,0
-  805  000004CA  FA1DFA250110                   dc.w    $FA1D,$FA25,$0110
-  806  000004D0  00000000                       dc.l    0
-  807  000004D4  0000000000000000               dc.l    0,0
-  808                                   
-  809                                   ; -----------------------------------------------------------------------------
-  810                                   ; The tick handlers, in maxYMiser's shipping forms: the PSG select and write
-  811                                   ; in as few instructions as the bus allows, patched immediates instead of
-  812                                   ; state, software end-of-interrupt as TOS runs the MFP - written as an
-  813                                   ; immediate byte, since the in-service registers ignore written ones. All
-  814                                   ; MFP interrupts arrive at 68000 level 6, so these never nest, and every
-  815                                   ; patched operand is addressed pc-relatively so the player stays loadable
-  816                                   ; anywhere - which also means it must run from RAM, where a demo lives.
-  817                                   ;
-  818                                   ; The two slots' handlers are the same text twice, and MUST stay
-  819                                   ; byte-congruent: the slot machine and yx6_drum_start reach every patched
-  820                                   ; operand through ISR_ offsets measured on the A block. The rig checks the
-  821                                   ; congruence from the symbol table. The park entries - where YX6_init aims
-  822                                   ; the vectors while no effect runs - are the handlers' own tails.
+  793                                   ; -----------------------------------------------------------------------------
+  794                                   ; The effect machinery. The per-frame stage lives inlined in YX6_play; what
+  795                                   ; follows is everything it drives: the two slot descriptors, the tick
+  796                                   ; handlers, and the one slot machine that serves both timers.
+  797                                   ; -----------------------------------------------------------------------------
+  798                                   
+  799                                   ; The slot descriptors - see the SD_ equates. Slot 1 owns Timer A, slot 2
+  800                                   ; Timer D, whose control nibble is shared with Timer C and only ever changed
+  801                                   ; read-modify-write; the slot machine uses that form for both, which on
+  802                                   ; Timer A writes the same values a clear would.
+  803                                           even
+  804                                   yx6_desc1:
+  805  000004C4  0000                           dc.b    0,0                     ; E last, T last
+  806  000004C6  FA19FA1F0134                   dc.w    $FA19,$FA1F,$0134       ; control, data, vector
+  807  000004CC  00000000                       dc.l    0                       ; PARM, set per effect
+  808  000004D0  0000000000000000               dc.l    0,0                     ; ISR block, other slot: yx6_link
+  809                                   yx6_desc2:
+  810  000004D8  0000                           dc.b    0,0
+  811  000004DA  FA1DFA250110                   dc.w    $FA1D,$FA25,$0110
+  812  000004E0  00000000                       dc.l    0
+  813  000004E4  0000000000000000               dc.l    0,0
+  814                                   
+  815                                   ; -----------------------------------------------------------------------------
+  816                                   ; The tick handlers, in maxYMiser's shipping forms: the PSG select and write
+  817                                   ; in as few instructions as the bus allows, patched immediates instead of
+  818                                   ; state, software end-of-interrupt as TOS runs the MFP - written as an
+  819                                   ; immediate byte, since the in-service registers ignore written ones. All
+  820                                   ; MFP interrupts arrive at 68000 level 6, so these never nest, and every
+  821                                   ; patched operand is addressed pc-relatively so the player stays loadable
+  822                                   ; anywhere - which also means it must run from RAM, where a demo lives.
   823                                   ;
-  824                                   ; The timers STACK: each handler drops the IPL to 5 as soon as its PSG
-  825                                   ; select/data pair is complete, so the MFP's higher-priority channel -
-  826                                   ; Timer A over Timer D - can nest instead of waiting a whole tick. The
-  827                                   ; nesting is strictly one-way: Timer A interrupts Timer D's handlers,
-  828                                   ; never the reverse (SEI mode admits only higher MFP priorities while an
-  829                                   ; in-service bit is set), and nothing of the player's sits above Timer A.
-  830                                   ; That direction is why the USP park belongs to the D-side drum alone: the
-  831                                   ; A-side drum - the one that can nest into a parked window - always uses
-  832                                   ; the stack, so a parked USP survives. The drop must never come before
-  833                                   ; the handler's LAST chip write: a nested tick re-selects the PSG.
-  834                                   ;
-  835                                   ; The patch offsets are load-bearing:
-  836                                   ;   drum:  select immediate at +3, sample address at +8, flag mask at _clear+3
-  837                                   ;   sid:   select at +2 and volume at +4 inside the imm long; the partner's
-  838                                   ;          address low word at +14, past the IPL drop, patched by yx6_link
-  839                                   ;   buzz:  the shape at +4
-  840                                   ; The SID vector swap patches the vector's LOW word only, so the two halves
-  841                                   ; of a block must share their address high word: keep the player inside one
-  842                                   ; 64K segment - anywhere a program smaller than 64K naturally loads.
-  843                                   ; -----------------------------------------------------------------------------
-  844                                   
-  845                                   ; One drum tick: the sample byte goes straight to the voice's volume register.
-  846                                   ; The byte after the last has bit 7 set, so the same move answers "done": park
-  847                                   ; the volume mid-scale against the click, stop the timer, drop the flag.
-  848                                   yx6_drumA:
-  849  000004DC  11FC00088800                   move.b  #8,$FFFF8800.w          ; SMC +3: select the drummed volume
-  850  000004E2  11F9123456788802               move.b  $12345678,$FFFF8802.w   ; SMC +8: the next sample byte
-  851  000004EA  6Bxx                           bmi.s   .ended
-  852  000004EC  46FC2500                       move.w  #$2500,sr               ; pair done: the other timer may stack
-  853  000004F0  2F08                           move.l  a0,-(sp)                ; the stack, never the USP: this side
-  854  000004F2  41FAFFF0                       lea     yx6_drumA+8(pc),a0      ; nests into parked windows
-  855  000004F6  5290                           addq.l  #1,(a0)                 ; step the operand itself
-  856  000004F8  205F                           movea.l (sp)+,a0
-  857  000004FA  11FC00DFFA0F                   move.b  #$DF,$FFFFFA0F.w
-  858  00000500  4E73                           rte
-  859                                   .ended:
-  860  00000502  11FC000D8802                   move.b  #$D,$FFFF8802.w         ; middle volume: no click
-  861  00000508  023800F0FA19                   andi.b  #$F0,$FFFFFA19.w        ; the sample ran out: stop Timer A
-  862  0000050E  46FC2500                       move.w  #$2500,sr
-  863  00000512  2F08                           move.l  a0,-(sp)
-  864  00000514  41FAxxxx                       lea     yx6_drums(pc),a0
-  865                                   yx6_drumA_clear:
-  866  00000518  021000FF                       andi.b  #$FF,(a0)               ; SMC +3: drop the voice's drum flag
-  867  0000051C  205F                           movea.l (sp)+,a0
-  868                                   yx6_parkA:
-  869  0000051E  11FC00DFFA0F                   move.b  #$DF,$FFFFFA0F.w
-  870  00000524  4E73                           rte
-  871                                   
-  872                                   ; The SID square: each tick writes one half of the square - the volume or
-  873                                   ; silence - and installs the other half as the next tick, one word into the
-  874                                   ; vector. Select and data land in one move.l: the immediate's bytes hit
-  875                                   ; $8800 (select) and $8802 (data) by bus layout.
-  876                                   yx6_sidA_on:
-  877  00000526  21FC08000F008800               move.l  #$08000F00,$FFFF8800.w  ; SMC +2 select, +4 volume
-  878  0000052E  46FC2500                       move.w  #$2500,sr
-  879  00000532  31FC00000136                   move.w  #0,$136.w               ; SMC +14: the quiet half is next
-  880  00000538  11FC00DFFA0F                   move.b  #$DF,$FFFFFA0F.w
-  881  0000053E  4E73                           rte
-  882                                   yx6_sidA_off:
-  883  00000540  21FC080000008800               move.l  #$08000000,$FFFF8800.w  ; SMC +2 select; silence
-  884  00000548  46FC2500                       move.w  #$2500,sr
-  885  0000054C  31FC00000136                   move.w  #0,$136.w               ; SMC +14: the loud half is next
-  886  00000552  11FC00DFFA0F                   move.b  #$DF,$FFFFFA0F.w
-  887  00000558  4E73                           rte
-  888                                   
-  889                                   ; The sync-buzzer tick: writing the shape to R13 restarts the envelope, and
-  890                                   ; that restart at the timer's rate is the whole effect.
-  891                                   yx6_buzzA:
-  892  0000055A  21FC0D0000008800               move.l  #$0D000000,$FFFF8800.w  ; SMC +4: the shape
-  893  00000562  46FC2500                       move.w  #$2500,sr
-  894  00000566  11FC00DFFA0F                   move.b  #$DF,$FFFFFA0F.w
-  895  0000056C  4E73                           rte
-  896                                   
-  897                                   ; Slot 2's instances: Timer D's stop, vector and in-service bit, otherwise
-  898                                   ; the A block byte for byte.
-  899                                   yx6_drumD:
-  900  0000056E  11FC00088800                   move.b  #8,$FFFF8800.w
-  901  00000574  11F9123456788802               move.b  $12345678,$FFFF8802.w
-  902  0000057C  6Bxx                           bmi.s   .ended
-  903  0000057E  46FC2500                       move.w  #$2500,sr               ; Timer A may nest from here on, and
-  904                                           .if YX6_SUPER_HOST              ; never parks the USP itself - so
-  905                                 -         move    a0,usp                  ; this side may
-  906                                 -         .else
-  907  00000582  2F08                           move.l  a0,-(sp)
-  908                                           .endif
-  909  00000584  41FAFFF0                       lea     yx6_drumD+8(pc),a0
-  910  00000588  5290                           addq.l  #1,(a0)
-  911                                           .if YX6_SUPER_HOST
-  912                                 -         move    usp,a0
-  913                                 -         .else
-  914  0000058A  205F                           movea.l (sp)+,a0
-  915                                           .endif
-  916  0000058C  11FC00EFFA11                   move.b  #$EF,$FFFFFA11.w
-  917  00000592  4E73                           rte
-  918                                   .ended:
-  919  00000594  11FC000D8802                   move.b  #$D,$FFFF8802.w
-  920  0000059A  023800F0FA1D                   andi.b  #$F0,$FFFFFA1D.w
-  921  000005A0  46FC2500                       move.w  #$2500,sr
-  922                                           .if YX6_SUPER_HOST
-  923                                 -         move    a0,usp
-  924                                 -         .else
-  925  000005A4  2F08                           move.l  a0,-(sp)
-  926                                           .endif
-  927  000005A6  41FAxxxx                       lea     yx6_drums(pc),a0
-  928                                   yx6_drumD_clear:
-  929  000005AA  021000FF                       andi.b  #$FF,(a0)
-  930                                           .if YX6_SUPER_HOST
-  931                                 -         move    usp,a0
-  932                                 -         .else
-  933  000005AE  205F                           movea.l (sp)+,a0
-  934                                           .endif
-  935                                   yx6_parkD:
-  936  000005B0  11FC00EFFA11                   move.b  #$EF,$FFFFFA11.w
-  937  000005B6  4E73                           rte
-  938                                   
-  939                                   yx6_sidD_on:
-  940  000005B8  21FC08000F008800               move.l  #$08000F00,$FFFF8800.w
-  941  000005C0  46FC2500                       move.w  #$2500,sr
-  942  000005C4  31FC00000112                   move.w  #0,$112.w
-  943  000005CA  11FC00EFFA11                   move.b  #$EF,$FFFFFA11.w
-  944  000005D0  4E73                           rte
-  945                                   yx6_sidD_off:
-  946  000005D2  21FC080000008800               move.l  #$08000000,$FFFF8800.w
-  947  000005DA  46FC2500                       move.w  #$2500,sr
-  948  000005DE  31FC00000112                   move.w  #0,$112.w
-  949  000005E4  11FC00EFFA11                   move.b  #$EF,$FFFFFA11.w
-  950  000005EA  4E73                           rte
-  951                                   
-  952                                   yx6_buzzD:
-  953  000005EC  21FC0D0000008800               move.l  #$0D000000,$FFFF8800.w
-  954  000005F4  46FC2500                       move.w  #$2500,sr
-  955  000005F8  11FC00EFFA11                   move.b  #$EF,$FFFFFA11.w
-  956  000005FE  4E73                           rte
+  824                                   ; The two slots' handlers are the same text twice, and MUST stay
+  825                                   ; byte-congruent: the slot machine and yx6_drum_start reach every patched
+  826                                   ; operand through ISR_ offsets measured on the A block. The rig checks the
+  827                                   ; congruence from the symbol table. The park entries - where YX6_init aims
+  828                                   ; the vectors while no effect runs - are the handlers' own tails.
+  829                                   ;
+  830                                   ; The timers STACK: each handler drops the IPL to 5 as soon as its PSG
+  831                                   ; select/data pair is complete, so the MFP's higher-priority channel -
+  832                                   ; Timer A over Timer D - can nest instead of waiting a whole tick. The
+  833                                   ; nesting is strictly one-way: Timer A interrupts Timer D's handlers,
+  834                                   ; never the reverse (SEI mode admits only higher MFP priorities while an
+  835                                   ; in-service bit is set), and nothing of the player's sits above Timer A.
+  836                                   ; That direction is why the USP park belongs to the D-side drum alone: the
+  837                                   ; A-side drum - the one that can nest into a parked window - always uses
+  838                                   ; the stack, so a parked USP survives. The drop must never come before
+  839                                   ; the handler's LAST chip write: a nested tick re-selects the PSG.
+  840                                   ;
+  841                                   ; The patch offsets are load-bearing:
+  842                                   ;   drum:  select immediate at +3, sample address at +8, flag mask at _clear+3
+  843                                   ;   sid:   select at +2 and volume at +4 inside the imm long; the partner's
+  844                                   ;          address low word at +14, past the IPL drop, patched by yx6_link
+  845                                   ;   buzz:  the shape at +4
+  846                                   ; The SID vector swap patches the vector's LOW word only, so the two halves
+  847                                   ; of a block must share their address high word: keep the player inside one
+  848                                   ; 64K segment - anywhere a program smaller than 64K naturally loads.
+  849                                   ; -----------------------------------------------------------------------------
+  850                                   
+  851                                   ; One drum tick: the sample byte goes straight to the voice's volume register.
+  852                                   ; The byte after the last has bit 7 set, so the same move answers "done": park
+  853                                   ; the volume mid-scale against the click, stop the timer, drop the flag.
+  854                                   yx6_drumA:
+  855  000004EC  11FC00088800                   move.b  #8,$FFFF8800.w          ; SMC +3: select the drummed volume
+  856  000004F2  11F9123456788802               move.b  $12345678,$FFFF8802.w   ; SMC +8: the next sample byte
+  857  000004FA  6Bxx                           bmi.s   .ended
+  858  000004FC  46FC2500                       move.w  #$2500,sr               ; pair done: the other timer may stack
+  859  00000500  2F08                           move.l  a0,-(sp)                ; the stack, never the USP: this side
+  860  00000502  41FAFFF0                       lea     yx6_drumA+8(pc),a0      ; nests into parked windows
+  861  00000506  5290                           addq.l  #1,(a0)                 ; step the operand itself
+  862  00000508  205F                           movea.l (sp)+,a0
+  863  0000050A  11FC00DFFA0F                   move.b  #$DF,$FFFFFA0F.w
+  864  00000510  4E73                           rte
+  865                                   .ended:
+  866  00000512  11FC000D8802                   move.b  #$D,$FFFF8802.w         ; middle volume: no click
+  867  00000518  023800F0FA19                   andi.b  #$F0,$FFFFFA19.w        ; the sample ran out: stop Timer A
+  868  0000051E  46FC2500                       move.w  #$2500,sr
+  869  00000522  2F08                           move.l  a0,-(sp)
+  870  00000524  41FAxxxx                       lea     yx6_drums(pc),a0
+  871                                   yx6_drumA_clear:
+  872  00000528  021000FF                       andi.b  #$FF,(a0)               ; SMC +3: drop the voice's drum flag
+  873  0000052C  205F                           movea.l (sp)+,a0
+  874                                   yx6_parkA:
+  875  0000052E  11FC00DFFA0F                   move.b  #$DF,$FFFFFA0F.w
+  876  00000534  4E73                           rte
+  877                                   
+  878                                   ; The SID square: each tick writes one half of the square - the volume or
+  879                                   ; silence - and installs the other half as the next tick, one word into the
+  880                                   ; vector. Select and data land in one move.l: the immediate's bytes hit
+  881                                   ; $8800 (select) and $8802 (data) by bus layout.
+  882                                   yx6_sidA_on:
+  883  00000536  21FC08000F008800               move.l  #$08000F00,$FFFF8800.w  ; SMC +2 select, +4 volume
+  884  0000053E  46FC2500                       move.w  #$2500,sr
+  885  00000542  31FC00000136                   move.w  #0,$136.w               ; SMC +14: the quiet half is next
+  886  00000548  11FC00DFFA0F                   move.b  #$DF,$FFFFFA0F.w
+  887  0000054E  4E73                           rte
+  888                                   yx6_sidA_off:
+  889  00000550  21FC080000008800               move.l  #$08000000,$FFFF8800.w  ; SMC +2 select; silence
+  890  00000558  46FC2500                       move.w  #$2500,sr
+  891  0000055C  31FC00000136                   move.w  #0,$136.w               ; SMC +14: the loud half is next
+  892  00000562  11FC00DFFA0F                   move.b  #$DF,$FFFFFA0F.w
+  893  00000568  4E73                           rte
+  894                                   
+  895                                   ; The sync-buzzer tick: writing the shape to R13 restarts the envelope, and
+  896                                   ; that restart at the timer's rate is the whole effect.
+  897                                   yx6_buzzA:
+  898  0000056A  21FC0D0000008800               move.l  #$0D000000,$FFFF8800.w  ; SMC +4: the shape
+  899  00000572  46FC2500                       move.w  #$2500,sr
+  900  00000576  11FC00DFFA0F                   move.b  #$DF,$FFFFFA0F.w
+  901  0000057C  4E73                           rte
+  902                                   
+  903                                   ; Slot 2's instances: Timer D's stop, vector and in-service bit, otherwise
+  904                                   ; the A block byte for byte.
+  905                                   yx6_drumD:
+  906  0000057E  11FC00088800                   move.b  #8,$FFFF8800.w
+  907  00000584  11F9123456788802               move.b  $12345678,$FFFF8802.w
+  908  0000058C  6Bxx                           bmi.s   .ended
+  909  0000058E  46FC2500                       move.w  #$2500,sr               ; Timer A may nest from here on, and
+  910                                           .if YX6_SUPER_HOST              ; never parks the USP itself - so
+  911                                 -         move    a0,usp                  ; this side may
+  912                                 -         .else
+  913  00000592  2F08                           move.l  a0,-(sp)
+  914                                           .endif
+  915  00000594  41FAFFF0                       lea     yx6_drumD+8(pc),a0
+  916  00000598  5290                           addq.l  #1,(a0)
+  917                                           .if YX6_SUPER_HOST
+  918                                 -         move    usp,a0
+  919                                 -         .else
+  920  0000059A  205F                           movea.l (sp)+,a0
+  921                                           .endif
+  922  0000059C  11FC00EFFA11                   move.b  #$EF,$FFFFFA11.w
+  923  000005A2  4E73                           rte
+  924                                   .ended:
+  925  000005A4  11FC000D8802                   move.b  #$D,$FFFF8802.w
+  926  000005AA  023800F0FA1D                   andi.b  #$F0,$FFFFFA1D.w
+  927  000005B0  46FC2500                       move.w  #$2500,sr
+  928                                           .if YX6_SUPER_HOST
+  929                                 -         move    a0,usp
+  930                                 -         .else
+  931  000005B4  2F08                           move.l  a0,-(sp)
+  932                                           .endif
+  933  000005B6  41FAxxxx                       lea     yx6_drums(pc),a0
+  934                                   yx6_drumD_clear:
+  935  000005BA  021000FF                       andi.b  #$FF,(a0)
+  936                                           .if YX6_SUPER_HOST
+  937                                 -         move    usp,a0
+  938                                 -         .else
+  939  000005BE  205F                           movea.l (sp)+,a0
+  940                                           .endif
+  941                                   yx6_parkD:
+  942  000005C0  11FC00EFFA11                   move.b  #$EF,$FFFFFA11.w
+  943  000005C6  4E73                           rte
+  944                                   
+  945                                   yx6_sidD_on:
+  946  000005C8  21FC08000F008800               move.l  #$08000F00,$FFFF8800.w
+  947  000005D0  46FC2500                       move.w  #$2500,sr
+  948  000005D4  31FC00000112                   move.w  #0,$112.w
+  949  000005DA  11FC00EFFA11                   move.b  #$EF,$FFFFFA11.w
+  950  000005E0  4E73                           rte
+  951                                   yx6_sidD_off:
+  952  000005E2  21FC080000008800               move.l  #$08000000,$FFFF8800.w
+  953  000005EA  46FC2500                       move.w  #$2500,sr
+  954  000005EE  31FC00000112                   move.w  #0,$112.w
+  955  000005F4  11FC00EFFA11                   move.b  #$EF,$FFFFFA11.w
+  956  000005FA  4E73                           rte
   957                                   
-  958                                   yx6_drums:
-  959  00000600  00                             dc.b    0                       ; voice bits 0-2: a drum is running
-  960  00000601  00                             even
-  961                                   
-  962                                   ; Where the patched operands sit, measured on the A block; the D block is
-  963                                   ; byte-congruent, so the same offsets serve both through SD_ISR.
-  964                                   ; rmac evaluates left to right: the parentheses are load-bearing.
-  965           =00000003               ISR_DRUM_SEL    equ     3
-  966           =00000008               ISR_DRUM_PTR    equ     8
-  967           =0000003F               ISR_CLEAR       equ     (yx6_drumA_clear-yx6_drumA)+3
-  968           =0000004A               ISR_SIDON       equ     yx6_sidA_on-yx6_drumA
-  969           =0000004C               ISR_SIDON_SEL   equ     ISR_SIDON+2
-  970           =0000004E               ISR_SID_VOL     equ     ISR_SIDON+4
-  971           =00000058               ISR_SIDON_NEXT  equ     ISR_SIDON+14
-  972           =00000064               ISR_SIDOFF      equ     yx6_sidA_off-yx6_drumA
-  973           =00000066               ISR_SIDOFF_SEL  equ     ISR_SIDOFF+2
-  974           =00000072               ISR_SIDOFF_NEXT equ     ISR_SIDOFF+14
-  975           =0000007E               ISR_BUZZ        equ     yx6_buzzA-yx6_drumA
-  976           =00000082               ISR_BUZZ_SHAPE  equ     ISR_BUZZ+4
-  977                                   
-  978                                   ; -----------------------------------------------------------------------------
-  979                                   ; yx6_link, from YX6_init: the run-time addresses only a loaded player knows.
-  980                                   ; Each descriptor gets its ISR block and its partner, both slots' last code
-  981                                   ; and count are cleared, and the SID halves get each other's address low
-  982                                   ; word - the vector's high word never changes, and neither do these, so
-  983                                   ; they are patched once here rather than on every SID start.
+  958                                   yx6_buzzD:
+  959  000005FC  21FC0D0000008800               move.l  #$0D000000,$FFFF8800.w
+  960  00000604  46FC2500                       move.w  #$2500,sr
+  961  00000608  11FC00EFFA11                   move.b  #$EF,$FFFFFA11.w
+  962  0000060E  4E73                           rte
+  963                                   
+  964                                   yx6_drums:
+  965  00000610  00                             dc.b    0                       ; voice bits 0-2: a drum is running
+  966  00000611  00                             even
+  967                                   
+  968                                   ; Where the patched operands sit, measured on the A block; the D block is
+  969                                   ; byte-congruent, so the same offsets serve both through SD_ISR.
+  970                                   ; rmac evaluates left to right: the parentheses are load-bearing.
+  971           =00000003               ISR_DRUM_SEL    equ     3
+  972           =00000008               ISR_DRUM_PTR    equ     8
+  973           =0000003F               ISR_CLEAR       equ     (yx6_drumA_clear-yx6_drumA)+3
+  974           =0000004A               ISR_SIDON       equ     yx6_sidA_on-yx6_drumA
+  975           =0000004C               ISR_SIDON_SEL   equ     ISR_SIDON+2
+  976           =0000004E               ISR_SID_VOL     equ     ISR_SIDON+4
+  977           =00000058               ISR_SIDON_NEXT  equ     ISR_SIDON+14
+  978           =00000064               ISR_SIDOFF      equ     yx6_sidA_off-yx6_drumA
+  979           =00000066               ISR_SIDOFF_SEL  equ     ISR_SIDOFF+2
+  980           =00000072               ISR_SIDOFF_NEXT equ     ISR_SIDOFF+14
+  981           =0000007E               ISR_BUZZ        equ     yx6_buzzA-yx6_drumA
+  982           =00000082               ISR_BUZZ_SHAPE  equ     ISR_BUZZ+4
+  983                                   
   984                                   ; -----------------------------------------------------------------------------
-  985                                   yx6_link:
-  986  00000602  41FAFEB0                       lea     yx6_desc1(pc),a0
-  987  00000606  43FAFEC0                       lea     yx6_desc2(pc),a1
-  988  0000060A  21490010                       move.l  a1,SD_OTHER(a0)
-  989  0000060E  23480010                       move.l  a0,SD_OTHER(a1)
-  990  00000612  4250                           clr.w   (a0)                    ; E and T last, both slots
-  991  00000614  4251                           clr.w   (a1)
-  992  00000616  45FAFEC4                       lea     yx6_drumA(pc),a2
-  993  0000061A  214A000C                       move.l  a2,SD_ISR(a0)
-  994  0000061E  61xx                           bsr.s   .partners
-  995  00000620  45FAFF4C                       lea     yx6_drumD(pc),a2
-  996  00000624  234A000C                       move.l  a2,SD_ISR(a1)
-  997                                   .partners:
-  998  00000628  41EA0064                       lea     ISR_SIDOFF(a2),a0       ; each half installs the other
-  999  0000062C  2008                           move.l  a0,d0
- 1000  0000062E  35400058                       move.w  d0,ISR_SIDON_NEXT(a2)
- 1001  00000632  41EA004A                       lea     ISR_SIDON(a2),a0
- 1002  00000636  2008                           move.l  a0,d0
- 1003  00000638  35400072                       move.w  d0,ISR_SIDOFF_NEXT(a2)
- 1004  0000063C  4E75                           rts
- 1005                                   
- 1006                                   ; -----------------------------------------------------------------------------
- 1007                                   ; yx6_slot: one slot of the effect stage - both slots, through a5.
- 1008                                   ; A changed code reprograms the slot's timer from scratch, a held one
- 1009                                   ; updates only the count (a running MFP timer loads it at its next reload),
- 1010                                   ; a dropped one stops the timer - unless the slot ran a drum, which
- 1011                                   ; finishes by itself. A held DRUM code is a trigger on EVERY frame it is
- 1012                                   ; present, as the reference player starts one on each coded frame: real
- 1013                                   ; dumps carry back-to-back codes whose ring bytes name different samples -
- 1014                                   ; an attack, then a body - and only a full restart plays the second one.
- 1015                                   ;
- 1016                                   ; in: d0.b = E (never 0 with E-last also 0: the caller's gate), d1.b = T,
- 1017                                   ;     a5 = the slot's descriptor, a3 = workspace, d3.l = N.
- 1018                                   ; preserves d3/a3/a5; clobbers d0-d2/d4-d5, a0-a2/a4.
- 1019                                   ; -----------------------------------------------------------------------------
- 1020                                   yx6_slot:
- 1021  0000063E  B015                           cmp.b   (a5),d0
- 1022  00000640  6700xxxx                       beq.w   .held
- 1023  00000644  1815                           move.b  (a5),d4                 ; what the slot was doing before
- 1024  00000646  1A80                           move.b  d0,(a5)
- 1025  00000648  4A00                           tst.b   d0
- 1026  0000064A  6700xxxx                       beq.w   .released
- 1027                                   ; A new code: find the parameter register's ring - r8+voice carries the SID
- 1028                                   ; volume, the drum number or the buzzer shape - then let the type arm its
- 1029                                   ; handler; every type then (re)programs the timer the same way. The voice
- 1030                                   ; stays live in d5, the parameter byte in a1, for whoever needs them.
- 1031  0000064E  1A00                           move.b  d0,d5
- 1032  00000650  E80D                           lsr.b   #4,d5
- 1033  00000652  CA7C0003                       and.w   #3,d5
- 1034  00000656  5345                           subq.w  #1,d5                   ; the voice, 0..2
- 1035  00000658  3405                           move.w  d5,d2
- 1036  0000065A  5042                           addq.w  #8,d2
- 1037  0000065C  C4EB0024                       mulu.w  YX6_N(a3),d2
- 1038  00000660  2B420008                       move.l  d2,SD_PARM(a5)
- 1039  00000664  2253                           movea.l YX6_CURSOR(a3),a1
- 1040  00000666  D3C2                           adda.l  d2,a1                   ; a1 = the slot's parameter byte
- 1041  00000668  1400                           move.b  d0,d2                   ; (d4 still holds the OLD code, for
- 1042  0000066A  C43C00C0                       and.b   #$C0,d2                 ; the retune test below)
- 1043  0000066E  67xx                           beq.s   .sid
- 1044  00000670  B43C0040                       cmp.b   #$40,d2
- 1045  00000674  67xx                           beq.s   .drum
- 1046  00000676  1811                           move.b  (a1),d4                 ; $C0, the buzzer ($80 never packs):
- 1047  00000678  C83C000F                       and.b   #15,d4                  ; the shape rides the tick's immediate
- 1048  0000067C  206D000C                       movea.l SD_ISR(a5),a0
- 1049  00000680  11440082                       move.b  d4,ISR_BUZZ_SHAPE(a0)
- 1050  00000684  41E8007E                       lea     ISR_BUZZ(a0),a0
- 1051  00000688  60xx                           bra.s   .armed
- 1052                                   .sid:
- 1053                                   ; While a drum owns this voice, its volume register is the drum's alone: the
- 1054                                   ; SID stays un-armed and the cleared last-code makes every following frame
- 1055                                   ; retry, so it comes back by itself the frame after the drum ends. That is
- 1056                                   ; the reference player's priority, where the drum overrides the volume.
- 1057  0000068A  7401                           moveq   #1,d2                   ; (d4 still holds the OLD code)
- 1058  0000068C  EB2A                           lsl.b   d5,d2
- 1059  0000068E  C43AFF70                       and.b   yx6_drums(pc),d2
- 1060  00000692  67xx                           beq.s   .sid_free
- 1061  00000694  4215                           clr.b   (a5)
- 1062  00000696  4E75                           rts
- 1063                                   .sid_free:
- 1064                                   ; A code that differs from the old one ONLY in its prescaler is the same
- 1065                                   ; SID sliding across a prescaler boundary - real tunes wobble across one
- 1066                                   ; many times a second. The reference player free-runs the square's phase
- 1067                                   ; through frequency changes, so keep the installed half: retune the timer
- 1068                                   ; without touching the vector. A full restart here would reset the phase
- 1069                                   ; to the loud half every flip - an audible ticking.
- 1070  00000698  1400                           move.b  d0,d2
- 1071  0000069A  B902                           eor.b   d4,d2
- 1072  0000069C  C43C00F0                       and.b   #$F0,d2                 ; type and voice unchanged?
- 1073  000006A0  67xx                           beq.s   .sid_retune
- 1074  000006A2  3805                           move.w  d5,d4                   ; a fresh SID: the voice's volume
- 1075  000006A4  5044                           addq.w  #8,d4                   ; register into both halves' selects
- 1076  000006A6  206D000C                       movea.l SD_ISR(a5),a0
- 1077  000006AA  1144004C                       move.b  d4,ISR_SIDON_SEL(a0)
- 1078  000006AE  11440066                       move.b  d4,ISR_SIDOFF_SEL(a0)
- 1079  000006B2  1811                           move.b  (a1),d4
- 1080  000006B4  C83C000F                       and.b   #15,d4
- 1081  000006B8  1144004E                       move.b  d4,ISR_SID_VOL(a0)      ; the loud half's volume
- 1082  000006BC  41E8004A                       lea     ISR_SIDON(a0),a0
- 1083  000006C0  60xx                           bra.s   .armed
- 1084                                   .sid_retune:
- 1085  000006C2  1811                           move.b  (a1),d4                 ; the volume still tracks the ring
- 1086  000006C4  C83C000F                       and.b   #15,d4
- 1087  000006C8  206D000C                       movea.l SD_ISR(a5),a0
- 1088  000006CC  1144004E                       move.b  d4,ISR_SID_VOL(a0)
- 1089  000006D0  306D0006                       movea.w SD_VEC(a5),a0           ; keep whichever half is installed:
- 1090  000006D4  2050                           movea.l (a0),a0                 ; .armed writes the same value back
- 1091  000006D6  60xx                           bra.s   .armed
- 1092                                   .drum:
- 1093  000006D8  6100xxxx                       bsr     yx6_drum_start
- 1094                                   .armed:
- 1095  000006DC  1B410001                       move.b  d1,SD_TLAST(a5)
- 1096  000006E0  326D0002                       movea.w SD_CTRL(a5),a1
- 1097  000006E4  346D0006                       movea.w SD_VEC(a5),a2
- 1098  000006E8  40E7                           move.w  sr,-(sp)
- 1099  000006EA  007C0700                       ori.w   #$0700,sr
- 1100  000006EE  021100F0                       andi.b  #$F0,(a1)               ; stop, then vector, count, prescaler
- 1101  000006F2  2488                           move.l  a0,(a2)
- 1102  000006F4  346D0004                       movea.w SD_DATA(a5),a2
- 1103  000006F8  1481                           move.b  d1,(a2)
- 1104  000006FA  1A00                           move.b  d0,d5
- 1105  000006FC  CA3C0007                       and.b   #7,d5
- 1106  00000700  8B11                           or.b    d5,(a1)
- 1107  00000702  46DF                           move.w  (sp)+,sr
- 1108  00000704  4E75                           rts
- 1109                                   .released:
- 1110  00000706  C83C00C0                       and.b   #$C0,d4                 ; the level dropped: stop the timer -
- 1111  0000070A  B83C0040                       cmp.b   #$40,d4                 ; unless a drum is finishing by itself
- 1112  0000070E  67xx                           beq.s   .out
+  985                                   ; yx6_link, from YX6_init: the run-time addresses only a loaded player knows.
+  986                                   ; Each descriptor gets its ISR block and its partner, both slots' last code
+  987                                   ; and count are cleared, and the SID halves get each other's address low
+  988                                   ; word - the vector's high word never changes, and neither do these, so
+  989                                   ; they are patched once here rather than on every SID start.
+  990                                   ; -----------------------------------------------------------------------------
+  991                                   yx6_link:
+  992  00000612  7402                           moveq   #2,d2                   ; every burst gate open: a previous
+  993  00000614  3F02                   .gates: move.w  d2,-(sp)                ; session's mute must not leak
+  994  00000616  7802                           moveq   #2,d4
+  995  00000618  6100xxxx                       bsr     yx6_burst_gate
+  996  0000061C  341F                           move.w  (sp)+,d2
+  997  0000061E  51CAFFF4                       dbra    d2,.gates
+  998  00000622  41FAFEA0                       lea     yx6_desc1(pc),a0
+  999  00000626  43FAFEB0                       lea     yx6_desc2(pc),a1
+ 1000  0000062A  21490010                       move.l  a1,SD_OTHER(a0)
+ 1001  0000062E  23480010                       move.l  a0,SD_OTHER(a1)
+ 1002  00000632  4250                           clr.w   (a0)                    ; E and T last, both slots
+ 1003  00000634  4251                           clr.w   (a1)
+ 1004  00000636  45FAFEB4                       lea     yx6_drumA(pc),a2
+ 1005  0000063A  214A000C                       move.l  a2,SD_ISR(a0)
+ 1006  0000063E  61xx                           bsr.s   .partners
+ 1007  00000640  45FAFF3C                       lea     yx6_drumD(pc),a2
+ 1008  00000644  234A000C                       move.l  a2,SD_ISR(a1)
+ 1009                                   .partners:
+ 1010  00000648  41EA0064                       lea     ISR_SIDOFF(a2),a0       ; each half installs the other
+ 1011  0000064C  2008                           move.l  a0,d0
+ 1012  0000064E  35400058                       move.w  d0,ISR_SIDON_NEXT(a2)
+ 1013  00000652  41EA004A                       lea     ISR_SIDON(a2),a0
+ 1014  00000656  2008                           move.l  a0,d0
+ 1015  00000658  35400072                       move.w  d0,ISR_SIDOFF_NEXT(a2)
+ 1016  0000065C  4E75                           rts
+ 1017                                   
+ 1018                                   ; -----------------------------------------------------------------------------
+ 1019                                   ; yx6_slot: one slot of the effect stage - both slots, through a5.
+ 1020                                   ; A changed code reprograms the slot's timer from scratch, a held one
+ 1021                                   ; updates only the count (a running MFP timer loads it at its next reload),
+ 1022                                   ; a dropped one stops the timer - unless the slot ran a drum, which
+ 1023                                   ; finishes by itself. A held DRUM code is a trigger on EVERY frame it is
+ 1024                                   ; present, as the reference player starts one on each coded frame: real
+ 1025                                   ; dumps carry back-to-back codes whose ring bytes name different samples -
+ 1026                                   ; an attack, then a body - and only a full restart plays the second one.
+ 1027                                   ;
+ 1028                                   ; in: d0.b = E (never 0 with E-last also 0: the caller's gate), d1.b = T,
+ 1029                                   ;     a5 = the slot's descriptor, a3 = workspace, d3.l = N.
+ 1030                                   ; preserves d3/a3/a5; clobbers d0-d2/d4-d5, a0-a2/a4.
+ 1031                                   ; -----------------------------------------------------------------------------
+ 1032                                   yx6_slot:
+ 1033  0000065E  B015                           cmp.b   (a5),d0
+ 1034  00000660  6700xxxx                       beq.w   .held
+ 1035  00000664  1815                           move.b  (a5),d4                 ; what the slot was doing before
+ 1036  00000666  1A80                           move.b  d0,(a5)
+ 1037  00000668  4A00                           tst.b   d0
+ 1038  0000066A  6700xxxx                       beq.w   .released
+ 1039                                   ; A new code: find the parameter register's ring - r8+voice carries the SID
+ 1040                                   ; volume, the drum number or the buzzer shape - then let the type arm its
+ 1041                                   ; handler; every type then (re)programs the timer the same way. The voice
+ 1042                                   ; stays live in d5, the parameter byte in a1, for whoever needs them.
+ 1043  0000066E  1A00                           move.b  d0,d5
+ 1044  00000670  E80D                           lsr.b   #4,d5
+ 1045  00000672  CA7C0003                       and.w   #3,d5
+ 1046  00000676  5345                           subq.w  #1,d5                   ; the voice, 0..2
+ 1047  00000678  3405                           move.w  d5,d2
+ 1048  0000067A  5042                           addq.w  #8,d2
+ 1049  0000067C  C4EB0024                       mulu.w  YX6_N(a3),d2
+ 1050  00000680  2B420008                       move.l  d2,SD_PARM(a5)
+ 1051  00000684  2253                           movea.l YX6_CURSOR(a3),a1
+ 1052  00000686  D3C2                           adda.l  d2,a1                   ; a1 = the slot's parameter byte
+ 1053  00000688  1400                           move.b  d0,d2                   ; (d4 still holds the OLD code, for
+ 1054  0000068A  C43C00C0                       and.b   #$C0,d2                 ; the retune test below)
+ 1055  0000068E  67xx                           beq.s   .sid
+ 1056  00000690  B43C0040                       cmp.b   #$40,d2
+ 1057  00000694  67xx                           beq.s   .drum
+ 1058  00000696  1811                           move.b  (a1),d4                 ; $C0, the buzzer ($80 never packs):
+ 1059  00000698  C83C000F                       and.b   #15,d4                  ; the shape rides the tick's immediate
+ 1060  0000069C  206D000C                       movea.l SD_ISR(a5),a0
+ 1061  000006A0  11440082                       move.b  d4,ISR_BUZZ_SHAPE(a0)
+ 1062  000006A4  41E8007E                       lea     ISR_BUZZ(a0),a0
+ 1063  000006A8  60xx                           bra.s   .armed
+ 1064                                   .sid:
+ 1065                                   ; While a drum owns this voice, its volume register is the drum's alone: the
+ 1066                                   ; SID stays un-armed and the cleared last-code makes every following frame
+ 1067                                   ; retry, so it comes back by itself the frame after the drum ends. That is
+ 1068                                   ; the reference player's priority, where the drum overrides the volume.
+ 1069  000006AA  7401                           moveq   #1,d2                   ; (d4 still holds the OLD code)
+ 1070  000006AC  EB2A                           lsl.b   d5,d2
+ 1071  000006AE  C43AFF60                       and.b   yx6_drums(pc),d2
+ 1072  000006B2  67xx                           beq.s   .sid_free
+ 1073  000006B4  4215                           clr.b   (a5)
+ 1074  000006B6  6100xxxx                       bsr     yx6_burst_open_old      ; a replaced SID's gate must not leak
+ 1075  000006BA  4E75                           rts
+ 1076                                   .sid_free:
+ 1077                                   ; A code that differs from the old one ONLY in its prescaler is the same
+ 1078                                   ; SID sliding across a prescaler boundary - real tunes wobble across one
+ 1079                                   ; many times a second. The reference player free-runs the square's phase
+ 1080                                   ; through frequency changes, so keep the installed half: retune the timer
+ 1081                                   ; without touching the vector. A full restart here would reset the phase
+ 1082                                   ; to the loud half every flip - an audible ticking.
+ 1083  000006BC  1400                           move.b  d0,d2
+ 1084  000006BE  B902                           eor.b   d4,d2
+ 1085  000006C0  C43C00F0                       and.b   #$F0,d2                 ; type and voice unchanged?
+ 1086  000006C4  67xx                           beq.s   .sid_retune
+ 1087  000006C6  6100xxxx                       bsr     yx6_burst_open_old      ; a replaced SID's voice write resumes
+ 1088  000006CA  3405                           move.w  d5,d2                   ; ...and the new voice's is muted:
+ 1089  000006CC  7800                           moveq   #0,d4                   ; the square owns it now
+ 1090  000006CE  6100xxxx                       bsr     yx6_burst_gate
+ 1091  000006D2  3805                           move.w  d5,d4                   ; a fresh SID: the voice's volume
+ 1092  000006D4  5044                           addq.w  #8,d4                   ; register into both halves' selects
+ 1093  000006D6  206D000C                       movea.l SD_ISR(a5),a0
+ 1094  000006DA  1144004C                       move.b  d4,ISR_SIDON_SEL(a0)
+ 1095  000006DE  11440066                       move.b  d4,ISR_SIDOFF_SEL(a0)
+ 1096  000006E2  1811                           move.b  (a1),d4
+ 1097  000006E4  C83C000F                       and.b   #15,d4
+ 1098  000006E8  1144004E                       move.b  d4,ISR_SID_VOL(a0)      ; the loud half's volume
+ 1099  000006EC  41E8004A                       lea     ISR_SIDON(a0),a0
+ 1100  000006F0  60xx                           bra.s   .armed
+ 1101                                   .sid_retune:
+ 1102  000006F2  1811                           move.b  (a1),d4                 ; the volume still tracks the ring
+ 1103  000006F4  C83C000F                       and.b   #15,d4
+ 1104  000006F8  206D000C                       movea.l SD_ISR(a5),a0
+ 1105  000006FC  1144004E                       move.b  d4,ISR_SID_VOL(a0)
+ 1106  00000700  306D0006                       movea.w SD_VEC(a5),a0           ; keep whichever half is installed:
+ 1107  00000704  2050                           movea.l (a0),a0                 ; .armed writes the same value back
+ 1108  00000706  60xx                           bra.s   .armed
+ 1109                                   .drum:
+ 1110  00000708  6100xxxx                       bsr     yx6_drum_start
+ 1111                                   .armed:
+ 1112  0000070C  1B410001                       move.b  d1,SD_TLAST(a5)
  1113  00000710  326D0002                       movea.w SD_CTRL(a5),a1
- 1114  00000714  021100F0                       andi.b  #$F0,(a1)
- 1115                                   .out:
- 1116  00000718  4E75                           rts
- 1117                                   .held:                                  ; E != 0 here: the caller's gate
- 1118  0000071A  1A00                           move.b  d0,d5
- 1119  0000071C  CA3C00C0                       and.b   #$C0,d5
- 1120  00000720  BA3C0040                       cmp.b   #$40,d5
- 1121  00000724  67B2                           beq.s   .drum                   ; a held drum code triggers again
- 1122  00000726  B22D0001                       cmp.b   SD_TLAST(a5),d1         ; reload only a CHANGED count: a write
- 1123  0000072A  67xx                           beq.s   .track                  ; meeting the counter at 01 is
- 1124  0000072C  1B410001                       move.b  d1,SD_TLAST(a5)         ; indeterminate, so do not roll dice
- 1125  00000730  346D0004                       movea.w SD_DATA(a5),a2          ; fifty times a second
- 1126  00000734  1481                           move.b  d1,(a2)
- 1127                                   .track:
- 1128                                   ; The level-held effects track their parameter every frame: the SID volume
- 1129                                   ; and the buzzer shape follow the voice's ring byte, as the reference player
- 1130                                   ; re-reads them.
- 1131  00000736  2053                           movea.l YX6_CURSOR(a3),a0
- 1132  00000738  D1ED0008                       adda.l  SD_PARM(a5),a0
- 1133  0000073C  1810                           move.b  (a0),d4
- 1134  0000073E  C83C000F                       and.b   #15,d4
- 1135  00000742  206D000C                       movea.l SD_ISR(a5),a0
- 1136  00000746  4A05                           tst.b   d5                      ; $00 SID, $C0 buzzer
- 1137  00000748  67xx                           beq.s   .vol
- 1138  0000074A  11440082                       move.b  d4,ISR_BUZZ_SHAPE(a0)
- 1139  0000074E  4E75                           rts
- 1140                                   .vol:
- 1141  00000750  1144004E                       move.b  d4,ISR_SID_VOL(a0)
- 1142  00000754  4E75                           rts
- 1143                                   
- 1144                                   ; -----------------------------------------------------------------------------
- 1145                                   ; yx6_drum_start: read the sample number from the drummed voice's ring byte
- 1146                                   ; and silence that byte - it is a number, not a volume - flag the voice for
- 1147                                   ; the mixer pass, then arm the drum routine: its select register, its sample
- 1148                                   ; address, and the flag-clearing mask, all patched into its own operands.
- 1149                                   ; If the other slot holds a SID on this same voice, the drum takes the
- 1150                                   ; volume register for itself, as the reference player's drum override does:
- 1151                                   ; stop that SID's timer and clear its last code, so the slot retries every
- 1152                                   ; frame - suppressed while the flag is up - and restarts the SID by itself
- 1153                                   ; the frame after the drum ends.
- 1154                                   ; Called from the new-code path AND the held retrigger, which has neither
- 1155                                   ; the voice nor the parameter pointer at hand - so it derives its own.
- 1156                                   ; in: d0.b = E, a5 = the descriptor, SD_PARM set; out: a0 = the handler;
- 1157                                   ; keeps d0/d1/d3/a5.
- 1158                                   ; -----------------------------------------------------------------------------
- 1159                                   yx6_drum_start:
- 1160  00000756  2053                           movea.l YX6_CURSOR(a3),a0
- 1161  00000758  D1ED0008                       adda.l  SD_PARM(a5),a0
- 1162  0000075C  6100xxxx                       bsr     yx6_borrow              ; the ring gets this byte back
- 1163  00000760  7800                           moveq   #0,d4
- 1164  00000762  1810                           move.b  (a0),d4                 ; the sample number, validated at pack
- 1165  00000764  4210                           clr.b   (a0)                    ; sanitize: silence, not a number
- 1166  00000766  1A00                           move.b  d0,d5
- 1167  00000768  E80D                           lsr.b   #4,d5
- 1168  0000076A  CA7C0003                       and.w   #3,d5
- 1169  0000076E  5345                           subq.w  #1,d5                   ; the voice, for flag and select
- 1170  00000770  7401                           moveq   #1,d2
- 1171  00000772  EB2A                           lsl.b   d5,d2
- 1172  00000774  41FAFE8A                       lea     yx6_drums(pc),a0
- 1173  00000778  8510                           or.b    d2,(a0)                 ; the mixer pass forces this voice off
- 1174  0000077A  4602                           not.b   d2
- 1175  0000077C  226D000C                       movea.l SD_ISR(a5),a1
- 1176  00000780  1342003F                       move.b  d2,ISR_CLEAR(a1)        ; the end tick drops the same flag
- 1177  00000784  286D0010                       movea.l SD_OTHER(a5),a4         ; a SID on this voice in the other
- 1178  00000788  1414                           move.b  (a4),d2                 ; slot: the drum takes the register
- 1179  0000078A  C43C00C0                       and.b   #$C0,d2
- 1180  0000078E  66xx                           bne.s   .keep
- 1181  00000790  1414                           move.b  (a4),d2
- 1182  00000792  B102                           eor.b   d0,d2
- 1183  00000794  C43C0030                       and.b   #$30,d2
- 1184  00000798  66xx                           bne.s   .keep
- 1185  0000079A  306C0002                       movea.w SD_CTRL(a4),a0
- 1186  0000079E  021000F0                       andi.b  #$F0,(a0)               ; stop the other slot's SID
- 1187  000007A2  4214                           clr.b   (a4)                    ; and let it retry every frame
- 1188                                   .keep:
- 1189  000007A4  3405                           move.w  d5,d2
- 1190  000007A6  5042                           addq.w  #8,d2                   ; the voice's volume register
- 1191  000007A8  13420003                       move.b  d2,ISR_DRUM_SEL(a1)     ; the tick's select immediate
- 1192  000007AC  D844                           add.w   d4,d4                   ; a drum table entry is six bytes:
- 1193  000007AE  3404                           move.w  d4,d2                   ; 6n = 2n + 4n
- 1194  000007B0  D844                           add.w   d4,d4
- 1195  000007B2  D842                           add.w   d2,d4
- 1196  000007B4  246B0014                       movea.l YX6_FILE(a3),a2
- 1197  000007B8  204A                           movea.l a2,a0
- 1198  000007BA  D1E8001C                       adda.l  YH_DRUMS(a0),a0
- 1199  000007BE  24304000                       move.l  0(a0,d4.w),d2           ; the sample's offset in the file
- 1200  000007C2  D48A                           add.l   a2,d2
- 1201  000007C4  23420008                       move.l  d2,ISR_DRUM_PTR(a1)     ; the tick reads through its operand
- 1202  000007C8  2049                           movea.l a1,a0                   ; the handler is the block base
- 1203  000007CA  4E75                           rts
- 1204                                   
- 1205                                   ; Records a ring byte about to be edited, for the restore after the burst.
- 1206                                   ; in: a0 = the byte; clobbers d2.
- 1207                                   yx6_borrow:
- 1208  000007CC  7400                           moveq   #0,d2
- 1209  000007CE  142B0036                       move.b  YX6_PATCHES(a3),d2
- 1210  000007D2  522B0036                       addq.b  #1,YX6_PATCHES(a3)
- 1211  000007D6  17902037                       move.b  (a0),YX6_PATCH_VAL(a3,d2.w)
- 1212  000007DA  D442                           add.w   d2,d2
- 1213  000007DC  D442                           add.w   d2,d2
- 1214  000007DE  2788203A                       move.l  a0,YX6_PATCH_ADDR(a3,d2.w)
- 1215  000007E2  4E75                           rts
+ 1114  00000714  346D0006                       movea.w SD_VEC(a5),a2
+ 1115  00000718  40E7                           move.w  sr,-(sp)
+ 1116  0000071A  007C0700                       ori.w   #$0700,sr
+ 1117  0000071E  021100F0                       andi.b  #$F0,(a1)               ; stop, then vector, count, prescaler
+ 1118  00000722  2488                           move.l  a0,(a2)
+ 1119  00000724  346D0004                       movea.w SD_DATA(a5),a2
+ 1120  00000728  1481                           move.b  d1,(a2)
+ 1121  0000072A  1A00                           move.b  d0,d5
+ 1122  0000072C  CA3C0007                       and.b   #7,d5
+ 1123  00000730  8B11                           or.b    d5,(a1)
+ 1124  00000732  46DF                           move.w  (sp)+,sr
+ 1125  00000734  4E75                           rts
+ 1126                                   .released:
+ 1127  00000736  1404                           move.b  d4,d2                   ; the level dropped: stop the timer -
+ 1128  00000738  C43C00C0                       and.b   #$C0,d2                 ; unless a drum is finishing by itself
+ 1129  0000073C  B43C0040                       cmp.b   #$40,d2
+ 1130  00000740  67xx                           beq.s   .out
+ 1131  00000742  326D0002                       movea.w SD_CTRL(a5),a1
+ 1132  00000746  021100F0                       andi.b  #$F0,(a1)
+ 1133  0000074A  4A02                           tst.b   d2                      ; an ended SID: the burst writes its
+ 1134  0000074C  66xx                           bne.s   .out                    ; voice's volume again
+ 1135  0000074E  6100xxxx                       bsr     yx6_burst_open_old
+ 1136                                   .out:
+ 1137  00000752  4E75                           rts
+ 1138                                   .held:                                  ; E != 0 here: the caller's gate
+ 1139  00000754  1A00                           move.b  d0,d5
+ 1140  00000756  CA3C00C0                       and.b   #$C0,d5
+ 1141  0000075A  BA3C0040                       cmp.b   #$40,d5
+ 1142  0000075E  67A8                           beq.s   .drum                   ; a held drum code triggers again
+ 1143  00000760  B22D0001                       cmp.b   SD_TLAST(a5),d1         ; reload only a CHANGED count: a write
+ 1144  00000764  67xx                           beq.s   .track                  ; meeting the counter at 01 is
+ 1145  00000766  1B410001                       move.b  d1,SD_TLAST(a5)         ; indeterminate, so do not roll dice
+ 1146  0000076A  346D0004                       movea.w SD_DATA(a5),a2          ; fifty times a second
+ 1147  0000076E  1481                           move.b  d1,(a2)
+ 1148                                   .track:
+ 1149                                   ; The level-held effects track their parameter every frame: the SID volume
+ 1150                                   ; and the buzzer shape follow the voice's ring byte, as the reference player
+ 1151                                   ; re-reads them.
+ 1152  00000770  2053                           movea.l YX6_CURSOR(a3),a0
+ 1153  00000772  D1ED0008                       adda.l  SD_PARM(a5),a0
+ 1154  00000776  1810                           move.b  (a0),d4
+ 1155  00000778  C83C000F                       and.b   #15,d4
+ 1156  0000077C  206D000C                       movea.l SD_ISR(a5),a0
+ 1157  00000780  4A05                           tst.b   d5                      ; $00 SID, $C0 buzzer
+ 1158  00000782  67xx                           beq.s   .vol
+ 1159  00000784  11440082                       move.b  d4,ISR_BUZZ_SHAPE(a0)
+ 1160  00000788  4E75                           rts
+ 1161                                   .vol:
+ 1162  0000078A  1144004E                       move.b  d4,ISR_SID_VOL(a0)
+ 1163  0000078E  4E75                           rts
+ 1164                                   
+ 1165                                   ; Opens the burst gate of the voice the OLD code (d4) named, when that code
+ 1166                                   ; was a SID; anything else leaves the gates alone. Clobbers d2/a0, keeps d4.
+ 1167                                   yx6_burst_open_old:
+ 1168  00000790  1404                           move.b  d4,d2
+ 1169  00000792  C43C00C0                       and.b   #$C0,d2
+ 1170  00000796  66xx                           bne.s   .not_sid
+ 1171  00000798  4A04                           tst.b   d4
+ 1172  0000079A  67xx                           beq.s   .not_sid
+ 1173  0000079C  1404                           move.b  d4,d2
+ 1174  0000079E  E80A                           lsr.b   #4,d2
+ 1175  000007A0  C47C0003                       and.w   #3,d2
+ 1176  000007A4  5342                           subq.w  #1,d2
+ 1177  000007A6  3F04                           move.w  d4,-(sp)
+ 1178  000007A8  7802                           moveq   #2,d4
+ 1179  000007AA  6100xxxx                       bsr     yx6_burst_gate
+ 1180  000007AE  381F                           move.w  (sp)+,d4
+ 1181                                   .not_sid:
+ 1182  000007B0  4E75                           rts
+ 1183                                   
+ 1184                                   ; -----------------------------------------------------------------------------
+ 1185                                   ; yx6_drum_start: read the sample number from the drummed voice's ring byte
+ 1186                                   ; and silence that byte - it is a number, not a volume - flag the voice for
+ 1187                                   ; the mixer pass, then arm the drum routine: its select register, its sample
+ 1188                                   ; address, and the flag-clearing mask, all patched into its own operands.
+ 1189                                   ; If the other slot holds a SID on this same voice, the drum takes the
+ 1190                                   ; volume register for itself, as the reference player's drum override does:
+ 1191                                   ; stop that SID's timer and clear its last code, so the slot retries every
+ 1192                                   ; frame - suppressed while the flag is up - and restarts the SID by itself
+ 1193                                   ; the frame after the drum ends.
+ 1194                                   ; Called from the new-code path AND the held retrigger, which has neither
+ 1195                                   ; the voice nor the parameter pointer at hand - so it derives its own.
+ 1196                                   ; in: d0.b = E, a5 = the descriptor, SD_PARM set; out: a0 = the handler;
+ 1197                                   ; keeps d0/d1/d3/a5.
+ 1198                                   ; -----------------------------------------------------------------------------
+ 1199                                   yx6_drum_start:
+ 1200  000007B2  2053                           movea.l YX6_CURSOR(a3),a0
+ 1201  000007B4  D1ED0008                       adda.l  SD_PARM(a5),a0
+ 1202  000007B8  6100xxxx                       bsr     yx6_borrow              ; the ring gets this byte back
+ 1203  000007BC  7800                           moveq   #0,d4
+ 1204  000007BE  1810                           move.b  (a0),d4                 ; the sample number, validated at pack
+ 1205  000007C0  4210                           clr.b   (a0)                    ; sanitize: silence, not a number
+ 1206  000007C2  1A00                           move.b  d0,d5
+ 1207  000007C4  E80D                           lsr.b   #4,d5
+ 1208  000007C6  CA7C0003                       and.w   #3,d5
+ 1209  000007CA  5345                           subq.w  #1,d5                   ; the voice, for flag and select
+ 1210  000007CC  7401                           moveq   #1,d2
+ 1211  000007CE  EB2A                           lsl.b   d5,d2
+ 1212  000007D0  41FAFE3E                       lea     yx6_drums(pc),a0
+ 1213  000007D4  8510                           or.b    d2,(a0)                 ; the mixer pass forces this voice off
+ 1214  000007D6  4602                           not.b   d2
+ 1215  000007D8  226D000C                       movea.l SD_ISR(a5),a1
+ 1216  000007DC  1342003F                       move.b  d2,ISR_CLEAR(a1)        ; the end tick drops the same flag
+ 1217  000007E0  286D0010                       movea.l SD_OTHER(a5),a4         ; a SID on this voice in the other
+ 1218  000007E4  1414                           move.b  (a4),d2                 ; slot: the drum takes the register
+ 1219  000007E6  C43C00C0                       and.b   #$C0,d2
+ 1220  000007EA  66xx                           bne.s   .keep
+ 1221  000007EC  1414                           move.b  (a4),d2
+ 1222  000007EE  B102                           eor.b   d0,d2
+ 1223  000007F0  C43C0030                       and.b   #$30,d2
+ 1224  000007F4  66xx                           bne.s   .keep
+ 1225  000007F6  306C0002                       movea.w SD_CTRL(a4),a0
+ 1226  000007FA  021000F0                       andi.b  #$F0,(a0)               ; stop the other slot's SID
+ 1227  000007FE  4214                           clr.b   (a4)                    ; and let it retry every frame
+ 1228  00000800  3405                           move.w  d5,d2                   ; the drum owns the volume register
+ 1229  00000802  3F04                           move.w  d4,-(sp)                ; through its own sanitize now: the
+ 1230  00000804  7802                           moveq   #2,d4                   ; burst write comes back
+ 1231  00000806  6100xxxx                       bsr     yx6_burst_gate
+ 1232  0000080A  381F                           move.w  (sp)+,d4
+ 1233                                   .keep:
+ 1234  0000080C  3405                           move.w  d5,d2
+ 1235  0000080E  5042                           addq.w  #8,d2                   ; the voice's volume register
+ 1236  00000810  13420003                       move.b  d2,ISR_DRUM_SEL(a1)     ; the tick's select immediate
+ 1237  00000814  D844                           add.w   d4,d4                   ; a drum table entry is six bytes:
+ 1238  00000816  3404                           move.w  d4,d2                   ; 6n = 2n + 4n
+ 1239  00000818  D844                           add.w   d4,d4
+ 1240  0000081A  D842                           add.w   d2,d4
+ 1241  0000081C  246B0014                       movea.l YX6_FILE(a3),a2
+ 1242  00000820  204A                           movea.l a2,a0
+ 1243  00000822  D1E8001C                       adda.l  YH_DRUMS(a0),a0
+ 1244  00000826  24304000                       move.l  0(a0,d4.w),d2           ; the sample's offset in the file
+ 1245  0000082A  D48A                           add.l   a2,d2
+ 1246  0000082C  23420008                       move.l  d2,ISR_DRUM_PTR(a1)     ; the tick reads through its operand
+ 1247  00000830  2049                           movea.l a1,a0                   ; the handler is the block base
+ 1248  00000832  4E75                           rts
+ 1249                                   
+ 1250                                   ; -----------------------------------------------------------------------------
+ 1251                                   ; yx6_burst_gate: while a SID owns a voice, the burst must NOT write that
+ 1252                                   ; voice's volume register - the write lands mid-phase and forces the loud
+ 1253                                   ; half back for up to half a square period, an audible tick at bass rates.
+ 1254                                   ; Both references agree: ST-Sound's per-sample SID overrides the register
+ 1255                                   ; write, maxYMiser's frame code skips SID channels outright. The gate is
+ 1256                                   ; one SMC word: the volume write's destination displacement, 2 for the PSG
+ 1257                                   ; data register, 0 to land harmlessly on the select register instead - the
+ 1258                                   ; next macro's select overrides it before anything is written.
+ 1259                                   ; in: d2.w = the voice 0..2, d4.w = 2 to open or 0 to mute; clobbers d2/a0.
+ 1260                                   ; -----------------------------------------------------------------------------
+ 1261                                   yx6_burst_gate:
+ 1262  00000834  C4FC000A                       mulu.w  #10,d2                  ; a YX6_WRITE is ten bytes; R8's
+ 1263  00000838  41FAFB5C                       lea     yx6_wB+8(pc),a0         ; destination word sits at +8
+ 1264  0000083C  31842000                       move.w  d4,0(a0,d2.w)
+ 1265  00000840  4E75                           rts
+ 1266                                   
+ 1267                                   ; Records a ring byte about to be edited, for the restore after the burst.
+ 1268                                   ; in: a0 = the byte; clobbers d2.
+ 1269                                   yx6_borrow:
+ 1270  00000842  7400                           moveq   #0,d2
+ 1271  00000844  142B0036                       move.b  YX6_PATCHES(a3),d2
+ 1272  00000848  522B0036                       addq.b  #1,YX6_PATCHES(a3)
+ 1273  0000084C  17902037                       move.b  (a0),YX6_PATCH_VAL(a3,d2.w)
+ 1274  00000850  D442                           add.w   d2,d2
+ 1275  00000852  D442                           add.w   d2,d2
+ 1276  00000854  2788203A                       move.l  a0,YX6_PATCH_ADDR(a3,d2.w)
+ 1277  00000858  4E75                           rts
     3                                           include "ST4_wrap.S"
     1                                   ; -----------------------------------------------------------------------------
     2                                   ; ST4_wrap.S - ST4: counted-wrap ring decompressor for the Atari ST (68000)
@@ -1329,82 +1391,82 @@
    87                                   
    88                                   ; Jump table: bra.w keeps 4-byte slots (base+0/4). A counted ring has no
    89                                   ; one-shot entry; the caller drains it through ST4_resume.
-   90  000007E4  6000xxxx                               bra.w   ST4_init
-   91  000007E8  6000xxxx                               bra.w   ST4_resume
+   90  0000085A  6000xxxx                               bra.w   ST4_init
+   91  0000085E  6000xxxx                               bra.w   ST4_resume
    92                                   
    93                                   ; ST4_init: a0 = A, a1 = first ring byte, a2 = B, a4 = C, a5 = D,
    94                                   ; d3.w = N.
    95                                   ; Packs -ring_start.low/N above the common state; writes no memory.
    96                                   ; Java: the Decompressor constructor / reset().
    97                                   ST4_init:
-   98  000007EC  7200                           moveq   #0,d1
-   99  000007EE  9249                           sub.w   a1,d1                   ; -ring_start.low, exact modulo 65536
-  100  000007F0  4841                           swap    d1                      ; pack it high; remaining = 0
+   98  00000862  7200                           moveq   #0,d1
+   99  00000864  9249                           sub.w   a1,d1                   ; -ring_start.low, exact modulo 65536
+  100  00000866  4841                           swap    d1                      ; pack it high; remaining = 0
   101                                   ; The initial offset has to land in the low word after the swap, so it starts
   102                                   ; in the high half. moveq would put -1 there whatever the unit size, which is
   103                                   ; a byte short at k=2 and three at k=4 - and only shows up on a stream whose
   104                                   ; first match reuses INITIAL_OFFSET.
-  105  000007F2  243CFFFE0000                   move.l  #(-ST4_UNIT)<<16,d2
-  106  000007F8  3403                           move.w  d3,d2                   ; N lives below it for now
-  107  000007FA  4842                           swap    d2                      ; N above, -INITIAL_OFFSET*UNIT below
+  105  00000868  243CFFFE0000                   move.l  #(-ST4_UNIT)<<16,d2
+  106  0000086E  3403                           move.w  d3,d2                   ; N lives below it for now
+  107  00000870  4842                           swap    d2                      ; N above, -INITIAL_OFFSET*UNIT below
   108                                   ; One virtual 0 flag, then the empty sentinel. The first resume call runs a
   109                                   ; zero-unit match segment through the normal path - remaining is zero, so
   110                                   ; n = 0 and the ladder is entered at its end - and lands in match_transition,
   111                                   ; which shifts $4000 into $8000: the flag reads as "begin literals" and the
   112                                   ; queue is the empty sentinel the old first call started from. That is what
   113                                   ; lets ST4_resume skip a first-call test on every call.
-  114  000007FC  303C4000                       move.w  #$4000,d0
-  115  00000800  4E75                           rts
+  114  00000872  303C4000                       move.w  #$4000,d0
+  115  00000876  4E75                           rts
   116                                   
   117                                   source_wrapped:
-  118  00000802  2A02                           move.l  d2,d5
-  119  00000804  4245                           clr.w   d5
-  120  00000806  4845                           swap    d5                      ; zero-extend N from d2.high
-  121  00000808  D7C5                           adda.l  d5,a3                   ; raw source + N, back into the ring
-  122  0000080A  60xx                           bra.s   copy
+  118  00000878  2A02                           move.l  d2,d5
+  119  0000087A  4245                           clr.w   d5
+  120  0000087C  4845                           swap    d5                      ; zero-extend N from d2.high
+  121  0000087E  D7C5                           adda.l  d5,a3                   ; raw source + N, back into the ring
+  122  00000880  60xx                           bra.s   copy
   123                                   
   124                                   ; ST4_resume: a0/a1/d0/d1/d2 = state and d3.w = this call's budget.
   125                                   ; Continuing calls emit d3 bytes; the final call may be shorter. The caller
   126                                   ; knows the final span from O; [old a1 .. new a1) is fresh output.
   127                                   ST4_resume:
-  128  0000080C  3803                           move.w  d3,d4                   ; seed n from the budget; a fresh state
+  128  00000882  3803                           move.w  d3,d4                   ; seed n from the budget; a fresh state
   129                                   segment:                                ; runs one 0-unit match segment and
-  130  0000080E  B841                           cmp.w   d1,d4                   ; reads the seeded flag afterwards.
-  131  00000810  63xx                           bls.s   budget_fits             ; n = min(budget, remaining)
-  132  00000812  3801                           move.w  d1,d4
+  130  00000884  B841                           cmp.w   d1,d4                   ; reads the seeded flag afterwards.
+  131  00000886  63xx                           bls.s   budget_fits             ; n = min(budget, remaining)
+  132  00000888  3801                           move.w  d1,d4
   133                                   budget_fits:
-  134  00000814  4A42                           tst.w   d2                      ; positive lastOffset means LITERALS
-  135  00000816  6Axx                           bpl.s   literal_source
+  134  0000088A  4A42                           tst.w   d2                      ; positive lastOffset means LITERALS
+  135  0000088C  6Axx                           bpl.s   literal_source
   136                                   ; MATCH: derive the source and split a segment that crosses the ring end.
-  137  00000818  2649                           movea.l a1,a3                   ; raw source = dst + -lastOffset*UNIT
-  138  0000081A  D6C2                           adda.w  d2,a3                   ; which is why the offset is kept scaled
-  139  0000081C  2A01                           move.l  d1,d5
-  140  0000081E  4845                           swap    d5                      ; d5.w = -ring_start.low
-  141  00000820  DA49                           add.w   a1,d5                   ; d5.w = destination position
-  142  00000822  DA42                           add.w   d2,d5                   ; add -offset; carry means unwrapped
-  143  00000824  65xx                           bcs.s   copy                    ; unwrapped source cannot cross before dst
-  144  00000826  4445                           neg.w   d5                      ; wrapped: room = offset - position
+  137  0000088E  2649                           movea.l a1,a3                   ; raw source = dst + -lastOffset*UNIT
+  138  00000890  D6C2                           adda.w  d2,a3                   ; which is why the offset is kept scaled
+  139  00000892  2A01                           move.l  d1,d5
+  140  00000894  4845                           swap    d5                      ; d5.w = -ring_start.low
+  141  00000896  DA49                           add.w   a1,d5                   ; d5.w = destination position
+  142  00000898  DA42                           add.w   d2,d5                   ; add -offset; carry means unwrapped
+  143  0000089A  65xx                           bcs.s   copy                    ; unwrapped source cannot cross before dst
+  144  0000089C  4445                           neg.w   d5                      ; wrapped: room = offset - position
   145                                   ; The room is bytes and the segment is units, so bring them to the same scale.
   146                                   ; Both are whole units - offsets and positions are - so the shift is exact.
   147                                           .if ST4_UNIT=2
-  148  00000828  E24D                           lsr.w   #1,d5
+  148  0000089E  E24D                           lsr.w   #1,d5
   149                                           .endif
   150                                           .if ST4_UNIT=4
   151                                 -         lsr.w   #2,d5              ; one shift, not two: 10 cycles, not 16
   152                                 -         .endif
-  153  0000082A  BA44                           cmp.w   d4,d5                   ; source units before the ring end
-  154  0000082C  64D4                           bcc.s   source_wrapped
-  155  0000082E  3805                           move.w  d5,d4                   ; stop this segment at the source wrap
-  156  00000830  60D0                           bra.s   source_wrapped
+  153  000008A0  BA44                           cmp.w   d4,d5                   ; source units before the ring end
+  154  000008A2  64D4                           bcc.s   source_wrapped
+  155  000008A4  3805                           move.w  d5,d4                   ; stop this segment at the source wrap
+  156  000008A6  60D0                           bra.s   source_wrapped
   157                                   
   158                                   copy:                                   ; MATCH copies only reach this entry
-  159  00000832  9244                           sub.w   d4,d1                   ; consume n from the operation
-  160  00000834  9644                           sub.w   d4,d3                   ; and from this call's budget
-  161  00000836  B87C0011                       cmp.w   #17,d4
-  162  0000083A  64xx                           bcc.s   copy_slow               ; n >= 17: the counted ladder
-  163  0000083C  D844                           add.w   d4,d4
-  164  0000083E  4444                           neg.w   d4                      ; d4 = -2n is the dispatch index itself,
-  165  00000840  4EFB40xx                       jmp     fast_end(pc,d4.w)       ; and $ffxx for byte_offset afterwards
+  159  000008A8  9244                           sub.w   d4,d1                   ; consume n from the operation
+  160  000008AA  9644                           sub.w   d4,d3                   ; and from this call's budget
+  161  000008AC  B87C0011                       cmp.w   #17,d4
+  162  000008B0  64xx                           bcc.s   copy_slow               ; n >= 17: the counted ladder
+  163  000008B2  D844                           add.w   d4,d4
+  164  000008B4  4444                           neg.w   d4                      ; d4 = -2n is the dispatch index itself,
+  165  000008B6  4EFB40xx                       jmp     fast_end(pc,d4.w)       ; and $ffxx for byte_offset afterwards
   166                                   fast_ladder:
   167                                   ; Sixteen unit moves: entry at fast_end-2k copies k units.
   168                                           .rept   16
@@ -1415,7 +1477,7 @@
                                       -         move.l  (a3)+,(a1)+
                                       -         .endif
                                       @         .if ST4_UNIT=2
-       00000844  32DB                 @         move.w  (a3)+,(a1)+
+       000008BA  32DB                 @         move.w  (a3)+,(a1)+
                                       @         .endif
                                       @         .if ST4_UNIT=1
                                       -         move.b  (a3)+,(a1)+
@@ -1425,7 +1487,7 @@
                                       -         move.l  (a3)+,(a1)+
                                       -         .endif
                                       @         .if ST4_UNIT=2
-       00000846  32DB                 @         move.w  (a3)+,(a1)+
+       000008BC  32DB                 @         move.w  (a3)+,(a1)+
                                       @         .endif
                                       @         .if ST4_UNIT=1
                                       -         move.b  (a3)+,(a1)+
@@ -1435,7 +1497,7 @@
                                       -         move.l  (a3)+,(a1)+
                                       -         .endif
                                       @         .if ST4_UNIT=2
-       00000848  32DB                 @         move.w  (a3)+,(a1)+
+       000008BE  32DB                 @         move.w  (a3)+,(a1)+
                                       @         .endif
                                       @         .if ST4_UNIT=1
                                       -         move.b  (a3)+,(a1)+
@@ -1445,7 +1507,7 @@
                                       -         move.l  (a3)+,(a1)+
                                       -         .endif
                                       @         .if ST4_UNIT=2
-       0000084A  32DB                 @         move.w  (a3)+,(a1)+
+       000008C0  32DB                 @         move.w  (a3)+,(a1)+
                                       @         .endif
                                       @         .if ST4_UNIT=1
                                       -         move.b  (a3)+,(a1)+
@@ -1455,7 +1517,7 @@
                                       -         move.l  (a3)+,(a1)+
                                       -         .endif
                                       @         .if ST4_UNIT=2
-       0000084C  32DB                 @         move.w  (a3)+,(a1)+
+       000008C2  32DB                 @         move.w  (a3)+,(a1)+
                                       @         .endif
                                       @         .if ST4_UNIT=1
                                       -         move.b  (a3)+,(a1)+
@@ -1465,7 +1527,7 @@
                                       -         move.l  (a3)+,(a1)+
                                       -         .endif
                                       @         .if ST4_UNIT=2
-       0000084E  32DB                 @         move.w  (a3)+,(a1)+
+       000008C4  32DB                 @         move.w  (a3)+,(a1)+
                                       @         .endif
                                       @         .if ST4_UNIT=1
                                       -         move.b  (a3)+,(a1)+
@@ -1475,7 +1537,7 @@
                                       -         move.l  (a3)+,(a1)+
                                       -         .endif
                                       @         .if ST4_UNIT=2
-       00000850  32DB                 @         move.w  (a3)+,(a1)+
+       000008C6  32DB                 @         move.w  (a3)+,(a1)+
                                       @         .endif
                                       @         .if ST4_UNIT=1
                                       -         move.b  (a3)+,(a1)+
@@ -1485,7 +1547,7 @@
                                       -         move.l  (a3)+,(a1)+
                                       -         .endif
                                       @         .if ST4_UNIT=2
-       00000852  32DB                 @         move.w  (a3)+,(a1)+
+       000008C8  32DB                 @         move.w  (a3)+,(a1)+
                                       @         .endif
                                       @         .if ST4_UNIT=1
                                       -         move.b  (a3)+,(a1)+
@@ -1495,7 +1557,7 @@
                                       -         move.l  (a3)+,(a1)+
                                       -         .endif
                                       @         .if ST4_UNIT=2
-       00000854  32DB                 @         move.w  (a3)+,(a1)+
+       000008CA  32DB                 @         move.w  (a3)+,(a1)+
                                       @         .endif
                                       @         .if ST4_UNIT=1
                                       -         move.b  (a3)+,(a1)+
@@ -1505,7 +1567,7 @@
                                       -         move.l  (a3)+,(a1)+
                                       -         .endif
                                       @         .if ST4_UNIT=2
-       00000856  32DB                 @         move.w  (a3)+,(a1)+
+       000008CC  32DB                 @         move.w  (a3)+,(a1)+
                                       @         .endif
                                       @         .if ST4_UNIT=1
                                       -         move.b  (a3)+,(a1)+
@@ -1515,7 +1577,7 @@
                                       -         move.l  (a3)+,(a1)+
                                       -         .endif
                                       @         .if ST4_UNIT=2
-       00000858  32DB                 @         move.w  (a3)+,(a1)+
+       000008CE  32DB                 @         move.w  (a3)+,(a1)+
                                       @         .endif
                                       @         .if ST4_UNIT=1
                                       -         move.b  (a3)+,(a1)+
@@ -1525,7 +1587,7 @@
                                       -         move.l  (a3)+,(a1)+
                                       -         .endif
                                       @         .if ST4_UNIT=2
-       0000085A  32DB                 @         move.w  (a3)+,(a1)+
+       000008D0  32DB                 @         move.w  (a3)+,(a1)+
                                       @         .endif
                                       @         .if ST4_UNIT=1
                                       -         move.b  (a3)+,(a1)+
@@ -1535,7 +1597,7 @@
                                       -         move.l  (a3)+,(a1)+
                                       -         .endif
                                       @         .if ST4_UNIT=2
-       0000085C  32DB                 @         move.w  (a3)+,(a1)+
+       000008D2  32DB                 @         move.w  (a3)+,(a1)+
                                       @         .endif
                                       @         .if ST4_UNIT=1
                                       -         move.b  (a3)+,(a1)+
@@ -1545,7 +1607,7 @@
                                       -         move.l  (a3)+,(a1)+
                                       -         .endif
                                       @         .if ST4_UNIT=2
-       0000085E  32DB                 @         move.w  (a3)+,(a1)+
+       000008D4  32DB                 @         move.w  (a3)+,(a1)+
                                       @         .endif
                                       @         .if ST4_UNIT=1
                                       -         move.b  (a3)+,(a1)+
@@ -1555,7 +1617,7 @@
                                       -         move.l  (a3)+,(a1)+
                                       -         .endif
                                       @         .if ST4_UNIT=2
-       00000860  32DB                 @         move.w  (a3)+,(a1)+
+       000008D6  32DB                 @         move.w  (a3)+,(a1)+
                                       @         .endif
                                       @         .if ST4_UNIT=1
                                       -         move.b  (a3)+,(a1)+
@@ -1565,32 +1627,32 @@
                                       -         move.l  (a3)+,(a1)+
                                       -         .endif
                                       @         .if ST4_UNIT=2
-       00000862  32DB                 @         move.w  (a3)+,(a1)+
+       000008D8  32DB                 @         move.w  (a3)+,(a1)+
                                       @         .endif
                                       @         .if ST4_UNIT=1
                                       -         move.b  (a3)+,(a1)+
   170                                 -         .endif
   171                                   fast_end:                               ; no counter, no kind test: fall into
   172                                   match_copied:                           ; the match epilogue
-  173  00000864  4A41                           tst.w   d1
-  174  00000866  67xx                           beq.s   match_transition
+  173  000008DA  4A41                           tst.w   d1
+  174  000008DC  67xx                           beq.s   match_transition
   175                                   resume_fresh:                           ; gamma or a split match may continue
-  176  00000868  3803                           move.w  d3,d4                   ; test budget and seed the next segment
-  177  0000086A  66A2                           bne.s   segment                 ; budget remains: start/continue a segment
+  176  000008DE  3803                           move.w  d3,d4                   ; test budget and seed the next segment
+  177  000008E0  66A2                           bne.s   segment                 ; budget remains: start/continue a segment
   178                                   resume_return:
-  179  0000086C  4E75                           rts
+  179  000008E2  4E75                           rts
   180                                   
   181                                   literal_source:
-  182  0000086E  264A                           movea.l a2,a3                   ; literals copy from stream B
-  183  00000870  9244                           sub.w   d4,d1                   ; consume n from the operation
-  184  00000872  9644                           sub.w   d4,d3                   ; and from this call's budget
+  182  000008E4  264A                           movea.l a2,a3                   ; literals copy from stream B
+  183  000008E6  9244                           sub.w   d4,d1                   ; consume n from the operation
+  184  000008E8  9644                           sub.w   d4,d3                   ; and from this call's budget
   185                                   copy_slow:                              ; any n; the subs are already done
-  186  00000874  7A0F                           moveq   #15,d5                  ; d5 = n&15, partial-pass dispatch
-  187  00000876  CA44                           and.w   d4,d5
-  188  00000878  E84C                           lsr.w   #4,d4                   ; d4 = n>>4 full passes
-  189  0000087A  DA45                           add.w   d5,d5
-  190  0000087C  4445                           neg.w   d5                      ; index = -2*(n&15)
-  191  0000087E  4EFB50xx                       jmp     ladder_end(pc,d5.w)     ; pc-relative dispatch, no base register
+  186  000008EA  7A0F                           moveq   #15,d5                  ; d5 = n&15, partial-pass dispatch
+  187  000008EC  CA44                           and.w   d4,d5
+  188  000008EE  E84C                           lsr.w   #4,d4                   ; d4 = n>>4 full passes
+  189  000008F0  DA45                           add.w   d5,d5
+  190  000008F2  4445                           neg.w   d5                      ; index = -2*(n&15)
+  191  000008F4  4EFB50xx                       jmp     ladder_end(pc,d5.w)     ; pc-relative dispatch, no base register
   192                                   ladder:
   193                                   ; Sixteen unit moves: entry at ladder_end-2k copies k units.
   194                                           .rept   16
@@ -1601,7 +1663,7 @@
                                       -         move.l  (a3)+,(a1)+
                                       -         .endif
                                       @         .if ST4_UNIT=2
-       00000882  32DB                 @         move.w  (a3)+,(a1)+
+       000008F8  32DB                 @         move.w  (a3)+,(a1)+
                                       @         .endif
                                       @         .if ST4_UNIT=1
                                       -         move.b  (a3)+,(a1)+
@@ -1611,7 +1673,7 @@
                                       -         move.l  (a3)+,(a1)+
                                       -         .endif
                                       @         .if ST4_UNIT=2
-       00000884  32DB                 @         move.w  (a3)+,(a1)+
+       000008FA  32DB                 @         move.w  (a3)+,(a1)+
                                       @         .endif
                                       @         .if ST4_UNIT=1
                                       -         move.b  (a3)+,(a1)+
@@ -1621,7 +1683,7 @@
                                       -         move.l  (a3)+,(a1)+
                                       -         .endif
                                       @         .if ST4_UNIT=2
-       00000886  32DB                 @         move.w  (a3)+,(a1)+
+       000008FC  32DB                 @         move.w  (a3)+,(a1)+
                                       @         .endif
                                       @         .if ST4_UNIT=1
                                       -         move.b  (a3)+,(a1)+
@@ -1631,7 +1693,7 @@
                                       -         move.l  (a3)+,(a1)+
                                       -         .endif
                                       @         .if ST4_UNIT=2
-       00000888  32DB                 @         move.w  (a3)+,(a1)+
+       000008FE  32DB                 @         move.w  (a3)+,(a1)+
                                       @         .endif
                                       @         .if ST4_UNIT=1
                                       -         move.b  (a3)+,(a1)+
@@ -1641,7 +1703,7 @@
                                       -         move.l  (a3)+,(a1)+
                                       -         .endif
                                       @         .if ST4_UNIT=2
-       0000088A  32DB                 @         move.w  (a3)+,(a1)+
+       00000900  32DB                 @         move.w  (a3)+,(a1)+
                                       @         .endif
                                       @         .if ST4_UNIT=1
                                       -         move.b  (a3)+,(a1)+
@@ -1651,7 +1713,7 @@
                                       -         move.l  (a3)+,(a1)+
                                       -         .endif
                                       @         .if ST4_UNIT=2
-       0000088C  32DB                 @         move.w  (a3)+,(a1)+
+       00000902  32DB                 @         move.w  (a3)+,(a1)+
                                       @         .endif
                                       @         .if ST4_UNIT=1
                                       -         move.b  (a3)+,(a1)+
@@ -1661,7 +1723,7 @@
                                       -         move.l  (a3)+,(a1)+
                                       -         .endif
                                       @         .if ST4_UNIT=2
-       0000088E  32DB                 @         move.w  (a3)+,(a1)+
+       00000904  32DB                 @         move.w  (a3)+,(a1)+
                                       @         .endif
                                       @         .if ST4_UNIT=1
                                       -         move.b  (a3)+,(a1)+
@@ -1671,7 +1733,7 @@
                                       -         move.l  (a3)+,(a1)+
                                       -         .endif
                                       @         .if ST4_UNIT=2
-       00000890  32DB                 @         move.w  (a3)+,(a1)+
+       00000906  32DB                 @         move.w  (a3)+,(a1)+
                                       @         .endif
                                       @         .if ST4_UNIT=1
                                       -         move.b  (a3)+,(a1)+
@@ -1681,7 +1743,7 @@
                                       -         move.l  (a3)+,(a1)+
                                       -         .endif
                                       @         .if ST4_UNIT=2
-       00000892  32DB                 @         move.w  (a3)+,(a1)+
+       00000908  32DB                 @         move.w  (a3)+,(a1)+
                                       @         .endif
                                       @         .if ST4_UNIT=1
                                       -         move.b  (a3)+,(a1)+
@@ -1691,7 +1753,7 @@
                                       -         move.l  (a3)+,(a1)+
                                       -         .endif
                                       @         .if ST4_UNIT=2
-       00000894  32DB                 @         move.w  (a3)+,(a1)+
+       0000090A  32DB                 @         move.w  (a3)+,(a1)+
                                       @         .endif
                                       @         .if ST4_UNIT=1
                                       -         move.b  (a3)+,(a1)+
@@ -1701,7 +1763,7 @@
                                       -         move.l  (a3)+,(a1)+
                                       -         .endif
                                       @         .if ST4_UNIT=2
-       00000896  32DB                 @         move.w  (a3)+,(a1)+
+       0000090C  32DB                 @         move.w  (a3)+,(a1)+
                                       @         .endif
                                       @         .if ST4_UNIT=1
                                       -         move.b  (a3)+,(a1)+
@@ -1711,7 +1773,7 @@
                                       -         move.l  (a3)+,(a1)+
                                       -         .endif
                                       @         .if ST4_UNIT=2
-       00000898  32DB                 @         move.w  (a3)+,(a1)+
+       0000090E  32DB                 @         move.w  (a3)+,(a1)+
                                       @         .endif
                                       @         .if ST4_UNIT=1
                                       -         move.b  (a3)+,(a1)+
@@ -1721,7 +1783,7 @@
                                       -         move.l  (a3)+,(a1)+
                                       -         .endif
                                       @         .if ST4_UNIT=2
-       0000089A  32DB                 @         move.w  (a3)+,(a1)+
+       00000910  32DB                 @         move.w  (a3)+,(a1)+
                                       @         .endif
                                       @         .if ST4_UNIT=1
                                       -         move.b  (a3)+,(a1)+
@@ -1731,7 +1793,7 @@
                                       -         move.l  (a3)+,(a1)+
                                       -         .endif
                                       @         .if ST4_UNIT=2
-       0000089C  32DB                 @         move.w  (a3)+,(a1)+
+       00000912  32DB                 @         move.w  (a3)+,(a1)+
                                       @         .endif
                                       @         .if ST4_UNIT=1
                                       -         move.b  (a3)+,(a1)+
@@ -1741,7 +1803,7 @@
                                       -         move.l  (a3)+,(a1)+
                                       -         .endif
                                       @         .if ST4_UNIT=2
-       0000089E  32DB                 @         move.w  (a3)+,(a1)+
+       00000914  32DB                 @         move.w  (a3)+,(a1)+
                                       @         .endif
                                       @         .if ST4_UNIT=1
                                       -         move.b  (a3)+,(a1)+
@@ -1751,30 +1813,30 @@
                                       -         move.l  (a3)+,(a1)+
                                       -         .endif
                                       @         .if ST4_UNIT=2
-       000008A0  32DB                 @         move.w  (a3)+,(a1)+
+       00000916  32DB                 @         move.w  (a3)+,(a1)+
                                       @         .endif
                                       @         .if ST4_UNIT=1
                                       -         move.b  (a3)+,(a1)+
   196                                 -         .endif
   197                                   ladder_end:
-  198  000008A2  5344                           subq.w  #1,d4                   ; full 16-unit passes; the fall-through
-  199  000008A4  64DC                           bcc.s   ladder                  ; costs 12 where dbf paid 14, and still
-  200  000008A6  4A42                           tst.w   d2                      ; leaves d4.w = $ffff for byte_offset
-  201  000008A8  6BBA                           bmi.s   match_copied            ; an n>=17 match rejoins its epilogue
-  202  000008AA  244B                           movea.l a3,a2                   ; literals do consume input: B advanced
-  203  000008AC  4A41                           tst.w   d1
-  204  000008AE  66BC                           bne.s   resume_return           ; literals stop only on the budget
+  198  00000918  5344                           subq.w  #1,d4                   ; full 16-unit passes; the fall-through
+  199  0000091A  64DC                           bcc.s   ladder                  ; costs 12 where dbf paid 14, and still
+  200  0000091C  4A42                           tst.w   d2                      ; leaves d4.w = $ffff for byte_offset
+  201  0000091E  6BBA                           bmi.s   match_copied            ; an n>=17 match rejoins its epilogue
+  202  00000920  244B                           movea.l a3,a2                   ; literals do consume input: B advanced
+  203  00000922  4A41                           tst.w   d1
+  204  00000924  66BC                           bne.s   resume_return           ; literals stop only on the budget
   205                                   
   206                                   literals_transition:
-  207  000008B0  D040                           add.w   d0,d0                   ; Java: next(), case LITERALS (bare read)
-  208  000008B2  65xx                           bcs.s   new_offset              ; 1: new offset
-  209  000008B4  4442                           neg.w   d2                      ; from-last reuses the negated offset
-  210  000008B6  60xx                           bra.s   gamma_seed0             ; Java: beginMatchFromLastOffset()
+  207  00000926  D040                           add.w   d0,d0                   ; Java: next(), case LITERALS (bare read)
+  208  00000928  65xx                           bcs.s   new_offset              ; 1: new offset
+  209  0000092A  4442                           neg.w   d2                      ; from-last reuses the negated offset
+  210  0000092C  60xx                           bra.s   gamma_seed0             ; Java: beginMatchFromLastOffset()
   211                                   
   212                                   begin_literals:                         ; Java: beginLiterals()
-  213  000008B8  4442                           neg.w   d2                      ; positive lastOffset = State.LITERALS
+  213  0000092E  4442                           neg.w   d2                      ; positive lastOffset = State.LITERALS
   214                                   gamma_seed0:
-  215  000008BA  7800                           moveq   #0,d4                   ; remaining = gamma + 0; fall through
+  215  00000930  7800                           moveq   #0,d4                   ; remaining = gamma + 0; fall through
   216                                   
   217                                   ; get_gamma: interlaced Elias gamma in d1.w; d4.w is the 0/1 length seed.
   218                                   ; Gammas are odd-length and each is followed by one flag bit, so a gamma always
@@ -1782,31 +1844,31 @@
   220                                   ; even - can only run out on a continuation bit. Data and transition reads need
   221                                   ; no refill check; 16 is even like 8, so the word queue inherits the argument.
   222                                   get_gamma:
-  223  000008BC  5241                           addq.w  #1,d1
-  224  000008BE  D040                           add.w   d0,d0                   ; first continuation bit
-  225  000008C0  67xx                           beq.s   gamma_refill
-  226  000008C2  64xx                           bcc.s   gamma_done
+  223  00000932  5241                           addq.w  #1,d1
+  224  00000934  D040                           add.w   d0,d0                   ; first continuation bit
+  225  00000936  67xx                           beq.s   gamma_refill
+  226  00000938  64xx                           bcc.s   gamma_done
   227                                   gamma_loop:
-  228  000008C4  D040                           add.w   d0,d0                   ; data bit: never a refill
-  229  000008C6  D341                           addx.w  d1,d1                   ; value = value*2 + bit
-  230  000008C8  D040                           add.w   d0,d0                   ; continuation bit
-  231  000008CA  67xx                           beq.s   gamma_refill
-  232  000008CC  65F6                           bcs.s   gamma_loop
+  228  0000093A  D040                           add.w   d0,d0                   ; data bit: never a refill
+  229  0000093C  D341                           addx.w  d1,d1                   ; value = value*2 + bit
+  230  0000093E  D040                           add.w   d0,d0                   ; continuation bit
+  231  00000940  67xx                           beq.s   gamma_refill
+  232  00000942  65F6                           bcs.s   gamma_loop
   233                                   gamma_done:
-  234  000008CE  D244                           add.w   d4,d1                   ; +1 only for a new-offset match
-  235  000008D0  3803                           move.w  d3,d4                   ; the resume_fresh tail, duplicated so
-  236  000008D2  6600FF3A                       bne.w   segment                 ; the parse exit takes one branch
+  234  00000944  D244                           add.w   d4,d1                   ; +1 only for a new-offset match
+  235  00000946  3803                           move.w  d3,d4                   ; the resume_fresh tail, duplicated so
+  236  00000948  6600FF3A                       bne.w   segment                 ; the parse exit takes one branch
   237                                   parse_done:
-  238  000008D6  4E75                           rts
+  238  0000094C  4E75                           rts
   239                                   gamma_refill:
-  240  000008D8  3018                           move.w  (a0)+,d0
-  241  000008DA  D140                           addx.w  d0,d0
-  242  000008DC  65E6                           bcs.s   gamma_loop
-  243  000008DE  60EE                           bra.s   gamma_done
+  240  0000094E  3018                           move.w  (a0)+,d0
+  241  00000950  D140                           addx.w  d0,d0
+  242  00000952  65E6                           bcs.s   gamma_loop
+  243  00000954  60EE                           bra.s   gamma_done
   244                                   
   245                                   match_transition:                       ; remaining == 0: parse after a match
-  246  000008E0  D040                           add.w   d0,d0
-  247  000008E2  64D4                           bcc.s   begin_literals
+  246  00000956  D040                           add.w   d0,d0
+  247  00000958  64D4                           bcc.s   begin_literals
   248                                   
   249                                   new_offset:                             ; Java: beginMatchFromNewOffset/readOffset
   250                                   ; Two class bits: the first says byte or word, the second picks a byte offset's
@@ -1815,95 +1877,95 @@
   253                                   ; of bits, so flags and gamma data bits all land on odd positions and the queue
   254                                   ; - which empties every 16 bits - can never run out on one; the bit immediately
   255                                   ; after a flag is the one exception, and it is checked.
-  256  000008E4  D040                           add.w   d0,d0                   ; class bit 1: set means a byte offset
-  257  000008E6  67xx                           beq.s   class_refill
+  256  0000095A  D040                           add.w   d0,d0                   ; class bit 1: set means a byte offset
+  257  0000095C  67xx                           beq.s   class_refill
   258                                   class_read:
-  259  000008E8  65xx                           bcs.s   byte_offset
-  260  000008EA  D040                           add.w   d0,d0                   ; class bit 2: set means end of stream
-  261  000008EC  65E8                           bcs.s   parse_done              ; the nearer of the two identical rts
-  262  000008EE  341D                           move.w  (a5)+,d2                ; -lastOffset*UNIT, stored ready to use
+  259  0000095E  65xx                           bcs.s   byte_offset
+  260  00000960  D040                           add.w   d0,d0                   ; class bit 2: set means end of stream
+  261  00000962  65E8                           bcs.s   parse_done              ; the nearer of the two identical rts
+  262  00000964  341D                           move.w  (a5)+,d2                ; -lastOffset*UNIT, stored ready to use
   263                                   have_offset:
-  264  000008F0  7801                           moveq   #1,d4                   ; new-offset match: remaining = gamma+1
-  265  000008F2  60C8                           bra.s   get_gamma
+  264  00000966  7801                           moveq   #1,d4                   ; new-offset match: remaining = gamma+1
+  265  00000968  60C8                           bra.s   get_gamma
   266                                   
   267                                   class_refill:
-  268  000008F4  3018                           move.w  (a0)+,d0
-  269  000008F6  D140                           addx.w  d0,d0
-  270  000008F8  60EE                           bra.s   class_read
+  268  0000096A  3018                           move.w  (a0)+,d0
+  269  0000096C  D140                           addx.w  d0,d0
+  270  0000096E  60EE                           bra.s   class_read
   271                                   
   272                                   byte_offset:
   273                                   ; The copy paths leave d4.w = $ffxx - the fast ladder's -2n dispatch index, or
   274                                   ; the counted terminator's $ffff - so one move.b makes $ff00 + (256-offset),
   275                                   ; which already IS -offset as a word. The bank bit moves it 256 units further.
-  276  000008FA  181C                           move.b  (a4)+,d4
-  277  000008FC  D040                           add.w   d0,d0                   ; class bit 2: the 256-unit bank
-  278  000008FE  64xx                           bcc.s   scale_offset
-  279  00000900  987C0100                       sub.w   #256,d4                 ; the far bank: 257..512 units
+  276  00000970  181C                           move.b  (a4)+,d4
+  277  00000972  D040                           add.w   d0,d0                   ; class bit 2: the 256-unit bank
+  278  00000974  64xx                           bcc.s   scale_offset
+  279  00000976  987C0100                       sub.w   #256,d4                 ; the far bank: 257..512 units
   280                                   scale_offset:
   281                                   ; The offset arrives in units and is kept in bytes, so the match source is one
   282                                   ; adda.w away for the rest of the operation.
   283                                           .if ST4_UNIT>1
-  284  00000904  D844                           add.w   d4,d4
+  284  0000097A  D844                           add.w   d4,d4
   285                                           .endif
   286                                           .if ST4_UNIT>2
   287                                 -         add.w   d4,d4
   288                                 -         .endif
-  289  00000906  3404                           move.w  d4,d2                   ; install -lastOffset*UNIT, keep d2.high
-  290  00000908  7801                           moveq   #1,d4                   ; new-offset match: remaining = gamma+1
-  291  0000090A  60B0                           bra.s   get_gamma               ; one branch, not two through have_offset
-          .advance 000000000000041A  t             SD_ISR 000000000000000C  a          YX6_R7OFF 0000000000000032  a           yx6_link 0000000000000602  t 
-            .armed 00000000000006DC  t           SD_OTHER 0000000000000010  a      YX6_REGISTERS 000000000000000E  a           yx6_open 00000000000002A6  t 
-     .cursor_ready 0000000000000428  t            SD_PARM 0000000000000008  a        YX6_RINGEND 000000000000000C  a          yx6_parkA 000000000000051E  t 
-             .done 000000000000025C  t           SD_TLAST 0000000000000001  a          YX6_RINGS 0000000000000010  a          yx6_parkD 00000000000005B0  t 
-             .drum 00000000000006D8  t             SD_VEC 0000000000000006  a           YX6_SLOT 0000000000000028  a       yx6_sidA_off 0000000000000540  t 
-     .effects_done 0000000000000312  t      ST4_SIGNATURE 0000000053340402  a          YX6_STATE 0000000000000046  a        yx6_sidA_on 0000000000000526  t 
-            .ended 0000000000000502  t           ST4_UNIT 0000000000000002  a     YX6_STATE_SIZE 0000000000000040  a       yx6_sidD_off 00000000000005D2  t 
-            .ended 0000000000000594  t           ST4_init 00000000000007EC  t        YX6_STREAMS 0000000000000012  a        yx6_sidD_on 00000000000005B8  t 
-    .envelope_held 00000000000003D2  t         ST4_resume 000000000000080C  t     YX6_SUPER_HOST 0000000000000000  a           yx6_slot 000000000000063E  t 
-      .first_group 000000000000009E  t           YH_CHUNK 0000000000000012  a          YX6_TOTAL 0000000000000018  a            yx6_w13 00000000000003C0  t 
-            .frame 00000000000002D2  t           YH_CLOCK 0000000000000018  a        YX6_VERSION 0000000000000004  a             yx6_w7 0000000000000382  t 
-             .held 000000000000071A  t       YH_DRUMCOUNT 0000000000000020  a           YX6_fill 00000000000001EC  t             yx6_wA 0000000000000338  t 
-             .keep 00000000000007A4  t           YH_DRUMS 000000000000001C  a           YX6_init 000000000000000C  t             yx6_wB 000000000000038E  t 
-      .loop_length 0000000000000084  t           YH_FLAGS 0000000000000006  a           YX6_play 00000000000002C6  t 
-         .mixer_ok 000000000000032A  t          YH_FRAMES 0000000000000008  a     YX6_start_loop 0000000000000262  t 
-          .no_loop 00000000000002A4  t     YH_INTRO_TABLE 0000000000000022  a           YX6_stop 000000000000045E  t 
-              .out 0000000000000718  t            YH_LOOP 0000000000000014  a             _RMAC_ 0000000002040003  a 
-         .partners 0000000000000628  t      YH_LOOP_TABLE 000000000000006A  a     begin_literals 00000000000008B8  t 
-            .piece 00000000000001FC  t           YH_MAGIC 0000000000000000  a        budget_fits 0000000000000814  t 
-       .piece_size 0000000000000212  t       YH_PLAYER_HZ 000000000000000C  a        byte_offset 00000000000008FA  t 
-           .played 000000000000045A  t            YH_RING 0000000000000010  a         class_read 00000000000008E8  t 
-         .pristine 00000000000003EE  t    YH_STREAM_COUNT 000000000000000E  a       class_refill 00000000000008F4  t 
-           .refill 0000000000000414  t         YH_VERSION 0000000000000004  a               copy 0000000000000832  t 
-         .rejected 00000000000001E8  t            YS_BOFF 0000000000000014  a          copy_slow 0000000000000874  t 
-         .released 0000000000000706  t              YS_D1 0000000000000000  a           fast_end 0000000000000864  t 
-          .restore 00000000000003E6  t              YS_D2 0000000000000004  a        fast_ladder 0000000000000844  t 
-          .section 00000000000000E4  t             YS_END 0000000000000024  a         gamma_done 00000000000008CE  t 
-          .section 000000000000020C  t           YS_INPUT 0000000000000008  a         gamma_loop 00000000000008C4  t 
-              .sid 000000000000068A  t            YS_LEFT 0000000000000028  a       gamma_refill 00000000000008D8  t 
-         .sid_free 0000000000000698  t             YS_LIT 0000000000000010  a        gamma_seed0 00000000000008BA  t 
-       .sid_retune 00000000000006C2  t           YS_QUEUE 000000000000001C  a          get_gamma 00000000000008BC  t 
-          .silence 00000000000004A2  t           YS_START 0000000000000020  a        have_offset 00000000000008F0  t 
-       .slot1_idle 00000000000002FA  t            YS_WOFF 0000000000000018  a             ladder 0000000000000882  t 
-            .slot2 00000000000002FE  t           YS_WRITE 000000000000000C  a         ladder_end 00000000000008A2  t 
-       .slot_ready 0000000000000440  t              YX6_C 0000000000000026  a     literal_source 000000000000086E  t 
-           .stored 0000000000000242  t         YX6_CURSOR 0000000000000000  a   literals_transition 00000000000008B0  t 
-           .stream 00000000000000A6  t         YX6_EFXOFF 000000000000002E  a       match_copied 0000000000000864  t 
-            .track 0000000000000736  t       YX6_ENVELOPE 000000000000000D  a   match_transition 00000000000008E0  t 
-              .vol 0000000000000750  t           YX6_FILE 0000000000000014  a         new_offset 00000000000008E4  t 
-          .wpatchA 0000000000000164  t          YX6_FIXED 00000000000004C6  a         parse_done 00000000000008D6  t 
-          .wpatchB 000000000000017E  t     YX6_FLAG_LOOPS 0000000000000001  a       resume_fresh 0000000000000868  t 
-          ISR_BUZZ 000000000000007E  a          YX6_INDEX 000000000000002A  a      resume_return 000000000000086C  t 
-    ISR_BUZZ_SHAPE 0000000000000082  a         YX6_LEFTFR 0000000000000004  a       scale_offset 0000000000000904  t 
-         ISR_CLEAR 000000000000003F  a           YX6_LOOP 0000000000000020  a            segment 000000000000080E  t 
-      ISR_DRUM_PTR 0000000000000008  a        YX6_LOOPLEN 000000000000001C  a     source_wrapped 0000000000000802  t 
-      ISR_DRUM_SEL 0000000000000003  a          YX6_LOOPS 000000000000002C  a         yx6_borrow 00000000000007CC  t 
-        ISR_SIDOFF 0000000000000064  a          YX6_MAGIC 0000000059583621  a          yx6_buzzA 000000000000055A  t 
-   ISR_SIDOFF_NEXT 0000000000000072  a          YX6_MIXER 0000000000000007  a          yx6_buzzD 00000000000005EC  t 
-    ISR_SIDOFF_SEL 0000000000000066  a              YX6_N 0000000000000024  a          yx6_desc1 00000000000004B4  t 
-         ISR_SIDON 000000000000004A  a           YX6_NEXT 0000000000000008  a          yx6_desc2 00000000000004C8  t 
-    ISR_SIDON_NEXT 0000000000000058  a         YX6_NO_ENV 00000000000000FF  a          yx6_drumA 00000000000004DC  t 
-     ISR_SIDON_SEL 000000000000004C  a        YX6_PATCHES 0000000000000036  a    yx6_drumA_clear 0000000000000518  t 
-       ISR_SID_VOL 000000000000004E  a     YX6_PATCH_ADDR 000000000000003A  a          yx6_drumD 000000000000056E  t 
-           SD_CTRL 0000000000000002  a      YX6_PATCH_VAL 0000000000000037  a    yx6_drumD_clear 00000000000005AA  t 
-           SD_DATA 0000000000000004  a          YX6_PORTS 00000000000000C0  a     yx6_drum_start 0000000000000756  t 
-          SD_ELAST 0000000000000000  a            YX6_PSG 00000000FFFF8800  a          yx6_drums 0000000000000600  t 
+  289  0000097C  3404                           move.w  d4,d2                   ; install -lastOffset*UNIT, keep d2.high
+  290  0000097E  7801                           moveq   #1,d4                   ; new-offset match: remaining = gamma+1
+  291  00000980  60B0                           bra.s   get_gamma               ; one branch, not two through have_offset
+          .advance 000000000000041A  t            SD_CTRL 0000000000000002  a      YX6_PATCH_VAL 0000000000000037  a    yx6_drumA_clear 0000000000000528  t 
+            .armed 000000000000070C  t            SD_DATA 0000000000000004  a          YX6_PORTS 00000000000000C0  a          yx6_drumD 000000000000057E  t 
+     .cursor_ready 0000000000000428  t           SD_ELAST 0000000000000000  a            YX6_PSG 00000000FFFF8800  a    yx6_drumD_clear 00000000000005BA  t 
+             .done 000000000000025C  t             SD_ISR 000000000000000C  a          YX6_R7OFF 0000000000000032  a     yx6_drum_start 00000000000007B2  t 
+             .drum 0000000000000708  t           SD_OTHER 0000000000000010  a      YX6_REGISTERS 000000000000000E  a          yx6_drums 0000000000000610  t 
+     .effects_done 0000000000000312  t            SD_PARM 0000000000000008  a        YX6_RINGEND 000000000000000C  a           yx6_link 0000000000000612  t 
+            .ended 0000000000000512  t           SD_TLAST 0000000000000001  a          YX6_RINGS 0000000000000010  a           yx6_open 00000000000002A6  t 
+            .ended 00000000000005A4  t             SD_VEC 0000000000000006  a           YX6_SLOT 0000000000000028  a          yx6_parkA 000000000000052E  t 
+    .envelope_held 00000000000003D2  t      ST4_SIGNATURE 0000000053340402  a          YX6_STATE 0000000000000046  a          yx6_parkD 00000000000005C0  t 
+      .first_group 000000000000009E  t           ST4_UNIT 0000000000000002  a     YX6_STATE_SIZE 0000000000000040  a       yx6_sidA_off 0000000000000550  t 
+            .frame 00000000000002D2  t           ST4_init 0000000000000862  t        YX6_STREAMS 0000000000000012  a        yx6_sidA_on 0000000000000536  t 
+            .gates 000000000000049C  t         ST4_resume 0000000000000882  t     YX6_SUPER_HOST 0000000000000000  a       yx6_sidD_off 00000000000005E2  t 
+            .gates 0000000000000614  t           YH_CHUNK 0000000000000012  a          YX6_TOTAL 0000000000000018  a        yx6_sidD_on 00000000000005C8  t 
+             .held 0000000000000754  t           YH_CLOCK 0000000000000018  a        YX6_VERSION 0000000000000004  a           yx6_slot 000000000000065E  t 
+             .keep 000000000000080C  t       YH_DRUMCOUNT 0000000000000020  a           YX6_fill 00000000000001EC  t            yx6_w13 00000000000003C0  t 
+      .loop_length 0000000000000084  t           YH_DRUMS 000000000000001C  a           YX6_init 000000000000000C  t             yx6_w7 0000000000000382  t 
+         .mixer_ok 000000000000032A  t           YH_FLAGS 0000000000000006  a           YX6_play 00000000000002C6  t             yx6_wA 0000000000000338  t 
+          .no_loop 00000000000002A4  t          YH_FRAMES 0000000000000008  a     YX6_start_loop 0000000000000262  t             yx6_wB 000000000000038E  t 
+          .not_sid 00000000000007B0  t     YH_INTRO_TABLE 0000000000000022  a           YX6_stop 000000000000045E  t 
+              .out 0000000000000752  t            YH_LOOP 0000000000000014  a             _RMAC_ 0000000002040003  a 
+         .partners 0000000000000648  t      YH_LOOP_TABLE 000000000000006A  a     begin_literals 000000000000092E  t 
+            .piece 00000000000001FC  t           YH_MAGIC 0000000000000000  a        budget_fits 000000000000088A  t 
+       .piece_size 0000000000000212  t       YH_PLAYER_HZ 000000000000000C  a        byte_offset 0000000000000970  t 
+           .played 000000000000045A  t            YH_RING 0000000000000010  a         class_read 000000000000095E  t 
+         .pristine 00000000000003EE  t    YH_STREAM_COUNT 000000000000000E  a       class_refill 000000000000096A  t 
+           .refill 0000000000000414  t         YH_VERSION 0000000000000004  a               copy 00000000000008A8  t 
+         .rejected 00000000000001E8  t            YS_BOFF 0000000000000014  a          copy_slow 00000000000008EA  t 
+         .released 0000000000000736  t              YS_D1 0000000000000000  a           fast_end 00000000000008DA  t 
+          .restore 00000000000003E6  t              YS_D2 0000000000000004  a        fast_ladder 00000000000008BA  t 
+          .section 00000000000000E4  t             YS_END 0000000000000024  a         gamma_done 0000000000000944  t 
+          .section 000000000000020C  t           YS_INPUT 0000000000000008  a         gamma_loop 000000000000093A  t 
+              .sid 00000000000006AA  t            YS_LEFT 0000000000000028  a       gamma_refill 000000000000094E  t 
+         .sid_free 00000000000006BC  t             YS_LIT 0000000000000010  a        gamma_seed0 0000000000000930  t 
+       .sid_retune 00000000000006F2  t           YS_QUEUE 000000000000001C  a          get_gamma 0000000000000932  t 
+          .silence 00000000000004B2  t           YS_START 0000000000000020  a        have_offset 0000000000000966  t 
+       .slot1_idle 00000000000002FA  t            YS_WOFF 0000000000000018  a             ladder 00000000000008F8  t 
+            .slot2 00000000000002FE  t           YS_WRITE 000000000000000C  a         ladder_end 0000000000000918  t 
+       .slot_ready 0000000000000440  t              YX6_C 0000000000000026  a     literal_source 00000000000008E4  t 
+           .stored 0000000000000242  t         YX6_CURSOR 0000000000000000  a   literals_transition 0000000000000926  t 
+           .stream 00000000000000A6  t         YX6_EFXOFF 000000000000002E  a       match_copied 00000000000008DA  t 
+            .track 0000000000000770  t       YX6_ENVELOPE 000000000000000D  a   match_transition 0000000000000956  t 
+              .vol 000000000000078A  t           YX6_FILE 0000000000000014  a         new_offset 000000000000095A  t 
+          .wpatchA 0000000000000164  t          YX6_FIXED 00000000000004C6  a         parse_done 000000000000094C  t 
+          .wpatchB 000000000000017E  t     YX6_FLAG_LOOPS 0000000000000001  a       resume_fresh 00000000000008DE  t 
+          ISR_BUZZ 000000000000007E  a          YX6_INDEX 000000000000002A  a      resume_return 00000000000008E2  t 
+    ISR_BUZZ_SHAPE 0000000000000082  a         YX6_LEFTFR 0000000000000004  a       scale_offset 000000000000097A  t 
+         ISR_CLEAR 000000000000003F  a           YX6_LOOP 0000000000000020  a            segment 0000000000000884  t 
+      ISR_DRUM_PTR 0000000000000008  a        YX6_LOOPLEN 000000000000001C  a     source_wrapped 0000000000000878  t 
+      ISR_DRUM_SEL 0000000000000003  a          YX6_LOOPS 000000000000002C  a         yx6_borrow 0000000000000842  t 
+        ISR_SIDOFF 0000000000000064  a          YX6_MAGIC 0000000059583621  a     yx6_burst_gate 0000000000000834  t 
+   ISR_SIDOFF_NEXT 0000000000000072  a          YX6_MIXER 0000000000000007  a   yx6_burst_open_old 0000000000000790  t 
+    ISR_SIDOFF_SEL 0000000000000066  a              YX6_N 0000000000000024  a          yx6_buzzA 000000000000056A  t 
+         ISR_SIDON 000000000000004A  a           YX6_NEXT 0000000000000008  a          yx6_buzzD 00000000000005FC  t 
+    ISR_SIDON_NEXT 0000000000000058  a         YX6_NO_ENV 00000000000000FF  a          yx6_desc1 00000000000004C4  t 
+     ISR_SIDON_SEL 000000000000004C  a        YX6_PATCHES 0000000000000036  a          yx6_desc2 00000000000004D8  t 
+       ISR_SID_VOL 000000000000004E  a     YX6_PATCH_ADDR 000000000000003A  a          yx6_drumA 00000000000004EC  t 

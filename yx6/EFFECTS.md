@@ -195,13 +195,24 @@ cycles under the stack; the park is one-way for the USP itself, so a host
 that ever returns to user mode saves the USP with the rest of the machine
 state - YX6_player.S does.
 
-The per-frame volume write and a running SID cooperate by design: the nibble
-the burst writes IS the SID volume parameter, and the ISR overwrites the
-register within one timer period. This is exactly the reference player's
-behavior. SID phase deliberately free-runs across frames (ST-Sound never
-resets `sidPos`); the buzzer's per-frame phase reset in ST-Sound is an
-emulator artifact — on hardware the timer free-runs, which is the original
-sound.
+The per-frame volume write and a running SID do NOT cooperate — this
+paragraph originally claimed they did, and that claim was wrong at bass
+rates (the Wicked Polygons ticking;
+[the full story](../doc/experiments/2026-08-19-sid-ticking.md)). The burst
+write lands mid-phase and forces the loud half back for up to half a square
+period: inaudible at kHz SID rates, a click train under a 100–1100 Hz
+buzz-bass. The references agree the ISR owns the register — ST-Sound's
+per-sample SID overrides the frame write, maxYMiser's frame code skips SID
+channels — so while a slot holds a SID, the burst's write of that voice's
+volume register is gated off (one SMC word: the write's destination
+displacement lands on the select register instead, and the next select
+overrides it). The gate opens again on release, voice change, drum
+takeover, init and stop. SID phase deliberately free-runs across frames
+(ST-Sound never resets `sidPos`), including across a prescaler boundary —
+a code change that differs only in its prescaler retunes the timer without
+touching the vector, keeping the installed half. The buzzer's per-frame
+phase reset in ST-Sound is an emulator artifact — on hardware the timer
+free-runs, which is the original sound.
 
 ## 5. Timers and interrupts
 

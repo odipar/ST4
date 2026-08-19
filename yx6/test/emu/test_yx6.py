@@ -417,6 +417,8 @@ def run_effects(super_host: bool = False) -> str:
         elif 6 <= frame <= 20 and frame != 15:      # held, same count: silence -
             if mfp:                                 # a redundant reload can land
                 return f'effects: frame {frame} wrote {mfp}'
+            if 8 in registers:                      # the square owns R8: the
+                return f'effects: frame {frame} wrote the SID voice volume'
         elif frame == 15:                           # while the counter passes 01
             if mfp != [(TADR, 80)]:                 # a changed count does reload
                 return f'effects: frame 15 wrote {mfp}'
@@ -442,6 +444,9 @@ def run_effects(super_host: bool = False) -> str:
         elif frame == 27:                           # the scene's release
             if mfp != [(TACR, 0)]:
                 return f'effects: frame 27 wrote {mfp}'
+        elif frame == 28:                           # released: the burst writes
+            if 8 not in registers:                  # the voice again
+                return 'effects: frame 28 kept the SID volume gate shut'
         elif frame == 30:                           # the drum start, slot 2
             if mfp != [(TCDCR, 0), (TDDR, 122), (TCDCR, 1)]:
                 return f'effects: frame 30 programmed {mfp}'
@@ -481,12 +486,15 @@ def run_effects(super_host: bool = False) -> str:
         elif frame == 45:                           # the scene's SID, slot 2
             if mfp != [(TCDCR, 0), (TDDR, 90), (TCDCR, 1)]:
                 return f'effects: frame 45 programmed {mfp}'
+        elif frame in (46, 47):                     # the scene's SID holds
+            if 9 in registers:                      # voice B: its volume is
+                return f'effects: frame {frame} wrote the gated volume'  # gated
         elif frame == 48:                           # the same-voice drum: stops
             want = [(TCDCR, 0),                     # the SID's timer first,
                     (TACR, 0), (TADR, 60), (TACR, 1)]   # then arms its own
             if mfp != want:
                 return f'effects: frame 48 programmed {mfp}'
-            if registers.get(9) != 0:
+            if registers.get(9) != 0:               # the drum reopened the gate:
                 return f'effects: frame 48 played volume {registers.get(9)}'
             if registers.get(7) != 0x38 | 0xC0 | 0x24 | 0x12:
                 return f'effects: frame 48 mixer {registers.get(7):#x}'
