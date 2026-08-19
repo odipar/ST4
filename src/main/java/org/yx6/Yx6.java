@@ -32,13 +32,16 @@ public final class Yx6 {
         int startFrame = -1;
         int endFrame = -1;
         int frameCount = -1;
+        int drumHz = YmEffects.MAX_TIMER_HZ;
         int i = 0;
         for (; i < args.length && args[i].startsWith("-"); i++) {
             switch (args[i]) {
                 case "-f" -> forcedMode = true;
                 case "-o" -> playOnce = true;
                 default -> {
-                    if (args[i].startsWith("-startframe")) {
+                    if (args[i].startsWith("-drumhz")) {
+                        drumHz = parseNumber(args[i].substring(7));
+                    } else if (args[i].startsWith("-startframe")) {
                         startFrame = parseNumber(args[i].substring(11));
                     } else if (args[i].startsWith("-endframe")) {
                         endFrame = parseNumber(args[i].substring(9));
@@ -83,6 +86,9 @@ public final class Yx6 {
                       -lF     Loop from frame F, overriding the YM header
                       -minM -secS   Trim: drop everything before M:S, so a
                               moment deep in a long tune plays immediately
+                      -drumhzH   The drum rate ceiling (default 25600): a drum
+                              asking for a faster timer is downsampled to fit,
+                              with a warning
                       -startframeF -endframeF -framesN   The same window in
                               frames: start, end, or a length cap
 
@@ -195,7 +201,8 @@ public final class Yx6 {
 
         Yx6Encoder.Result result;
         try {
-            result = Yx6Encoder.encode(song, ringSize, chunk, loopFrame, true, unit);
+            result = Yx6Encoder.encode(song, ringSize, chunk, loopFrame, true, unit,
+                    drumHz);
         } catch (IllegalArgumentException e) {
             // The encoder always says what it rejected, but getMessage() is
             // @Nullable, so give it something to fall back on.
@@ -318,6 +325,9 @@ public final class Yx6 {
         if (effects.missingDrum() > 0) {
             System.out.printf("Warning: %d drum trigger%s dropped: no such sample%n",
                     effects.missingDrum(), effects.missingDrum() == 1 ? "" : "s");
+        }
+        for (String note : effects.notes()) {
+            System.out.println("Warning: " + note);
         }
 
         int raw = song.frames() * Yx6Format.STREAMS;    // registers and effects alike

@@ -74,6 +74,8 @@ yx6 [-f] [-o] [-nN] [-cC] [-kK] [-lF] input.ym [output.yx6]
   -kK   ST4 unit size: 1, 2 or 4 (default: 2 when the shape allows, else 1)
   -lF   loop from frame F, overriding the YM header
   -o    play once: pack no loop section
+  -drumhzH  the drum rate ceiling (default 25600): a drum asking for a
+        faster timer is downsampled to fit, with a warning
 ```
 
 `N` decides how much RAM the player needs (`18 × N` plus about 1.2 KB of

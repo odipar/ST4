@@ -73,13 +73,14 @@ def owned_voices(fmt, frames, drums, regs):
             kind = code & 0xC0
             if ym6 and kind == 0x80:
                 continue                        # sinus: dropped at pack
-            if 2457600 // (PREDIV[tp] * tc) > 25600:
-                continue                        # too fast: dropped
             if kind == 0x40:
                 n = regs[8 + v - 1][f] & 0x1F
                 if n >= drums:
                     continue                    # missing drum: dropped
-            owned.add(v - 1)
+            elif 2457600 // (PREDIV[tp] * tc) > 25600:
+                continue                        # too-fast SID/buzzer: dropped
+            owned.add(v - 1)                    # (a too-fast DRUM downsamples
+                                                # and plays, so it owns)
     return owned
 
 def sweep(path):
