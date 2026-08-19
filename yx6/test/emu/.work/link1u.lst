@@ -1,5 +1,6 @@
-    1           =00000004               ST4_UNIT    equ     4
-    2                                           include "YX6.S"
+    1           =00000001               ST4_UNIT    equ     1
+    2           =00000001               YX6_SUPER_HOST equ  1
+    3                                           include "YX6.S"
     1                                   ; -----------------------------------------------------------------------------
     2                                   ; YX6.S - streaming YM chiptune player for the plain 68000 (Atari ST)
     3                                   ;
@@ -134,9 +135,9 @@
   132                                   ; two. Default off, because a program that hooks the VBL from user mode has
   133                                   ; a live USP at every tick.
   134                                           .if ^^defined YX6_SUPER_HOST
-  135                                 -         .else
-  136           =00000000               YX6_SUPER_HOST  equ     0
-  137                                           .endif
+  135                                           .else
+  136                                 - YX6_SUPER_HOST  equ     0
+  137                                 -         .endif
   138                                   
   139           =00000012               YX6_STREAMS     equ     18              ; R0..R13, then E1 T1 E2 T2: the two
   140                                                                           ; effect slots' control and timer-count
@@ -482,36 +483,36 @@
   480                                 -         lsr.w   #1,d3
   481                                 -         .endif
   482                                           .if ST4_UNIT=4
-  483  00000226  E44B                           lsr.w   #2,d3
-  484                                           .endif
+  483                                 -         lsr.w   #2,d3
+  484                                 -         .endif
   485                                   
   486                                   ; (a2) written out rather than YS_D1(a2): with +o3 rmac folds a zero
   487                                   ; displacement away on movem but keeps the addressing mode, and emits the
   488                                   ; instruction without its extension word. The next word becomes the
   489                                   ; displacement and the code runs off into nothing.
-  490  00000228  4CD20306                       movem.l (a2),d1-d2/a0-a1
-  491  0000022C  286A0014                       movea.l YS_BOFF(a2),a4
-  492  00000230  2A6A0018                       movea.l YS_WOFF(a2),a5
-  493  00000234  302A001C                       move.w  YS_QUEUE(a2),d0
-  494  00000238  246A0010                       movea.l YS_LIT(a2),a2           ; loaded last: a2 was the base
-  495  0000023C  6100xxxx                       bsr     ST4_resume
-  496  00000240  264E                           movea.l a6,a3                   ; the decoder clobbered the workspace
-  497  00000242  CD8A                           exg     a2,d6                   ; a2 = the block again, d6 = stream B
-  498  00000244  B3EA0024                       cmpa.l  YS_END(a2),a1           ; YX6_save, inlined: this is the hot path
-  499  00000248  66xx                           bne.s   .stored
-  500  0000024A  226A0020                       movea.l YS_START(a2),a1         ; the call landed on the ring end
+  490  00000226  4CD20306                       movem.l (a2),d1-d2/a0-a1
+  491  0000022A  286A0014                       movea.l YS_BOFF(a2),a4
+  492  0000022E  2A6A0018                       movea.l YS_WOFF(a2),a5
+  493  00000232  302A001C                       move.w  YS_QUEUE(a2),d0
+  494  00000236  246A0010                       movea.l YS_LIT(a2),a2           ; loaded last: a2 was the base
+  495  0000023A  6100xxxx                       bsr     ST4_resume
+  496  0000023E  264E                           movea.l a6,a3                   ; the decoder clobbered the workspace
+  497  00000240  CD8A                           exg     a2,d6                   ; a2 = the block again, d6 = stream B
+  498  00000242  B3EA0024                       cmpa.l  YS_END(a2),a1           ; YX6_save, inlined: this is the hot path
+  499  00000246  66xx                           bne.s   .stored
+  500  00000248  226A0020                       movea.l YS_START(a2),a1         ; the call landed on the ring end
   501                                   .stored:
-  502  0000024E  48D20306                       movem.l d1-d2/a0-a1,(a2)
-  503  00000252  25460010                       move.l  d6,YS_LIT(a2)
-  504  00000256  254C0014                       move.l  a4,YS_BOFF(a2)
-  505  0000025A  254D0018                       move.l  a5,YS_WOFF(a2)
-  506  0000025E  3540001C                       move.w  d0,YS_QUEUE(a2)
-  507  00000262  2C0A                           move.l  a2,d6                   ; the block pointer, back where fill keeps it
-  508  00000264  4A87                           tst.l   d7
-  509  00000266  66A0                           bne.s   .piece
+  502  0000024C  48D20306                       movem.l d1-d2/a0-a1,(a2)
+  503  00000250  25460010                       move.l  d6,YS_LIT(a2)
+  504  00000254  254C0014                       move.l  a4,YS_BOFF(a2)
+  505  00000258  254D0018                       move.l  a5,YS_WOFF(a2)
+  506  0000025C  3540001C                       move.w  d0,YS_QUEUE(a2)
+  507  00000260  2C0A                           move.l  a2,d6                   ; the block pointer, back where fill keeps it
+  508  00000262  4A87                           tst.l   d7
+  509  00000264  66A2                           bne.s   .piece
   510                                   .done:
-  511  00000268  4CDF40C0                       movem.l (sp)+,d6-d7/a6
-  512  0000026C  4E75                           rts
+  511  00000266  4CDF40C0                       movem.l (sp)+,d6-d7/a6
+  512  0000026A  4E75                           rts
   513                                   
   514                                   ; -----------------------------------------------------------------------------
   515                                   ; YX6_start_loop: a2 = state block. Starts this register's loop stream over -
@@ -523,29 +524,29 @@
   521                                   ; It runs inside YX6_fill, which guarantees d6 = the state block and a6 = the
   522                                   ; workspace - the two anchors that survive the decoder call.
   523                                   YX6_start_loop:
-  524  0000026E  200A                           move.l  a2,d0
-  525  00000270  908B                           sub.l   a3,d0
-  526  00000272  907C0058                       sub.w   #YX6_STATE,d0
-  527  00000276  E848                           lsr.w   #4,d0                   ; k * 64 becomes k * 4, a table index
-  528  00000278  206B0014                       movea.l YX6_FILE(a3),a0
-  529  0000027C  2030006A                       move.l  YH_LOOP_TABLE(a0,d0.w),d0
-  530  00000280  67xx                           beq.s   .no_loop                ; this tune has no loop section
-  531  00000282  D1C0                           adda.l  d0,a0                   ; the loop section's ST4 container
-  532  00000284  226A0020                       movea.l YS_START(a2),a1         ; read before a2 becomes stream B
-  533  00000288  61xx                           bsr.s   yx6_open
-  534  0000028A  264E                           movea.l a6,a3                   ; the decoder clobbered the workspace
-  535  0000028C  CD8A                           exg     a2,d6                   ; a2 = the block again, d6 = stream B
-  536  0000028E  25480008                       move.l  a0,YS_INPUT(a2)
-  537  00000292  25460010                       move.l  d6,YS_LIT(a2)
-  538  00000296  254C0014                       move.l  a4,YS_BOFF(a2)
-  539  0000029A  254D0018                       move.l  a5,YS_WOFF(a2)
-  540  0000029E  3540001C                       move.w  d0,YS_QUEUE(a2)
-  541  000002A2  2481                           move.l  d1,YS_D1(a2)
-  542  000002A4  25420004                       move.l  d2,YS_D2(a2)
-  543  000002A8  256B001C0028                   move.l  YX6_LOOPLEN(a3),YS_LEFT(a2)
-  544  000002AE  2C0A                           move.l  a2,d6                   ; the block pointer, as fill keeps it
+  524  0000026C  200A                           move.l  a2,d0
+  525  0000026E  908B                           sub.l   a3,d0
+  526  00000270  907C0058                       sub.w   #YX6_STATE,d0
+  527  00000274  E848                           lsr.w   #4,d0                   ; k * 64 becomes k * 4, a table index
+  528  00000276  206B0014                       movea.l YX6_FILE(a3),a0
+  529  0000027A  2030006A                       move.l  YH_LOOP_TABLE(a0,d0.w),d0
+  530  0000027E  67xx                           beq.s   .no_loop                ; this tune has no loop section
+  531  00000280  D1C0                           adda.l  d0,a0                   ; the loop section's ST4 container
+  532  00000282  226A0020                       movea.l YS_START(a2),a1         ; read before a2 becomes stream B
+  533  00000286  61xx                           bsr.s   yx6_open
+  534  00000288  264E                           movea.l a6,a3                   ; the decoder clobbered the workspace
+  535  0000028A  CD8A                           exg     a2,d6                   ; a2 = the block again, d6 = stream B
+  536  0000028C  25480008                       move.l  a0,YS_INPUT(a2)
+  537  00000290  25460010                       move.l  d6,YS_LIT(a2)
+  538  00000294  254C0014                       move.l  a4,YS_BOFF(a2)
+  539  00000298  254D0018                       move.l  a5,YS_WOFF(a2)
+  540  0000029C  3540001C                       move.w  d0,YS_QUEUE(a2)
+  541  000002A0  2481                           move.l  d1,YS_D1(a2)
+  542  000002A2  25420004                       move.l  d2,YS_D2(a2)
+  543  000002A6  256B001C0028                   move.l  YX6_LOOPLEN(a3),YS_LEFT(a2)
+  544  000002AC  2C0A                           move.l  a2,d6                   ; the block pointer, as fill keeps it
   545                                   .no_loop:
-  546  000002B0  4E75                           rts
+  546  000002AE  4E75                           rts
   547                                   
   548                                   ; -----------------------------------------------------------------------------
   549                                   ; yx6_open: a0 = an ST4 container. Points the four stream registers at its
@@ -556,215 +557,215 @@
   554                                   ; themselves, init from the stack and the loop restart from a6.
   555                                   ; -----------------------------------------------------------------------------
   556                                   yx6_open:
-  557  000002B2  2448                           movea.l a0,a2
-  558  000002B4  D5E80008                       adda.l  8(a0),a2                ; stream B, the literals
-  559  000002B8  2848                           movea.l a0,a4
-  560  000002BA  D9E8000C                       adda.l  12(a0),a4               ; stream C, the byte offsets
-  561  000002BE  2A48                           movea.l a0,a5
-  562  000002C0  DBE80010                       adda.l  16(a0),a5               ; stream D, the word offsets
-  563  000002C4  41E80014                       lea     20(a0),a0               ; stream A, the bits
-  564  000002C8  7600                           moveq   #0,d3
-  565  000002CA  362B0024                       move.w  YX6_N(a3),d3            ; N, ST4_init's argument
-  566  000002CE  6000xxxx                       bra     ST4_init
+  557  000002B0  2448                           movea.l a0,a2
+  558  000002B2  D5E80008                       adda.l  8(a0),a2                ; stream B, the literals
+  559  000002B6  2848                           movea.l a0,a4
+  560  000002B8  D9E8000C                       adda.l  12(a0),a4               ; stream C, the byte offsets
+  561  000002BC  2A48                           movea.l a0,a5
+  562  000002BE  DBE80010                       adda.l  16(a0),a5               ; stream D, the word offsets
+  563  000002C2  41E80014                       lea     20(a0),a0               ; stream A, the bits
+  564  000002C6  7600                           moveq   #0,d3
+  565  000002C8  362B0024                       move.w  YX6_N(a3),d3            ; N, ST4_init's argument
+  566  000002CC  6000xxxx                       bra     ST4_init
   567                                   
   568                                   ; -----------------------------------------------------------------------------
   569                                   ; YX6_play: a0 = workspace. One frame: run the effect stage, write fourteen
   570                                   ; registers, undo the stage's ring edits, refill one stream.
   571                                   ; -----------------------------------------------------------------------------
   572                                   YX6_play:
-  573  000002D2  2648                           movea.l a0,a3
-  574  000002D4  4AAB0004                       tst.l   YX6_LEFTFR(a3)
-  575  000002D8  66xx                           bne.s   .frame
-  576  000002DA  70FF                           moveq   #-1,d0                  ; past the last frame of a tune that
-  577  000002DC  4E75                           rts                             ; does not loop: write nothing
+  573  000002D0  2648                           movea.l a0,a3
+  574  000002D2  4AAB0004                       tst.l   YX6_LEFTFR(a3)
+  575  000002D6  66xx                           bne.s   .frame
+  576  000002D8  70FF                           moveq   #-1,d0                  ; past the last frame of a tune that
+  577  000002DA  4E75                           rts                             ; does not loop: write nothing
   578                                   
   579                                   .frame:
-  580  000002DE  7600                           moveq   #0,d3
-  581  000002E0  362B0024                       move.w  YX6_N(a3),d3            ; one ring to the next
+  580  000002DC  7600                           moveq   #0,d3
+  581  000002DE  362B0024                       move.w  YX6_N(a3),d3            ; one ring to the next
   582                                   
   583                                   ; The effect stage, inlined: it runs BEFORE the burst so it may rewrite this
   584                                   ; frame's ring bytes. Each slot is gated on E | E-last: a slot that has, and
   585                                   ; had, nothing to do costs one test - the common frame. A slot machine call
   586                                   ; therefore always means something changed, holds, or just ended; yx6_slot's
   587                                   ; held path leans on that (E is never 0 there).
-  588  000002E4  2053                           movea.l YX6_CURSOR(a3),a0
-  589  000002E6  D1EB002E                       adda.l  YX6_EFXOFF(a3),a0       ; ring E1, at this frame's offset
-  590  000002EA  4BFAxxxx                       lea     yx6_desc1(pc),a5
-  591  000002EE  1010                           move.b  (a0),d0                 ; E1 | its last code: zero is idle
-  592  000002F0  8015                           or.b    (a5),d0
-  593  000002F2  67xx                           beq.s   .slot1_idle
-  594  000002F4  1010                           move.b  (a0),d0                 ; the real E1
-  595  000002F6  D1C3                           adda.l  d3,a0
-  596  000002F8  1210                           move.b  (a0),d1                 ; T1
-  597  000002FA  D1C3                           adda.l  d3,a0
-  598  000002FC  2F08                           move.l  a0,-(sp)                ; ring E2's byte, for after slot 1
-  599  000002FE  6100xxxx                       bsr     yx6_slot
-  600  00000302  205F                           movea.l (sp)+,a0
-  601  00000304  60xx                           bra.s   .slot2
+  588  000002E2  2053                           movea.l YX6_CURSOR(a3),a0
+  589  000002E4  D1EB002E                       adda.l  YX6_EFXOFF(a3),a0       ; ring E1, at this frame's offset
+  590  000002E8  4BFAxxxx                       lea     yx6_desc1(pc),a5
+  591  000002EC  1010                           move.b  (a0),d0                 ; E1 | its last code: zero is idle
+  592  000002EE  8015                           or.b    (a5),d0
+  593  000002F0  67xx                           beq.s   .slot1_idle
+  594  000002F2  1010                           move.b  (a0),d0                 ; the real E1
+  595  000002F4  D1C3                           adda.l  d3,a0
+  596  000002F6  1210                           move.b  (a0),d1                 ; T1
+  597  000002F8  D1C3                           adda.l  d3,a0
+  598  000002FA  2F08                           move.l  a0,-(sp)                ; ring E2's byte, for after slot 1
+  599  000002FC  6100xxxx                       bsr     yx6_slot
+  600  00000300  205F                           movea.l (sp)+,a0
+  601  00000302  60xx                           bra.s   .slot2
   602                                   .slot1_idle:
-  603  00000306  D1C3                           adda.l  d3,a0
-  604  00000308  D1C3                           adda.l  d3,a0
+  603  00000304  D1C3                           adda.l  d3,a0
+  604  00000306  D1C3                           adda.l  d3,a0
   605                                   .slot2:
-  606  0000030A  4BFAxxxx                       lea     yx6_desc2(pc),a5
-  607  0000030E  1010                           move.b  (a0),d0                 ; E2, the same gate
-  608  00000310  8015                           or.b    (a5),d0
-  609  00000312  67xx                           beq.s   .effects_done
-  610  00000314  1010                           move.b  (a0),d0
-  611  00000316  D1C3                           adda.l  d3,a0
-  612  00000318  1210                           move.b  (a0),d1                 ; T2
-  613  0000031A  6100xxxx                       bsr     yx6_slot
+  606  00000308  4BFAxxxx                       lea     yx6_desc2(pc),a5
+  607  0000030C  1010                           move.b  (a0),d0                 ; E2, the same gate
+  608  0000030E  8015                           or.b    (a5),d0
+  609  00000310  67xx                           beq.s   .effects_done
+  610  00000312  1010                           move.b  (a0),d0
+  611  00000314  D1C3                           adda.l  d3,a0
+  612  00000316  1210                           move.b  (a0),d1                 ; T2
+  613  00000318  6100xxxx                       bsr     yx6_slot
   614                                   .effects_done:
   615                                   
   616                                   ; While a drum runs its voice leaves the mixer, as the original replay
   617                                   ; routines had it: force the tone and noise bits in this frame's R7.
-  618  0000031E  103Axxxx                       move.b  yx6_drums(pc),d0
-  619  00000322  67xx                           beq.s   .mixer_ok
-  620  00000324  1200                           move.b  d0,d1
-  621  00000326  E709                           lsl.b   #3,d1
-  622  00000328  8200                           or.b    d0,d1                   ; the voice's tone and noise disables
-  623  0000032A  2053                           movea.l YX6_CURSOR(a3),a0
-  624  0000032C  D1EB0032                       adda.l  YX6_R7OFF(a3),a0
-  625  00000330  6100xxxx                       bsr     yx6_borrow              ; the ring gets this byte back
-  626  00000334  8310                           or.b    d1,(a0)
+  618  0000031C  103Axxxx                       move.b  yx6_drums(pc),d0
+  619  00000320  67xx                           beq.s   .mixer_ok
+  620  00000322  1200                           move.b  d0,d1
+  621  00000324  E709                           lsl.b   #3,d1
+  622  00000326  8200                           or.b    d0,d1                   ; the voice's tone and noise disables
+  623  00000328  2053                           movea.l YX6_CURSOR(a3),a0
+  624  0000032A  D1EB0032                       adda.l  YX6_R7OFF(a3),a0
+  625  0000032E  6100xxxx                       bsr     yx6_borrow              ; the ring gets this byte back
+  626  00000332  8310                           or.b    d1,(a0)
   627                                   .mixer_ok:
-  628  00000336  2253                           movea.l YX6_CURSOR(a3),a1       ; the same offset in all fourteen
-  629  00000338  45F9FFFF8800                   lea     YX6_PSG,a2              ; register rings
+  628  00000334  2253                           movea.l YX6_CURSOR(a3),a1       ; the same offset in all fourteen
+  629  00000336  45F9FFFF8800                   lea     YX6_PSG,a2              ; register rings
   630                                   
   631                                   ; Selecting a register and writing it are two bus cycles. An interrupt that
   632                                   ; uses the sound chip in between - TOS has several, its floppy motor timeout
   633                                   ; among them - would leave this write going to whatever register it selected,
   634                                   ; so the burst runs masked. Cheap: about 24 cycles for the whole frame.
-  635  0000033E  40E7                           move.w  sr,-(sp)
-  636  00000340  007C0700                       ori.w   #$0700,sr
+  635  0000033C  40E7                           move.w  sr,-(sp)
+  636  0000033E  007C0700                       ori.w   #$0700,sr
   637                                   
                                                 YX6_WRITE 0                     ; channel A period, fine and coarse
-       00000344  14BC0000             @         move.b  #$0,(a2)           
-       00000348  15510002             @         move.b  (a1),2(a2)              
-  638  0000034C  D3C3                 @         adda.l  d3,a1
+       00000342  14BC0000             @         move.b  #$0,(a2)           
+       00000346  15510002             @         move.b  (a1),2(a2)              
+  638  0000034A  D3C3                 @         adda.l  d3,a1
                                                 YX6_WRITE 1
-       0000034E  14BC0001             @         move.b  #$1,(a2)           
-       00000352  15510002             @         move.b  (a1),2(a2)              
-  639  00000356  D3C3                 @         adda.l  d3,a1
+       0000034C  14BC0001             @         move.b  #$1,(a2)           
+       00000350  15510002             @         move.b  (a1),2(a2)              
+  639  00000354  D3C3                 @         adda.l  d3,a1
                                                 YX6_WRITE 2                     ; channel B
-       00000358  14BC0002             @         move.b  #$2,(a2)           
-       0000035C  15510002             @         move.b  (a1),2(a2)              
-  640  00000360  D3C3                 @         adda.l  d3,a1
+       00000356  14BC0002             @         move.b  #$2,(a2)           
+       0000035A  15510002             @         move.b  (a1),2(a2)              
+  640  0000035E  D3C3                 @         adda.l  d3,a1
                                                 YX6_WRITE 3
-       00000362  14BC0003             @         move.b  #$3,(a2)           
-       00000366  15510002             @         move.b  (a1),2(a2)              
-  641  0000036A  D3C3                 @         adda.l  d3,a1
+       00000360  14BC0003             @         move.b  #$3,(a2)           
+       00000364  15510002             @         move.b  (a1),2(a2)              
+  641  00000368  D3C3                 @         adda.l  d3,a1
                                                 YX6_WRITE 4                     ; channel C
-       0000036C  14BC0004             @         move.b  #$4,(a2)           
-       00000370  15510002             @         move.b  (a1),2(a2)              
-  642  00000374  D3C3                 @         adda.l  d3,a1
+       0000036A  14BC0004             @         move.b  #$4,(a2)           
+       0000036E  15510002             @         move.b  (a1),2(a2)              
+  642  00000372  D3C3                 @         adda.l  d3,a1
                                                 YX6_WRITE 5
-       00000376  14BC0005             @         move.b  #$5,(a2)           
-       0000037A  15510002             @         move.b  (a1),2(a2)              
-  643  0000037E  D3C3                 @         adda.l  d3,a1
+       00000374  14BC0005             @         move.b  #$5,(a2)           
+       00000378  15510002             @         move.b  (a1),2(a2)              
+  643  0000037C  D3C3                 @         adda.l  d3,a1
                                                 YX6_WRITE 6                     ; noise period
-       00000380  14BC0006             @         move.b  #$6,(a2)           
-       00000384  15510002             @         move.b  (a1),2(a2)              
-  644  00000388  D3C3                 @         adda.l  d3,a1
+       0000037E  14BC0006             @         move.b  #$6,(a2)           
+       00000382  15510002             @         move.b  (a1),2(a2)              
+  644  00000386  D3C3                 @         adda.l  d3,a1
   645                                   
-  646  0000038A  14BC0007                       move.b  #YX6_MIXER,(a2)         ; R7 also carries the ST's I/O port
-  647  0000038E  1211                           move.b  (a1),d1                 ; directions, which port A needs kept
-  648  00000390  823C00C0                       or.b    #YX6_PORTS,d1           ; as outputs for the floppy select
-  649  00000394  15410002                       move.b  d1,2(a2)
-  650  00000398  D3C3                           adda.l  d3,a1
+  646  00000388  14BC0007                       move.b  #YX6_MIXER,(a2)         ; R7 also carries the ST's I/O port
+  647  0000038C  1211                           move.b  (a1),d1                 ; directions, which port A needs kept
+  648  0000038E  823C00C0                       or.b    #YX6_PORTS,d1           ; as outputs for the floppy select
+  649  00000392  15410002                       move.b  d1,2(a2)
+  650  00000396  D3C3                           adda.l  d3,a1
   651                                   
                                                 YX6_WRITE 8                     ; the three volumes
-       0000039A  14BC0008             @         move.b  #$8,(a2)           
-       0000039E  15510002             @         move.b  (a1),2(a2)              
-  652  000003A2  D3C3                 @         adda.l  d3,a1
+       00000398  14BC0008             @         move.b  #$8,(a2)           
+       0000039C  15510002             @         move.b  (a1),2(a2)              
+  652  000003A0  D3C3                 @         adda.l  d3,a1
                                                 YX6_WRITE 9
-       000003A4  14BC0009             @         move.b  #$9,(a2)           
-       000003A8  15510002             @         move.b  (a1),2(a2)              
-  653  000003AC  D3C3                 @         adda.l  d3,a1
+       000003A2  14BC0009             @         move.b  #$9,(a2)           
+       000003A6  15510002             @         move.b  (a1),2(a2)              
+  653  000003AA  D3C3                 @         adda.l  d3,a1
                                                 YX6_WRITE 10
-       000003AE  14BC000A             @         move.b  #$A,(a2)           
-       000003B2  15510002             @         move.b  (a1),2(a2)              
-  654  000003B6  D3C3                 @         adda.l  d3,a1
+       000003AC  14BC000A             @         move.b  #$A,(a2)           
+       000003B0  15510002             @         move.b  (a1),2(a2)              
+  654  000003B4  D3C3                 @         adda.l  d3,a1
                                                 YX6_WRITE 11                    ; envelope period
-       000003B8  14BC000B             @         move.b  #$B,(a2)           
-       000003BC  15510002             @         move.b  (a1),2(a2)              
-  655  000003C0  D3C3                 @         adda.l  d3,a1
+       000003B6  14BC000B             @         move.b  #$B,(a2)           
+       000003BA  15510002             @         move.b  (a1),2(a2)              
+  655  000003BE  D3C3                 @         adda.l  d3,a1
                                                 YX6_WRITE 12
-       000003C2  14BC000C             @         move.b  #$C,(a2)           
-       000003C6  15510002             @         move.b  (a1),2(a2)              
-  656  000003CA  D3C3                 @         adda.l  d3,a1
+       000003C0  14BC000C             @         move.b  #$C,(a2)           
+       000003C4  15510002             @         move.b  (a1),2(a2)              
+  656  000003C8  D3C3                 @         adda.l  d3,a1
   657                                   
-  658  000003CC  1211                           move.b  (a1),d1                 ; R13 restarts the envelope whenever it
-  659  000003CE  B23C00FF                       cmp.b   #YX6_NO_ENV,d1          ; is written, so $FF means leave it be
-  660  000003D2  67xx                           beq.s   .envelope_held
-  661  000003D4  14BC000D                       move.b  #YX6_ENVELOPE,(a2)
-  662  000003D8  15410002                       move.b  d1,2(a2)
+  658  000003CA  1211                           move.b  (a1),d1                 ; R13 restarts the envelope whenever it
+  659  000003CC  B23C00FF                       cmp.b   #YX6_NO_ENV,d1          ; is written, so $FF means leave it be
+  660  000003D0  67xx                           beq.s   .envelope_held
+  661  000003D2  14BC000D                       move.b  #YX6_ENVELOPE,(a2)
+  662  000003D6  15410002                       move.b  d1,2(a2)
   663                                   .envelope_held:
-  664  000003DC  46DF                           move.w  (sp)+,sr
+  664  000003DA  46DF                           move.w  (sp)+,sr
   665                                   
   666                                   ; Undo this frame's ring edits: the chip has heard the sanitized frame, and
   667                                   ; the ring must stay exact decode history for every match yet to come.
-  668  000003DE  102B0043                       move.b  YX6_PATCHES(a3),d0
-  669  000003E2  67xx                           beq.s   .pristine
-  670  000003E4  422B0043                       clr.b   YX6_PATCHES(a3)         ; cleared only when it was used
-  671  000003E8  41EB0048                       lea     YX6_PATCH_ADDR(a3),a0
-  672  000003EC  43EB0044                       lea     YX6_PATCH_VAL(a3),a1
+  668  000003DC  102B0043                       move.b  YX6_PATCHES(a3),d0
+  669  000003E0  67xx                           beq.s   .pristine
+  670  000003E2  422B0043                       clr.b   YX6_PATCHES(a3)         ; cleared only when it was used
+  671  000003E6  41EB0048                       lea     YX6_PATCH_ADDR(a3),a0
+  672  000003EA  43EB0044                       lea     YX6_PATCH_VAL(a3),a1
   673                                   .restore:
-  674  000003F0  2458                           movea.l (a0)+,a2
-  675  000003F2  1499                           move.b  (a1)+,(a2)
-  676  000003F4  5300                           subq.b  #1,d0
-  677  000003F6  66F8                           bne.s   .restore
+  674  000003EE  2458                           movea.l (a0)+,a2
+  675  000003F0  1499                           move.b  (a1)+,(a2)
+  676  000003F2  5300                           subq.b  #1,d0
+  677  000003F4  66F8                           bne.s   .restore
   678                                   .pristine:
   679                                   
   680                                   ; Refill the stream whose turn it is. Slots 18..C-1 exist when C is larger
   681                                   ; than the stream count; they simply have nothing to do.
-  682  000003F8  302B0028                       move.w  YX6_SLOT(a3),d0
-  683  000003FC  B07C0012                       cmp.w   #YX6_STREAMS,d0
-  684  00000400  64xx                           bcc.s   .advance
-  685  00000402  7600                           moveq   #0,d3
-  686  00000404  362B0026                       move.w  YX6_C(a3),d3            ; a whole group
-  687  00000408  4A6B002C                       tst.w   YX6_LOOPS(a3)
-  688  0000040C  66xx                           bne.s   .refill                 ; a looping tune never runs out
-  689  0000040E  222B0018                       move.l  YX6_TOTAL(a3),d1
-  690  00000412  92AB0008                       sub.l   YX6_NEXT(a3),d1         ; values still packed
-  691  00000416  6Fxx                           ble.s   .advance                ; all decoded: never call ST4 again
-  692  00000418  B283                           cmp.l   d3,d1
-  693  0000041A  64xx                           bcc.s   .refill
-  694  0000041C  2601                           move.l  d1,d3                   ; the last group is a short one
+  682  000003F6  302B0028                       move.w  YX6_SLOT(a3),d0
+  683  000003FA  B07C0012                       cmp.w   #YX6_STREAMS,d0
+  684  000003FE  64xx                           bcc.s   .advance
+  685  00000400  7600                           moveq   #0,d3
+  686  00000402  362B0026                       move.w  YX6_C(a3),d3            ; a whole group
+  687  00000406  4A6B002C                       tst.w   YX6_LOOPS(a3)
+  688  0000040A  66xx                           bne.s   .refill                 ; a looping tune never runs out
+  689  0000040C  222B0018                       move.l  YX6_TOTAL(a3),d1
+  690  00000410  92AB0008                       sub.l   YX6_NEXT(a3),d1         ; values still packed
+  691  00000414  6Fxx                           ble.s   .advance                ; all decoded: never call ST4 again
+  692  00000416  B283                           cmp.l   d3,d1
+  693  00000418  64xx                           bcc.s   .refill
+  694  0000041A  2601                           move.l  d1,d3                   ; the last group is a short one
   695                                   .refill:
-  696  0000041E  ED48                           lsl.w   #6,d0
-  697  00000420  6100FDD6                       bsr     YX6_fill
+  696  0000041C  ED48                           lsl.w   #6,d0
+  697  0000041E  6100FDD8                       bsr     YX6_fill
   698                                   
   699                                   .advance:
-  700  00000424  5293                           addq.l  #1,YX6_CURSOR(a3)       ; one byte along every ring
-  701  00000426  2013                           move.l  YX6_CURSOR(a3),d0
-  702  00000428  B0AB000C                       cmp.l   YX6_RINGEND(a3),d0
-  703  0000042C  65xx                           bcs.s   .cursor_ready
-  704  0000042E  26AB0010                       move.l  YX6_RINGS(a3),YX6_CURSOR(a3)
+  700  00000422  5293                           addq.l  #1,YX6_CURSOR(a3)       ; one byte along every ring
+  701  00000424  2013                           move.l  YX6_CURSOR(a3),d0
+  702  00000426  B0AB000C                       cmp.l   YX6_RINGEND(a3),d0
+  703  0000042A  65xx                           bcs.s   .cursor_ready
+  704  0000042C  26AB0010                       move.l  YX6_RINGS(a3),YX6_CURSOR(a3)
   705                                   .cursor_ready:
-  706  00000432  302B0028                       move.w  YX6_SLOT(a3),d0
-  707  00000436  5240                           addq.w  #1,d0
-  708  00000438  B06B0026                       cmp.w   YX6_C(a3),d0
-  709  0000043C  65xx                           bcs.s   .slot_ready
-  710  0000043E  7000                           moveq   #0,d0                   ; a cycle ended: the groups move on
-  711  00000440  7200                           moveq   #0,d1
-  712  00000442  322B0026                       move.w  YX6_C(a3),d1
-  713  00000446  D3AB0008                       add.l   d1,YX6_NEXT(a3)
+  706  00000430  302B0028                       move.w  YX6_SLOT(a3),d0
+  707  00000434  5240                           addq.w  #1,d0
+  708  00000436  B06B0026                       cmp.w   YX6_C(a3),d0
+  709  0000043A  65xx                           bcs.s   .slot_ready
+  710  0000043C  7000                           moveq   #0,d0                   ; a cycle ended: the groups move on
+  711  0000043E  7200                           moveq   #0,d1
+  712  00000440  322B0026                       move.w  YX6_C(a3),d1
+  713  00000444  D3AB0008                       add.l   d1,YX6_NEXT(a3)
   714                                   .slot_ready:
-  715  0000044A  37400028                       move.w  d0,YX6_SLOT(a3)
+  715  00000448  37400028                       move.w  d0,YX6_SLOT(a3)
   716                                   
   717                                   ; The rings hold the tune as one continuous sequence, so reaching the end of
   718                                   ; the last frame simply means the next values in them are the loop section's.
   719                                   ; The countdown follows: it reloads with the loop section's length.
-  720  0000044E  53AB0004                       subq.l  #1,YX6_LEFTFR(a3)
-  721  00000452  66xx                           bne.s   .played
-  722  00000454  4A6B002C                       tst.w   YX6_LOOPS(a3)
-  723  00000458  67xx                           beq.s   .played                 ; zero and no loop: the next call ends
-  724  0000045A  276B001C0004                   move.l  YX6_LOOPLEN(a3),YX6_LEFTFR(a3)
-  725  00000460  7001                           moveq   #1,d0                   ; played, and wrapped to the loop point
-  726  00000462  4E75                           rts
+  720  0000044C  53AB0004                       subq.l  #1,YX6_LEFTFR(a3)
+  721  00000450  66xx                           bne.s   .played
+  722  00000452  4A6B002C                       tst.w   YX6_LOOPS(a3)
+  723  00000456  67xx                           beq.s   .played                 ; zero and no loop: the next call ends
+  724  00000458  276B001C0004                   move.l  YX6_LOOPLEN(a3),YX6_LEFTFR(a3)
+  725  0000045E  7001                           moveq   #1,d0                   ; played, and wrapped to the loop point
+  726  00000460  4E75                           rts
   727                                   .played:
-  728  00000464  7000                           moveq   #0,d0
-  729  00000466  4E75                           rts
+  728  00000462  7000                           moveq   #0,d0
+  729  00000464  4E75                           rts
   730                                   
   731                                   ; -----------------------------------------------------------------------------
   732                                   ; YX6_stop: a0 = workspace. Hands the MFP back exactly as YX6_init found it -
@@ -773,48 +774,48 @@
   735                                   ; envelope settings stay, and a fresh YX6_init starts the tune over.
   736                                   ; -----------------------------------------------------------------------------
   737                                   YX6_stop:
-  738  00000468  2648                           movea.l a0,a3
-  739  0000046A  40E7                           move.w  sr,-(sp)
-  740  0000046C  007C0700                       ori.w   #$0700,sr
-  741  00000470  4238FA19                       clr.b   $FFFFFA19.w             ; quiesce before handing back
-  742  00000474  023800F0FA1D                   andi.b  #$F0,$FFFFFA1D.w
-  743  0000047A  21EB00360134                   move.l  YX6_OLDTA(a3),$134.w
-  744  00000480  21EB003A0110                   move.l  YX6_OLDTD(a3),$110.w
-  745  00000486  11EB0040FA1F                   move.b  YX6_OLDTADR(a3),$FFFFFA1F.w
-  746  0000048C  11EB0041FA25                   move.b  YX6_OLDTDDR(a3),$FFFFFA25.w
-  747  00000492  11EB003EFA19                   move.b  YX6_OLDTACR(a3),$FFFFFA19.w
-  748  00000498  102B003F                       move.b  YX6_OLDTCDCR(a3),d0     ; only Timer D's nibble is ours
-  749  0000049C  C03C000F                       and.b   #$0F,d0
-  750  000004A0  8138FA1D                       or.b    d0,$FFFFFA1D.w
-  751  000004A4  206B0054                       movea.l YX6_OLDUSP(a3),a0       ; the USP, as init found it
-  752  000004A8  4E60                           move    a0,usp
-  753  000004AA  102B0042                       move.b  YX6_OLDMFP(a3),d0       ; re-clear what init found clear,
-  754  000004AE  41FAxxxx                       lea     yx6_mfpbits(pc),a0      ; through the same table init read
-  755  000004B2  7403                           moveq   #3,d2
+  738  00000466  2648                           movea.l a0,a3
+  739  00000468  40E7                           move.w  sr,-(sp)
+  740  0000046A  007C0700                       ori.w   #$0700,sr
+  741  0000046E  4238FA19                       clr.b   $FFFFFA19.w             ; quiesce before handing back
+  742  00000472  023800F0FA1D                   andi.b  #$F0,$FFFFFA1D.w
+  743  00000478  21EB00360134                   move.l  YX6_OLDTA(a3),$134.w
+  744  0000047E  21EB003A0110                   move.l  YX6_OLDTD(a3),$110.w
+  745  00000484  11EB0040FA1F                   move.b  YX6_OLDTADR(a3),$FFFFFA1F.w
+  746  0000048A  11EB0041FA25                   move.b  YX6_OLDTDDR(a3),$FFFFFA25.w
+  747  00000490  11EB003EFA19                   move.b  YX6_OLDTACR(a3),$FFFFFA19.w
+  748  00000496  102B003F                       move.b  YX6_OLDTCDCR(a3),d0     ; only Timer D's nibble is ours
+  749  0000049A  C03C000F                       and.b   #$0F,d0
+  750  0000049E  8138FA1D                       or.b    d0,$FFFFFA1D.w
+  751  000004A2  206B0054                       movea.l YX6_OLDUSP(a3),a0       ; the USP, as init found it
+  752  000004A6  4E60                           move    a0,usp
+  753  000004A8  102B0042                       move.b  YX6_OLDMFP(a3),d0       ; re-clear what init found clear,
+  754  000004AC  41FAxxxx                       lea     yx6_mfpbits(pc),a0      ; through the same table init read
+  755  000004B0  7403                           moveq   #3,d2
   756                                   .mfpbit:
-  757  000004B4  3258                           movea.w (a0)+,a1
-  758  000004B6  3218                           move.w  (a0)+,d1
-  759  000004B8  0500                           btst    d2,d0
-  760  000004BA  66xx                           bne.s   .mfpkeep
-  761  000004BC  0391                           bclr    d1,(a1)
+  757  000004B2  3258                           movea.w (a0)+,a1
+  758  000004B4  3218                           move.w  (a0)+,d1
+  759  000004B6  0500                           btst    d2,d0
+  760  000004B8  66xx                           bne.s   .mfpkeep
+  761  000004BA  0391                           bclr    d1,(a1)
   762                                   .mfpkeep:
-  763  000004BE  51CAFFF4                       dbra    d2,.mfpbit
-  764  000004C2  08B80005FA0B                   bclr    #5,$FFFFFA0B.w          ; and no pending ticks of ours
-  765  000004C8  08B80004FA0D                   bclr    #4,$FFFFFA0D.w
-  766  000004CE  41FAxxxx                       lea     yx6_drums(pc),a0
-  767  000004D2  4210                           clr.b   (a0)
+  763  000004BC  51CAFFF4                       dbra    d2,.mfpbit
+  764  000004C0  08B80005FA0B                   bclr    #5,$FFFFFA0B.w          ; and no pending ticks of ours
+  765  000004C6  08B80004FA0D                   bclr    #4,$FFFFFA0D.w
+  766  000004CC  41FAxxxx                       lea     yx6_drums(pc),a0
+  767  000004D0  4210                           clr.b   (a0)
   768                                   ; The silence stays inside the mask: selecting a register and writing it are
   769                                   ; two bus cycles, and the system interrupts just handed back use the chip.
-  770  000004D4  41F9FFFF8800                   lea     YX6_PSG,a0
-  771  000004DA  7008                           moveq   #8,d0                   ; R8, R9, R10 are the voice volumes
+  770  000004D2  41F9FFFF8800                   lea     YX6_PSG,a0
+  771  000004D8  7008                           moveq   #8,d0                   ; R8, R9, R10 are the voice volumes
   772                                   .silence:
-  773  000004DC  1080                           move.b  d0,(a0)
-  774  000004DE  42280002                       clr.b   2(a0)
-  775  000004E2  5200                           addq.b  #1,d0
-  776  000004E4  B03C000B                       cmp.b   #11,d0
-  777  000004E8  66F2                           bne.s   .silence
-  778  000004EA  46DF                           move.w  (sp)+,sr
-  779  000004EC  4E75                           rts
+  773  000004DA  1080                           move.b  d0,(a0)
+  774  000004DC  42280002                       clr.b   2(a0)
+  775  000004E0  5200                           addq.b  #1,d0
+  776  000004E2  B03C000B                       cmp.b   #11,d0
+  777  000004E6  66F2                           bne.s   .silence
+  778  000004E8  46DF                           move.w  (sp)+,sr
+  779  000004EA  4E75                           rts
   780                                   
   781                                   ; -----------------------------------------------------------------------------
   782                                   ; The effect machinery. The per-frame stage lives inlined in YX6_play; what
@@ -826,10 +827,10 @@
   788                                   ; {register, bit} rows. Walked with a 3..0 countdown, so the OLDMFP encoding
   789                                   ; reads: bit 0 IERA5, bit 1 IMRA5, bit 2 IERB4, bit 3 IMRB4.
   790                                   yx6_mfpbits:
-  791  000004EE  FA150004                       dc.w    $FA15,4                 ; IMRB, Timer D's mask
-  792  000004F2  FA090004                       dc.w    $FA09,4                 ; IERB, its enable
-  793  000004F6  FA130005                       dc.w    $FA13,5                 ; IMRA, Timer A's mask
-  794  000004FA  FA070005                       dc.w    $FA07,5                 ; IERA, its enable
+  791  000004EC  FA150004                       dc.w    $FA15,4                 ; IMRB, Timer D's mask
+  792  000004F0  FA090004                       dc.w    $FA09,4                 ; IERB, its enable
+  793  000004F4  FA130005                       dc.w    $FA13,5                 ; IMRA, Timer A's mask
+  794  000004F8  FA070005                       dc.w    $FA07,5                 ; IERA, its enable
   795                                   
   796                                   ; The slot descriptors - see the SD_ equates. Slot 1 owns Timer A, slot 2
   797                                   ; Timer D, whose control nibble is shared with Timer C and only ever changed
@@ -837,15 +838,15 @@
   799                                   ; Timer A writes the same values a clear would.
   800                                           even
   801                                   yx6_desc1:
-  802  000004FE  0000                           dc.b    0,0                     ; E last, T last
-  803  00000500  FA19FA1F0134                   dc.w    $FA19,$FA1F,$0134       ; control, data, vector
-  804  00000506  00000000                       dc.l    0                       ; PARM, set per effect
-  805  0000050A  0000000000000000               dc.l    0,0                     ; ISR block, other slot: yx6_link
+  802  000004FC  0000                           dc.b    0,0                     ; E last, T last
+  803  000004FE  FA19FA1F0134                   dc.w    $FA19,$FA1F,$0134       ; control, data, vector
+  804  00000504  00000000                       dc.l    0                       ; PARM, set per effect
+  805  00000508  0000000000000000               dc.l    0,0                     ; ISR block, other slot: yx6_link
   806                                   yx6_desc2:
-  807  00000512  0000                           dc.b    0,0
-  808  00000514  FA1DFA250110                   dc.w    $FA1D,$FA25,$0110
-  809  0000051A  00000000                       dc.l    0
-  810  0000051E  0000000000000000               dc.l    0,0
+  807  00000510  0000                           dc.b    0,0
+  808  00000512  FA1DFA250110                   dc.w    $FA1D,$FA25,$0110
+  809  00000518  00000000                       dc.l    0
+  810  0000051C  0000000000000000               dc.l    0,0
   811                                   
   812                                   ; -----------------------------------------------------------------------------
   813                                   ; The tick handlers, in maxYMiser's shipping forms: the PSG select and write
@@ -876,124 +877,124 @@
   838                                   ; The byte after the last has bit 7 set, so the same move answers "done": park
   839                                   ; the volume mid-scale against the click, stop the timer, drop the flag.
   840                                   yx6_drumA:
-  841  00000526  11FC00088800                   move.b  #8,$FFFF8800.w          ; SMC +3: select the drummed volume
-  842  0000052C  11F9123456788802               move.b  $12345678,$FFFF8802.w   ; SMC +8: the next sample byte
-  843  00000534  6Bxx                           bmi.s   .ended
+  841  00000524  11FC00088800                   move.b  #8,$FFFF8800.w          ; SMC +3: select the drummed volume
+  842  0000052A  11F9123456788802               move.b  $12345678,$FFFF8802.w   ; SMC +8: the next sample byte
+  843  00000532  6Bxx                           bmi.s   .ended
   844                                           .if YX6_SUPER_HOST
-  845                                 -         move    a0,usp                  ; the USP is the host's spare register
-  846                                 -         .else
-  847  00000536  2F08                           move.l  a0,-(sp)
-  848                                           .endif
-  849  00000538  41FAFFF4                       lea     yx6_drumA+8(pc),a0
-  850  0000053C  5290                           addq.l  #1,(a0)                 ; step the operand itself
+  845  00000534  4E60                           move    a0,usp                  ; the USP is the host's spare register
+  846                                           .else
+  847                                 -         move.l  a0,-(sp)
+  848                                 -         .endif
+  849  00000536  41FAFFF4                       lea     yx6_drumA+8(pc),a0
+  850  0000053A  5290                           addq.l  #1,(a0)                 ; step the operand itself
   851                                           .if YX6_SUPER_HOST
-  852                                 -         move    usp,a0
-  853                                 -         .else
-  854  0000053E  205F                           movea.l (sp)+,a0
-  855                                           .endif
-  856  00000540  11FC00DFFA0F                   move.b  #$DF,$FFFFFA0F.w
-  857  00000546  4E73                           rte
+  852  0000053C  4E68                           move    usp,a0
+  853                                           .else
+  854                                 -         movea.l (sp)+,a0
+  855                                 -         .endif
+  856  0000053E  11FC00DFFA0F                   move.b  #$DF,$FFFFFA0F.w
+  857  00000544  4E73                           rte
   858                                   .ended:
-  859  00000548  11FC000D8802                   move.b  #$D,$FFFF8802.w         ; middle volume: no click
-  860  0000054E  023800F0FA19                   andi.b  #$F0,$FFFFFA19.w        ; the sample ran out: stop Timer A
+  859  00000546  11FC000D8802                   move.b  #$D,$FFFF8802.w         ; middle volume: no click
+  860  0000054C  023800F0FA19                   andi.b  #$F0,$FFFFFA19.w        ; the sample ran out: stop Timer A
   861                                           .if YX6_SUPER_HOST
-  862                                 -         move    a0,usp
-  863                                 -         .else
-  864  00000554  2F08                           move.l  a0,-(sp)
-  865                                           .endif
-  866  00000556  41FAxxxx                       lea     yx6_drums(pc),a0
+  862  00000552  4E60                           move    a0,usp
+  863                                           .else
+  864                                 -         move.l  a0,-(sp)
+  865                                 -         .endif
+  866  00000554  41FAxxxx                       lea     yx6_drums(pc),a0
   867                                   yx6_drumA_clear:
-  868  0000055A  021000FF                       andi.b  #$FF,(a0)               ; SMC +3: drop the voice's drum flag
+  868  00000558  021000FF                       andi.b  #$FF,(a0)               ; SMC +3: drop the voice's drum flag
   869                                           .if YX6_SUPER_HOST
-  870                                 -         move    usp,a0
-  871                                 -         .else
-  872  0000055E  205F                           movea.l (sp)+,a0
-  873                                           .endif
+  870  0000055C  4E68                           move    usp,a0
+  871                                           .else
+  872                                 -         movea.l (sp)+,a0
+  873                                 -         .endif
   874                                   yx6_parkA:
-  875  00000560  11FC00DFFA0F                   move.b  #$DF,$FFFFFA0F.w
-  876  00000566  4E73                           rte
+  875  0000055E  11FC00DFFA0F                   move.b  #$DF,$FFFFFA0F.w
+  876  00000564  4E73                           rte
   877                                   
   878                                   ; The SID square: each tick writes one half of the square - the volume or
   879                                   ; silence - and installs the other half as the next tick, one word into the
   880                                   ; vector. Select and data land in one move.l: the immediate's bytes hit
   881                                   ; $8800 (select) and $8802 (data) by bus layout.
   882                                   yx6_sidA_on:
-  883  00000568  21FC08000F008800               move.l  #$08000F00,$FFFF8800.w  ; SMC +2 select, +4 volume
-  884  00000570  31FC00000136                   move.w  #0,$136.w               ; SMC +10: the quiet half is next
-  885  00000576  11FC00DFFA0F                   move.b  #$DF,$FFFFFA0F.w
-  886  0000057C  4E73                           rte
+  883  00000566  21FC08000F008800               move.l  #$08000F00,$FFFF8800.w  ; SMC +2 select, +4 volume
+  884  0000056E  31FC00000136                   move.w  #0,$136.w               ; SMC +10: the quiet half is next
+  885  00000574  11FC00DFFA0F                   move.b  #$DF,$FFFFFA0F.w
+  886  0000057A  4E73                           rte
   887                                   yx6_sidA_off:
-  888  0000057E  21FC080000008800               move.l  #$08000000,$FFFF8800.w  ; SMC +2 select; silence
-  889  00000586  31FC00000136                   move.w  #0,$136.w               ; SMC +10: the loud half is next
-  890  0000058C  11FC00DFFA0F                   move.b  #$DF,$FFFFFA0F.w
-  891  00000592  4E73                           rte
+  888  0000057C  21FC080000008800               move.l  #$08000000,$FFFF8800.w  ; SMC +2 select; silence
+  889  00000584  31FC00000136                   move.w  #0,$136.w               ; SMC +10: the loud half is next
+  890  0000058A  11FC00DFFA0F                   move.b  #$DF,$FFFFFA0F.w
+  891  00000590  4E73                           rte
   892                                   
   893                                   ; The sync-buzzer tick: writing the shape to R13 restarts the envelope, and
   894                                   ; that restart at the timer's rate is the whole effect.
   895                                   yx6_buzzA:
-  896  00000594  21FC0D0000008800               move.l  #$0D000000,$FFFF8800.w  ; SMC +4: the shape
-  897  0000059C  11FC00DFFA0F                   move.b  #$DF,$FFFFFA0F.w
-  898  000005A2  4E73                           rte
+  896  00000592  21FC0D0000008800               move.l  #$0D000000,$FFFF8800.w  ; SMC +4: the shape
+  897  0000059A  11FC00DFFA0F                   move.b  #$DF,$FFFFFA0F.w
+  898  000005A0  4E73                           rte
   899                                   
   900                                   ; Slot 2's instances: Timer D's stop, vector and in-service bit, otherwise
   901                                   ; the A block byte for byte.
   902                                   yx6_drumD:
-  903  000005A4  11FC00088800                   move.b  #8,$FFFF8800.w
-  904  000005AA  11F9123456788802               move.b  $12345678,$FFFF8802.w
-  905  000005B2  6Bxx                           bmi.s   .ended
+  903  000005A2  11FC00088800                   move.b  #8,$FFFF8800.w
+  904  000005A8  11F9123456788802               move.b  $12345678,$FFFF8802.w
+  905  000005B0  6Bxx                           bmi.s   .ended
   906                                           .if YX6_SUPER_HOST
-  907                                 -         move    a0,usp
-  908                                 -         .else
-  909  000005B4  2F08                           move.l  a0,-(sp)
-  910                                           .endif
-  911  000005B6  41FAFFF4                       lea     yx6_drumD+8(pc),a0
-  912  000005BA  5290                           addq.l  #1,(a0)
+  907  000005B2  4E60                           move    a0,usp
+  908                                           .else
+  909                                 -         move.l  a0,-(sp)
+  910                                 -         .endif
+  911  000005B4  41FAFFF4                       lea     yx6_drumD+8(pc),a0
+  912  000005B8  5290                           addq.l  #1,(a0)
   913                                           .if YX6_SUPER_HOST
-  914                                 -         move    usp,a0
-  915                                 -         .else
-  916  000005BC  205F                           movea.l (sp)+,a0
-  917                                           .endif
-  918  000005BE  11FC00EFFA11                   move.b  #$EF,$FFFFFA11.w
-  919  000005C4  4E73                           rte
+  914  000005BA  4E68                           move    usp,a0
+  915                                           .else
+  916                                 -         movea.l (sp)+,a0
+  917                                 -         .endif
+  918  000005BC  11FC00EFFA11                   move.b  #$EF,$FFFFFA11.w
+  919  000005C2  4E73                           rte
   920                                   .ended:
-  921  000005C6  11FC000D8802                   move.b  #$D,$FFFF8802.w
-  922  000005CC  023800F0FA1D                   andi.b  #$F0,$FFFFFA1D.w
+  921  000005C4  11FC000D8802                   move.b  #$D,$FFFF8802.w
+  922  000005CA  023800F0FA1D                   andi.b  #$F0,$FFFFFA1D.w
   923                                           .if YX6_SUPER_HOST
-  924                                 -         move    a0,usp
-  925                                 -         .else
-  926  000005D2  2F08                           move.l  a0,-(sp)
-  927                                           .endif
-  928  000005D4  41FAxxxx                       lea     yx6_drums(pc),a0
+  924  000005D0  4E60                           move    a0,usp
+  925                                           .else
+  926                                 -         move.l  a0,-(sp)
+  927                                 -         .endif
+  928  000005D2  41FAxxxx                       lea     yx6_drums(pc),a0
   929                                   yx6_drumD_clear:
-  930  000005D8  021000FF                       andi.b  #$FF,(a0)
+  930  000005D6  021000FF                       andi.b  #$FF,(a0)
   931                                           .if YX6_SUPER_HOST
-  932                                 -         move    usp,a0
-  933                                 -         .else
-  934  000005DC  205F                           movea.l (sp)+,a0
-  935                                           .endif
+  932  000005DA  4E68                           move    usp,a0
+  933                                           .else
+  934                                 -         movea.l (sp)+,a0
+  935                                 -         .endif
   936                                   yx6_parkD:
-  937  000005DE  11FC00EFFA11                   move.b  #$EF,$FFFFFA11.w
-  938  000005E4  4E73                           rte
+  937  000005DC  11FC00EFFA11                   move.b  #$EF,$FFFFFA11.w
+  938  000005E2  4E73                           rte
   939                                   
   940                                   yx6_sidD_on:
-  941  000005E6  21FC08000F008800               move.l  #$08000F00,$FFFF8800.w
-  942  000005EE  31FC00000112                   move.w  #0,$112.w
-  943  000005F4  11FC00EFFA11                   move.b  #$EF,$FFFFFA11.w
-  944  000005FA  4E73                           rte
+  941  000005E4  21FC08000F008800               move.l  #$08000F00,$FFFF8800.w
+  942  000005EC  31FC00000112                   move.w  #0,$112.w
+  943  000005F2  11FC00EFFA11                   move.b  #$EF,$FFFFFA11.w
+  944  000005F8  4E73                           rte
   945                                   yx6_sidD_off:
-  946  000005FC  21FC080000008800               move.l  #$08000000,$FFFF8800.w
-  947  00000604  31FC00000112                   move.w  #0,$112.w
-  948  0000060A  11FC00EFFA11                   move.b  #$EF,$FFFFFA11.w
-  949  00000610  4E73                           rte
+  946  000005FA  21FC080000008800               move.l  #$08000000,$FFFF8800.w
+  947  00000602  31FC00000112                   move.w  #0,$112.w
+  948  00000608  11FC00EFFA11                   move.b  #$EF,$FFFFFA11.w
+  949  0000060E  4E73                           rte
   950                                   
   951                                   yx6_buzzD:
-  952  00000612  21FC0D0000008800               move.l  #$0D000000,$FFFF8800.w
-  953  0000061A  11FC00EFFA11                   move.b  #$EF,$FFFFFA11.w
-  954  00000620  4E73                           rte
+  952  00000610  21FC0D0000008800               move.l  #$0D000000,$FFFF8800.w
+  953  00000618  11FC00EFFA11                   move.b  #$EF,$FFFFFA11.w
+  954  0000061E  4E73                           rte
   955                                   
   956                                   yx6_drums:
-  957  00000622  00                             dc.b    0                       ; voice bits 0-2: a drum is running
-  958  00000623  00                             even
+  957  00000620  00                             dc.b    0                       ; voice bits 0-2: a drum is running
+  958  00000621  00                             even
   959                                   
   960                                   ; Where the patched operands sit, measured on the A block; the D block is
   961                                   ; byte-congruent, so the same offsets serve both through SD_ISR.
@@ -1019,25 +1020,25 @@
   981                                   ; they are patched once here rather than on every SID start.
   982                                   ; -----------------------------------------------------------------------------
   983                                   yx6_link:
-  984  00000624  41FAFED8                       lea     yx6_desc1(pc),a0
-  985  00000628  43FAFEE8                       lea     yx6_desc2(pc),a1
-  986  0000062C  21490010                       move.l  a1,SD_OTHER(a0)
-  987  00000630  23480010                       move.l  a0,SD_OTHER(a1)
-  988  00000634  4250                           clr.w   (a0)                    ; E and T last, both slots
-  989  00000636  4251                           clr.w   (a1)
-  990  00000638  45FAFEEC                       lea     yx6_drumA(pc),a2
-  991  0000063C  214A000C                       move.l  a2,SD_ISR(a0)
-  992  00000640  61xx                           bsr.s   .partners
-  993  00000642  45FAFF60                       lea     yx6_drumD(pc),a2
-  994  00000646  234A000C                       move.l  a2,SD_ISR(a1)
+  984  00000622  41FAFED8                       lea     yx6_desc1(pc),a0
+  985  00000626  43FAFEE8                       lea     yx6_desc2(pc),a1
+  986  0000062A  21490010                       move.l  a1,SD_OTHER(a0)
+  987  0000062E  23480010                       move.l  a0,SD_OTHER(a1)
+  988  00000632  4250                           clr.w   (a0)                    ; E and T last, both slots
+  989  00000634  4251                           clr.w   (a1)
+  990  00000636  45FAFEEC                       lea     yx6_drumA(pc),a2
+  991  0000063A  214A000C                       move.l  a2,SD_ISR(a0)
+  992  0000063E  61xx                           bsr.s   .partners
+  993  00000640  45FAFF60                       lea     yx6_drumD(pc),a2
+  994  00000644  234A000C                       move.l  a2,SD_ISR(a1)
   995                                   .partners:
-  996  0000064A  41EA0058                       lea     ISR_SIDOFF(a2),a0       ; each half installs the other
-  997  0000064E  2008                           move.l  a0,d0
-  998  00000650  3540004C                       move.w  d0,ISR_SIDON_NEXT(a2)
-  999  00000654  41EA0042                       lea     ISR_SIDON(a2),a0
- 1000  00000658  2008                           move.l  a0,d0
- 1001  0000065A  35400062                       move.w  d0,ISR_SIDOFF_NEXT(a2)
- 1002  0000065E  4E75                           rts
+  996  00000648  41EA0058                       lea     ISR_SIDOFF(a2),a0       ; each half installs the other
+  997  0000064C  2008                           move.l  a0,d0
+  998  0000064E  3540004C                       move.w  d0,ISR_SIDON_NEXT(a2)
+  999  00000652  41EA0042                       lea     ISR_SIDON(a2),a0
+ 1000  00000656  2008                           move.l  a0,d0
+ 1001  00000658  35400062                       move.w  d0,ISR_SIDOFF_NEXT(a2)
+ 1002  0000065C  4E75                           rts
  1003                                   
  1004                                   ; -----------------------------------------------------------------------------
  1005                                   ; yx6_slot: one slot of the effect stage - both slots, through a5.
@@ -1054,110 +1055,110 @@
  1016                                   ; preserves d3/a3/a5; clobbers d0-d2/d4-d5, a0-a2/a4.
  1017                                   ; -----------------------------------------------------------------------------
  1018                                   yx6_slot:
- 1019  00000660  B015                           cmp.b   (a5),d0
- 1020  00000662  6700xxxx                       beq.w   .held
- 1021  00000666  1815                           move.b  (a5),d4                 ; what the slot was doing before
- 1022  00000668  1A80                           move.b  d0,(a5)
- 1023  0000066A  4A00                           tst.b   d0
- 1024  0000066C  6700xxxx                       beq.w   .released
+ 1019  0000065E  B015                           cmp.b   (a5),d0
+ 1020  00000660  6700xxxx                       beq.w   .held
+ 1021  00000664  1815                           move.b  (a5),d4                 ; what the slot was doing before
+ 1022  00000666  1A80                           move.b  d0,(a5)
+ 1023  00000668  4A00                           tst.b   d0
+ 1024  0000066A  6700xxxx                       beq.w   .released
  1025                                   ; A new code: find the parameter register's ring - r8+voice carries the SID
  1026                                   ; volume, the drum number or the buzzer shape - then let the type arm its
  1027                                   ; handler; every type then (re)programs the timer the same way. The voice
  1028                                   ; stays live in d5, the parameter byte in a1, for whoever needs them.
- 1029  00000670  1A00                           move.b  d0,d5
- 1030  00000672  E80D                           lsr.b   #4,d5
- 1031  00000674  CA7C0003                       and.w   #3,d5
- 1032  00000678  5345                           subq.w  #1,d5                   ; the voice, 0..2
- 1033  0000067A  3805                           move.w  d5,d4
- 1034  0000067C  5044                           addq.w  #8,d4
- 1035  0000067E  C8EB0024                       mulu.w  YX6_N(a3),d4
- 1036  00000682  2B440008                       move.l  d4,SD_PARM(a5)
- 1037  00000686  2253                           movea.l YX6_CURSOR(a3),a1
- 1038  00000688  D3C4                           adda.l  d4,a1                   ; a1 = the slot's parameter byte
- 1039  0000068A  1400                           move.b  d0,d2
- 1040  0000068C  C43C00C0                       and.b   #$C0,d2
- 1041  00000690  67xx                           beq.s   .sid
- 1042  00000692  B43C0040                       cmp.b   #$40,d2
- 1043  00000696  67xx                           beq.s   .drum
- 1044  00000698  1811                           move.b  (a1),d4                 ; $C0, the buzzer ($80 never packs):
- 1045  0000069A  C83C000F                       and.b   #15,d4                  ; the shape rides the tick's immediate
- 1046  0000069E  206D000C                       movea.l SD_ISR(a5),a0
- 1047  000006A2  11440072                       move.b  d4,ISR_BUZZ_SHAPE(a0)
- 1048  000006A6  41E8006E                       lea     ISR_BUZZ(a0),a0
- 1049  000006AA  60xx                           bra.s   .armed
+ 1029  0000066E  1A00                           move.b  d0,d5
+ 1030  00000670  E80D                           lsr.b   #4,d5
+ 1031  00000672  CA7C0003                       and.w   #3,d5
+ 1032  00000676  5345                           subq.w  #1,d5                   ; the voice, 0..2
+ 1033  00000678  3805                           move.w  d5,d4
+ 1034  0000067A  5044                           addq.w  #8,d4
+ 1035  0000067C  C8EB0024                       mulu.w  YX6_N(a3),d4
+ 1036  00000680  2B440008                       move.l  d4,SD_PARM(a5)
+ 1037  00000684  2253                           movea.l YX6_CURSOR(a3),a1
+ 1038  00000686  D3C4                           adda.l  d4,a1                   ; a1 = the slot's parameter byte
+ 1039  00000688  1400                           move.b  d0,d2
+ 1040  0000068A  C43C00C0                       and.b   #$C0,d2
+ 1041  0000068E  67xx                           beq.s   .sid
+ 1042  00000690  B43C0040                       cmp.b   #$40,d2
+ 1043  00000694  67xx                           beq.s   .drum
+ 1044  00000696  1811                           move.b  (a1),d4                 ; $C0, the buzzer ($80 never packs):
+ 1045  00000698  C83C000F                       and.b   #15,d4                  ; the shape rides the tick's immediate
+ 1046  0000069C  206D000C                       movea.l SD_ISR(a5),a0
+ 1047  000006A0  11440072                       move.b  d4,ISR_BUZZ_SHAPE(a0)
+ 1048  000006A4  41E8006E                       lea     ISR_BUZZ(a0),a0
+ 1049  000006A8  60xx                           bra.s   .armed
  1050                                   .sid:
  1051                                   ; While a drum owns this voice, its volume register is the drum's alone: the
  1052                                   ; SID stays un-armed and the cleared last-code makes every following frame
  1053                                   ; retry, so it comes back by itself the frame after the drum ends. That is
  1054                                   ; the reference player's priority, where the drum overrides the volume.
- 1055  000006AC  7801                           moveq   #1,d4
- 1056  000006AE  EB2C                           lsl.b   d5,d4
- 1057  000006B0  C83AFF70                       and.b   yx6_drums(pc),d4
- 1058  000006B4  67xx                           beq.s   .sid_free
- 1059  000006B6  4215                           clr.b   (a5)
- 1060  000006B8  4E75                           rts
+ 1055  000006AA  7801                           moveq   #1,d4
+ 1056  000006AC  EB2C                           lsl.b   d5,d4
+ 1057  000006AE  C83AFF70                       and.b   yx6_drums(pc),d4
+ 1058  000006B2  67xx                           beq.s   .sid_free
+ 1059  000006B4  4215                           clr.b   (a5)
+ 1060  000006B6  4E75                           rts
  1061                                   .sid_free:
- 1062  000006BA  3805                           move.w  d5,d4                   ; the SID start: the voice's volume
- 1063  000006BC  5044                           addq.w  #8,d4                   ; register into both halves' selects
- 1064  000006BE  206D000C                       movea.l SD_ISR(a5),a0
- 1065  000006C2  11440044                       move.b  d4,ISR_SIDON_SEL(a0)
- 1066  000006C6  1144005A                       move.b  d4,ISR_SIDOFF_SEL(a0)
- 1067  000006CA  1811                           move.b  (a1),d4
- 1068  000006CC  C83C000F                       and.b   #15,d4
- 1069  000006D0  11440046                       move.b  d4,ISR_SID_VOL(a0)      ; the loud half's volume
- 1070  000006D4  41E80042                       lea     ISR_SIDON(a0),a0
- 1071  000006D8  60xx                           bra.s   .armed
+ 1062  000006B8  3805                           move.w  d5,d4                   ; the SID start: the voice's volume
+ 1063  000006BA  5044                           addq.w  #8,d4                   ; register into both halves' selects
+ 1064  000006BC  206D000C                       movea.l SD_ISR(a5),a0
+ 1065  000006C0  11440044                       move.b  d4,ISR_SIDON_SEL(a0)
+ 1066  000006C4  1144005A                       move.b  d4,ISR_SIDOFF_SEL(a0)
+ 1067  000006C8  1811                           move.b  (a1),d4
+ 1068  000006CA  C83C000F                       and.b   #15,d4
+ 1069  000006CE  11440046                       move.b  d4,ISR_SID_VOL(a0)      ; the loud half's volume
+ 1070  000006D2  41E80042                       lea     ISR_SIDON(a0),a0
+ 1071  000006D6  60xx                           bra.s   .armed
  1072                                   .drum:
- 1073  000006DA  6100xxxx                       bsr     yx6_drum_start
+ 1073  000006D8  6100xxxx                       bsr     yx6_drum_start
  1074                                   .armed:
- 1075  000006DE  1B410001                       move.b  d1,SD_TLAST(a5)
- 1076  000006E2  326D0002                       movea.w SD_CTRL(a5),a1
- 1077  000006E6  346D0006                       movea.w SD_VEC(a5),a2
- 1078  000006EA  40E7                           move.w  sr,-(sp)
- 1079  000006EC  007C0700                       ori.w   #$0700,sr
- 1080  000006F0  021100F0                       andi.b  #$F0,(a1)               ; stop, then vector, count, prescaler
- 1081  000006F4  2488                           move.l  a0,(a2)
- 1082  000006F6  346D0004                       movea.w SD_DATA(a5),a2
- 1083  000006FA  1481                           move.b  d1,(a2)
- 1084  000006FC  1A00                           move.b  d0,d5
- 1085  000006FE  CA3C0007                       and.b   #7,d5
- 1086  00000702  8B11                           or.b    d5,(a1)
- 1087  00000704  46DF                           move.w  (sp)+,sr
- 1088  00000706  4E75                           rts
+ 1075  000006DC  1B410001                       move.b  d1,SD_TLAST(a5)
+ 1076  000006E0  326D0002                       movea.w SD_CTRL(a5),a1
+ 1077  000006E4  346D0006                       movea.w SD_VEC(a5),a2
+ 1078  000006E8  40E7                           move.w  sr,-(sp)
+ 1079  000006EA  007C0700                       ori.w   #$0700,sr
+ 1080  000006EE  021100F0                       andi.b  #$F0,(a1)               ; stop, then vector, count, prescaler
+ 1081  000006F2  2488                           move.l  a0,(a2)
+ 1082  000006F4  346D0004                       movea.w SD_DATA(a5),a2
+ 1083  000006F8  1481                           move.b  d1,(a2)
+ 1084  000006FA  1A00                           move.b  d0,d5
+ 1085  000006FC  CA3C0007                       and.b   #7,d5
+ 1086  00000700  8B11                           or.b    d5,(a1)
+ 1087  00000702  46DF                           move.w  (sp)+,sr
+ 1088  00000704  4E75                           rts
  1089                                   .released:
- 1090  00000708  C83C00C0                       and.b   #$C0,d4                 ; the level dropped: stop the timer -
- 1091  0000070C  B83C0040                       cmp.b   #$40,d4                 ; unless a drum is finishing by itself
- 1092  00000710  67xx                           beq.s   .out
- 1093  00000712  326D0002                       movea.w SD_CTRL(a5),a1
- 1094  00000716  021100F0                       andi.b  #$F0,(a1)
+ 1090  00000706  C83C00C0                       and.b   #$C0,d4                 ; the level dropped: stop the timer -
+ 1091  0000070A  B83C0040                       cmp.b   #$40,d4                 ; unless a drum is finishing by itself
+ 1092  0000070E  67xx                           beq.s   .out
+ 1093  00000710  326D0002                       movea.w SD_CTRL(a5),a1
+ 1094  00000714  021100F0                       andi.b  #$F0,(a1)
  1095                                   .out:
- 1096  0000071A  4E75                           rts
+ 1096  00000718  4E75                           rts
  1097                                   .held:                                  ; E != 0 here: the caller's gate
- 1098  0000071C  1A00                           move.b  d0,d5
- 1099  0000071E  CA3C00C0                       and.b   #$C0,d5
- 1100  00000722  BA3C0040                       cmp.b   #$40,d5
- 1101  00000726  67B2                           beq.s   .drum                   ; a held drum code triggers again
- 1102  00000728  B22D0001                       cmp.b   SD_TLAST(a5),d1         ; reload only a CHANGED count: a write
- 1103  0000072C  67xx                           beq.s   .track                  ; meeting the counter at 01 is
- 1104  0000072E  1B410001                       move.b  d1,SD_TLAST(a5)         ; indeterminate, so do not roll dice
- 1105  00000732  346D0004                       movea.w SD_DATA(a5),a2          ; fifty times a second
- 1106  00000736  1481                           move.b  d1,(a2)
+ 1098  0000071A  1A00                           move.b  d0,d5
+ 1099  0000071C  CA3C00C0                       and.b   #$C0,d5
+ 1100  00000720  BA3C0040                       cmp.b   #$40,d5
+ 1101  00000724  67B2                           beq.s   .drum                   ; a held drum code triggers again
+ 1102  00000726  B22D0001                       cmp.b   SD_TLAST(a5),d1         ; reload only a CHANGED count: a write
+ 1103  0000072A  67xx                           beq.s   .track                  ; meeting the counter at 01 is
+ 1104  0000072C  1B410001                       move.b  d1,SD_TLAST(a5)         ; indeterminate, so do not roll dice
+ 1105  00000730  346D0004                       movea.w SD_DATA(a5),a2          ; fifty times a second
+ 1106  00000734  1481                           move.b  d1,(a2)
  1107                                   .track:
  1108                                   ; The level-held effects track their parameter every frame: the SID volume
  1109                                   ; and the buzzer shape follow the voice's ring byte, as the reference player
  1110                                   ; re-reads them.
- 1111  00000738  2053                           movea.l YX6_CURSOR(a3),a0
- 1112  0000073A  D1ED0008                       adda.l  SD_PARM(a5),a0
- 1113  0000073E  1810                           move.b  (a0),d4
- 1114  00000740  C83C000F                       and.b   #15,d4
- 1115  00000744  206D000C                       movea.l SD_ISR(a5),a0
- 1116  00000748  4A05                           tst.b   d5                      ; $00 SID, $C0 buzzer
- 1117  0000074A  67xx                           beq.s   .vol
- 1118  0000074C  11440072                       move.b  d4,ISR_BUZZ_SHAPE(a0)
- 1119  00000750  4E75                           rts
+ 1111  00000736  2053                           movea.l YX6_CURSOR(a3),a0
+ 1112  00000738  D1ED0008                       adda.l  SD_PARM(a5),a0
+ 1113  0000073C  1810                           move.b  (a0),d4
+ 1114  0000073E  C83C000F                       and.b   #15,d4
+ 1115  00000742  206D000C                       movea.l SD_ISR(a5),a0
+ 1116  00000746  4A05                           tst.b   d5                      ; $00 SID, $C0 buzzer
+ 1117  00000748  67xx                           beq.s   .vol
+ 1118  0000074A  11440072                       move.b  d4,ISR_BUZZ_SHAPE(a0)
+ 1119  0000074E  4E75                           rts
  1120                                   .vol:
- 1121  00000752  11440046                       move.b  d4,ISR_SID_VOL(a0)
- 1122  00000756  4E75                           rts
+ 1121  00000750  11440046                       move.b  d4,ISR_SID_VOL(a0)
+ 1122  00000754  4E75                           rts
  1123                                   
  1124                                   ; -----------------------------------------------------------------------------
  1125                                   ; yx6_drum_start: read the sample number from the drummed voice's ring byte
@@ -1175,63 +1176,63 @@
  1137                                   ; keeps d0/d1/d3/a5.
  1138                                   ; -----------------------------------------------------------------------------
  1139                                   yx6_drum_start:
- 1140  00000758  2053                           movea.l YX6_CURSOR(a3),a0
- 1141  0000075A  D1ED0008                       adda.l  SD_PARM(a5),a0
- 1142  0000075E  6100xxxx                       bsr     yx6_borrow              ; the ring gets this byte back
- 1143  00000762  7800                           moveq   #0,d4
- 1144  00000764  1810                           move.b  (a0),d4                 ; the sample number, validated at pack
- 1145  00000766  4210                           clr.b   (a0)                    ; sanitize: silence, not a number
- 1146  00000768  1A00                           move.b  d0,d5
- 1147  0000076A  E80D                           lsr.b   #4,d5
- 1148  0000076C  CA7C0003                       and.w   #3,d5
- 1149  00000770  5345                           subq.w  #1,d5                   ; the voice, for flag and select
- 1150  00000772  7401                           moveq   #1,d2
- 1151  00000774  EB2A                           lsl.b   d5,d2
- 1152  00000776  41FAFEAA                       lea     yx6_drums(pc),a0
- 1153  0000077A  8510                           or.b    d2,(a0)                 ; the mixer pass forces this voice off
- 1154  0000077C  4602                           not.b   d2
- 1155  0000077E  226D000C                       movea.l SD_ISR(a5),a1
- 1156  00000782  13420037                       move.b  d2,ISR_CLEAR(a1)        ; the end tick drops the same flag
- 1157  00000786  286D0010                       movea.l SD_OTHER(a5),a4         ; a SID on this voice in the other
- 1158  0000078A  1414                           move.b  (a4),d2                 ; slot: the drum takes the register
- 1159  0000078C  C43C00C0                       and.b   #$C0,d2
- 1160  00000790  66xx                           bne.s   .keep
- 1161  00000792  1414                           move.b  (a4),d2
- 1162  00000794  B102                           eor.b   d0,d2
- 1163  00000796  C43C0030                       and.b   #$30,d2
- 1164  0000079A  66xx                           bne.s   .keep
- 1165  0000079C  306C0002                       movea.w SD_CTRL(a4),a0
- 1166  000007A0  021000F0                       andi.b  #$F0,(a0)               ; stop the other slot's SID
- 1167  000007A4  4214                           clr.b   (a4)                    ; and let it retry every frame
+ 1140  00000756  2053                           movea.l YX6_CURSOR(a3),a0
+ 1141  00000758  D1ED0008                       adda.l  SD_PARM(a5),a0
+ 1142  0000075C  6100xxxx                       bsr     yx6_borrow              ; the ring gets this byte back
+ 1143  00000760  7800                           moveq   #0,d4
+ 1144  00000762  1810                           move.b  (a0),d4                 ; the sample number, validated at pack
+ 1145  00000764  4210                           clr.b   (a0)                    ; sanitize: silence, not a number
+ 1146  00000766  1A00                           move.b  d0,d5
+ 1147  00000768  E80D                           lsr.b   #4,d5
+ 1148  0000076A  CA7C0003                       and.w   #3,d5
+ 1149  0000076E  5345                           subq.w  #1,d5                   ; the voice, for flag and select
+ 1150  00000770  7401                           moveq   #1,d2
+ 1151  00000772  EB2A                           lsl.b   d5,d2
+ 1152  00000774  41FAFEAA                       lea     yx6_drums(pc),a0
+ 1153  00000778  8510                           or.b    d2,(a0)                 ; the mixer pass forces this voice off
+ 1154  0000077A  4602                           not.b   d2
+ 1155  0000077C  226D000C                       movea.l SD_ISR(a5),a1
+ 1156  00000780  13420037                       move.b  d2,ISR_CLEAR(a1)        ; the end tick drops the same flag
+ 1157  00000784  286D0010                       movea.l SD_OTHER(a5),a4         ; a SID on this voice in the other
+ 1158  00000788  1414                           move.b  (a4),d2                 ; slot: the drum takes the register
+ 1159  0000078A  C43C00C0                       and.b   #$C0,d2
+ 1160  0000078E  66xx                           bne.s   .keep
+ 1161  00000790  1414                           move.b  (a4),d2
+ 1162  00000792  B102                           eor.b   d0,d2
+ 1163  00000794  C43C0030                       and.b   #$30,d2
+ 1164  00000798  66xx                           bne.s   .keep
+ 1165  0000079A  306C0002                       movea.w SD_CTRL(a4),a0
+ 1166  0000079E  021000F0                       andi.b  #$F0,(a0)               ; stop the other slot's SID
+ 1167  000007A2  4214                           clr.b   (a4)                    ; and let it retry every frame
  1168                                   .keep:
- 1169  000007A6  3405                           move.w  d5,d2
- 1170  000007A8  5042                           addq.w  #8,d2                   ; the voice's volume register
- 1171  000007AA  13420003                       move.b  d2,ISR_DRUM_SEL(a1)     ; the tick's select immediate
- 1172  000007AE  D844                           add.w   d4,d4                   ; a drum table entry is six bytes:
- 1173  000007B0  3404                           move.w  d4,d2                   ; 6n = 2n + 4n
- 1174  000007B2  D844                           add.w   d4,d4
- 1175  000007B4  D842                           add.w   d2,d4
- 1176  000007B6  246B0014                       movea.l YX6_FILE(a3),a2
- 1177  000007BA  204A                           movea.l a2,a0
- 1178  000007BC  D1E8001C                       adda.l  YH_DRUMS(a0),a0
- 1179  000007C0  24304000                       move.l  0(a0,d4.w),d2           ; the sample's offset in the file
- 1180  000007C4  D48A                           add.l   a2,d2
- 1181  000007C6  23420008                       move.l  d2,ISR_DRUM_PTR(a1)     ; the tick reads through its operand
- 1182  000007CA  2049                           movea.l a1,a0                   ; the handler is the block base
- 1183  000007CC  4E75                           rts
+ 1169  000007A4  3405                           move.w  d5,d2
+ 1170  000007A6  5042                           addq.w  #8,d2                   ; the voice's volume register
+ 1171  000007A8  13420003                       move.b  d2,ISR_DRUM_SEL(a1)     ; the tick's select immediate
+ 1172  000007AC  D844                           add.w   d4,d4                   ; a drum table entry is six bytes:
+ 1173  000007AE  3404                           move.w  d4,d2                   ; 6n = 2n + 4n
+ 1174  000007B0  D844                           add.w   d4,d4
+ 1175  000007B2  D842                           add.w   d2,d4
+ 1176  000007B4  246B0014                       movea.l YX6_FILE(a3),a2
+ 1177  000007B8  204A                           movea.l a2,a0
+ 1178  000007BA  D1E8001C                       adda.l  YH_DRUMS(a0),a0
+ 1179  000007BE  24304000                       move.l  0(a0,d4.w),d2           ; the sample's offset in the file
+ 1180  000007C2  D48A                           add.l   a2,d2
+ 1181  000007C4  23420008                       move.l  d2,ISR_DRUM_PTR(a1)     ; the tick reads through its operand
+ 1182  000007C8  2049                           movea.l a1,a0                   ; the handler is the block base
+ 1183  000007CA  4E75                           rts
  1184                                   
  1185                                   ; Records a ring byte about to be edited, for the restore after the burst.
  1186                                   ; in: a0 = the byte; clobbers d2.
  1187                                   yx6_borrow:
- 1188  000007CE  7400                           moveq   #0,d2
- 1189  000007D0  142B0043                       move.b  YX6_PATCHES(a3),d2
- 1190  000007D4  522B0043                       addq.b  #1,YX6_PATCHES(a3)
- 1191  000007D8  17902044                       move.b  (a0),YX6_PATCH_VAL(a3,d2.w)
- 1192  000007DC  D442                           add.w   d2,d2
- 1193  000007DE  D442                           add.w   d2,d2
- 1194  000007E0  27882048                       move.l  a0,YX6_PATCH_ADDR(a3,d2.w)
- 1195  000007E4  4E75                           rts
-    3                                           include "ST4_wrap.S"
+ 1188  000007CC  7400                           moveq   #0,d2
+ 1189  000007CE  142B0043                       move.b  YX6_PATCHES(a3),d2
+ 1190  000007D2  522B0043                       addq.b  #1,YX6_PATCHES(a3)
+ 1191  000007D6  17902044                       move.b  (a0),YX6_PATCH_VAL(a3,d2.w)
+ 1192  000007DA  D442                           add.w   d2,d2
+ 1193  000007DC  D442                           add.w   d2,d2
+ 1194  000007DE  27882048                       move.l  a0,YX6_PATCH_ADDR(a3,d2.w)
+ 1195  000007E2  4E75                           rts
+    4                                           include "ST4_wrap.S"
     1                                   ; -----------------------------------------------------------------------------
     2                                   ; ST4_wrap.S - ST4: counted-wrap ring decompressor for the Atari ST (68000)
     3                                   ;
@@ -1304,7 +1305,7 @@
    70                                   ; The asset's signature for this build: 'S4', format version 4, and the unit
    71                                   ; size this decoder was assembled for. One cmp.l against a file's first long
    72                                   ; proves all three at once.
-   73           =53340404               ST4_SIGNATURE   equ     $53340400+ST4_UNIT
+   73           =53340401               ST4_SIGNATURE   equ     $53340400+ST4_UNIT
    74                                   
    75                                   ; One unit copied, at the width this build was made for.
    76                                           .macro ST4_MOVE
@@ -1321,82 +1322,82 @@
    87                                   
    88                                   ; Jump table: bra.w keeps 4-byte slots (base+0/4). A counted ring has no
    89                                   ; one-shot entry; the caller drains it through ST4_resume.
-   90  000007E6  6000xxxx                               bra.w   ST4_init
-   91  000007EA  6000xxxx                               bra.w   ST4_resume
+   90  000007E4  6000xxxx                               bra.w   ST4_init
+   91  000007E8  6000xxxx                               bra.w   ST4_resume
    92                                   
    93                                   ; ST4_init: a0 = A, a1 = first ring byte, a2 = B, a4 = C, a5 = D,
    94                                   ; d3.w = N.
    95                                   ; Packs -ring_start.low/N above the common state; writes no memory.
    96                                   ; Java: the Decompressor constructor / reset().
    97                                   ST4_init:
-   98  000007EE  7200                           moveq   #0,d1
-   99  000007F0  9249                           sub.w   a1,d1                   ; -ring_start.low, exact modulo 65536
-  100  000007F2  4841                           swap    d1                      ; pack it high; remaining = 0
+   98  000007EC  7200                           moveq   #0,d1
+   99  000007EE  9249                           sub.w   a1,d1                   ; -ring_start.low, exact modulo 65536
+  100  000007F0  4841                           swap    d1                      ; pack it high; remaining = 0
   101                                   ; The initial offset has to land in the low word after the swap, so it starts
   102                                   ; in the high half. moveq would put -1 there whatever the unit size, which is
   103                                   ; a byte short at k=2 and three at k=4 - and only shows up on a stream whose
   104                                   ; first match reuses INITIAL_OFFSET.
-  105  000007F4  243CFFFC0000                   move.l  #(-ST4_UNIT)<<16,d2
-  106  000007FA  3403                           move.w  d3,d2                   ; N lives below it for now
-  107  000007FC  4842                           swap    d2                      ; N above, -INITIAL_OFFSET*UNIT below
+  105  000007F2  243CFFFF0000                   move.l  #(-ST4_UNIT)<<16,d2
+  106  000007F8  3403                           move.w  d3,d2                   ; N lives below it for now
+  107  000007FA  4842                           swap    d2                      ; N above, -INITIAL_OFFSET*UNIT below
   108                                   ; One virtual 0 flag, then the empty sentinel. The first resume call runs a
   109                                   ; zero-unit match segment through the normal path - remaining is zero, so
   110                                   ; n = 0 and the ladder is entered at its end - and lands in match_transition,
   111                                   ; which shifts $4000 into $8000: the flag reads as "begin literals" and the
   112                                   ; queue is the empty sentinel the old first call started from. That is what
   113                                   ; lets ST4_resume skip a first-call test on every call.
-  114  000007FE  303C4000                       move.w  #$4000,d0
-  115  00000802  4E75                           rts
+  114  000007FC  303C4000                       move.w  #$4000,d0
+  115  00000800  4E75                           rts
   116                                   
   117                                   source_wrapped:
-  118  00000804  2A02                           move.l  d2,d5
-  119  00000806  4245                           clr.w   d5
-  120  00000808  4845                           swap    d5                      ; zero-extend N from d2.high
-  121  0000080A  D7C5                           adda.l  d5,a3                   ; raw source + N, back into the ring
-  122  0000080C  60xx                           bra.s   copy
+  118  00000802  2A02                           move.l  d2,d5
+  119  00000804  4245                           clr.w   d5
+  120  00000806  4845                           swap    d5                      ; zero-extend N from d2.high
+  121  00000808  D7C5                           adda.l  d5,a3                   ; raw source + N, back into the ring
+  122  0000080A  60xx                           bra.s   copy
   123                                   
   124                                   ; ST4_resume: a0/a1/d0/d1/d2 = state and d3.w = this call's budget.
   125                                   ; Continuing calls emit d3 bytes; the final call may be shorter. The caller
   126                                   ; knows the final span from O; [old a1 .. new a1) is fresh output.
   127                                   ST4_resume:
-  128  0000080E  3803                           move.w  d3,d4                   ; seed n from the budget; a fresh state
+  128  0000080C  3803                           move.w  d3,d4                   ; seed n from the budget; a fresh state
   129                                   segment:                                ; runs one 0-unit match segment and
-  130  00000810  B841                           cmp.w   d1,d4                   ; reads the seeded flag afterwards.
-  131  00000812  63xx                           bls.s   budget_fits             ; n = min(budget, remaining)
-  132  00000814  3801                           move.w  d1,d4
+  130  0000080E  B841                           cmp.w   d1,d4                   ; reads the seeded flag afterwards.
+  131  00000810  63xx                           bls.s   budget_fits             ; n = min(budget, remaining)
+  132  00000812  3801                           move.w  d1,d4
   133                                   budget_fits:
-  134  00000816  4A42                           tst.w   d2                      ; positive lastOffset means LITERALS
-  135  00000818  6Axx                           bpl.s   literal_source
+  134  00000814  4A42                           tst.w   d2                      ; positive lastOffset means LITERALS
+  135  00000816  6Axx                           bpl.s   literal_source
   136                                   ; MATCH: derive the source and split a segment that crosses the ring end.
-  137  0000081A  2649                           movea.l a1,a3                   ; raw source = dst + -lastOffset*UNIT
-  138  0000081C  D6C2                           adda.w  d2,a3                   ; which is why the offset is kept scaled
-  139  0000081E  2A01                           move.l  d1,d5
-  140  00000820  4845                           swap    d5                      ; d5.w = -ring_start.low
-  141  00000822  DA49                           add.w   a1,d5                   ; d5.w = destination position
-  142  00000824  DA42                           add.w   d2,d5                   ; add -offset; carry means unwrapped
-  143  00000826  65xx                           bcs.s   copy                    ; unwrapped source cannot cross before dst
-  144  00000828  4445                           neg.w   d5                      ; wrapped: room = offset - position
+  137  00000818  2649                           movea.l a1,a3                   ; raw source = dst + -lastOffset*UNIT
+  138  0000081A  D6C2                           adda.w  d2,a3                   ; which is why the offset is kept scaled
+  139  0000081C  2A01                           move.l  d1,d5
+  140  0000081E  4845                           swap    d5                      ; d5.w = -ring_start.low
+  141  00000820  DA49                           add.w   a1,d5                   ; d5.w = destination position
+  142  00000822  DA42                           add.w   d2,d5                   ; add -offset; carry means unwrapped
+  143  00000824  65xx                           bcs.s   copy                    ; unwrapped source cannot cross before dst
+  144  00000826  4445                           neg.w   d5                      ; wrapped: room = offset - position
   145                                   ; The room is bytes and the segment is units, so bring them to the same scale.
   146                                   ; Both are whole units - offsets and positions are - so the shift is exact.
   147                                           .if ST4_UNIT=2
   148                                 -         lsr.w   #1,d5
   149                                 -         .endif
   150                                           .if ST4_UNIT=4
-  151  0000082A  E44D                           lsr.w   #2,d5              ; one shift, not two: 10 cycles, not 16
-  152                                           .endif
-  153  0000082C  BA44                           cmp.w   d4,d5                   ; source units before the ring end
-  154  0000082E  64D4                           bcc.s   source_wrapped
-  155  00000830  3805                           move.w  d5,d4                   ; stop this segment at the source wrap
-  156  00000832  60D0                           bra.s   source_wrapped
+  151                                 -         lsr.w   #2,d5              ; one shift, not two: 10 cycles, not 16
+  152                                 -         .endif
+  153  00000828  BA44                           cmp.w   d4,d5                   ; source units before the ring end
+  154  0000082A  64D6                           bcc.s   source_wrapped
+  155  0000082C  3805                           move.w  d5,d4                   ; stop this segment at the source wrap
+  156  0000082E  60D2                           bra.s   source_wrapped
   157                                   
   158                                   copy:                                   ; MATCH copies only reach this entry
-  159  00000834  9244                           sub.w   d4,d1                   ; consume n from the operation
-  160  00000836  9644                           sub.w   d4,d3                   ; and from this call's budget
-  161  00000838  B87C0011                       cmp.w   #17,d4
-  162  0000083C  64xx                           bcc.s   copy_slow               ; n >= 17: the counted ladder
-  163  0000083E  D844                           add.w   d4,d4
-  164  00000840  4444                           neg.w   d4                      ; d4 = -2n is the dispatch index itself,
-  165  00000842  4EFB40xx                       jmp     fast_end(pc,d4.w)       ; and $ffxx for byte_offset afterwards
+  159  00000830  9244                           sub.w   d4,d1                   ; consume n from the operation
+  160  00000832  9644                           sub.w   d4,d3                   ; and from this call's budget
+  161  00000834  B87C0011                       cmp.w   #17,d4
+  162  00000838  64xx                           bcc.s   copy_slow               ; n >= 17: the counted ladder
+  163  0000083A  D844                           add.w   d4,d4
+  164  0000083C  4444                           neg.w   d4                      ; d4 = -2n is the dispatch index itself,
+  165  0000083E  4EFB40xx                       jmp     fast_end(pc,d4.w)       ; and $ffxx for byte_offset afterwards
   166                                   fast_ladder:
   167                                   ; Sixteen unit moves: entry at fast_end-2k copies k units.
   168                                           .rept   16
@@ -1404,185 +1405,185 @@
                                       #         .endr
                                       #         ST4_MOVE
                                       @         .if ST4_UNIT=4
-       00000846  22DB                 @         move.l  (a3)+,(a1)+
-                                      @         .endif
+                                      -         move.l  (a3)+,(a1)+
+                                      -         .endif
                                       @         .if ST4_UNIT=2
                                       -         move.w  (a3)+,(a1)+
                                       -         .endif
                                       @         .if ST4_UNIT=1
-                                      -         move.b  (a3)+,(a1)+
-                                      -         .endif
+       00000842  12DB                 @         move.b  (a3)+,(a1)+
+                                      @         .endif
                                       #         ST4_MOVE
                                       @         .if ST4_UNIT=4
-       00000848  22DB                 @         move.l  (a3)+,(a1)+
-                                      @         .endif
+                                      -         move.l  (a3)+,(a1)+
+                                      -         .endif
                                       @         .if ST4_UNIT=2
                                       -         move.w  (a3)+,(a1)+
                                       -         .endif
                                       @         .if ST4_UNIT=1
-                                      -         move.b  (a3)+,(a1)+
-                                      -         .endif
+       00000844  12DB                 @         move.b  (a3)+,(a1)+
+                                      @         .endif
                                       #         ST4_MOVE
                                       @         .if ST4_UNIT=4
-       0000084A  22DB                 @         move.l  (a3)+,(a1)+
-                                      @         .endif
+                                      -         move.l  (a3)+,(a1)+
+                                      -         .endif
                                       @         .if ST4_UNIT=2
                                       -         move.w  (a3)+,(a1)+
                                       -         .endif
                                       @         .if ST4_UNIT=1
-                                      -         move.b  (a3)+,(a1)+
-                                      -         .endif
+       00000846  12DB                 @         move.b  (a3)+,(a1)+
+                                      @         .endif
                                       #         ST4_MOVE
                                       @         .if ST4_UNIT=4
-       0000084C  22DB                 @         move.l  (a3)+,(a1)+
-                                      @         .endif
+                                      -         move.l  (a3)+,(a1)+
+                                      -         .endif
                                       @         .if ST4_UNIT=2
                                       -         move.w  (a3)+,(a1)+
                                       -         .endif
                                       @         .if ST4_UNIT=1
-                                      -         move.b  (a3)+,(a1)+
-                                      -         .endif
+       00000848  12DB                 @         move.b  (a3)+,(a1)+
+                                      @         .endif
                                       #         ST4_MOVE
                                       @         .if ST4_UNIT=4
-       0000084E  22DB                 @         move.l  (a3)+,(a1)+
-                                      @         .endif
+                                      -         move.l  (a3)+,(a1)+
+                                      -         .endif
                                       @         .if ST4_UNIT=2
                                       -         move.w  (a3)+,(a1)+
                                       -         .endif
                                       @         .if ST4_UNIT=1
-                                      -         move.b  (a3)+,(a1)+
-                                      -         .endif
+       0000084A  12DB                 @         move.b  (a3)+,(a1)+
+                                      @         .endif
                                       #         ST4_MOVE
                                       @         .if ST4_UNIT=4
-       00000850  22DB                 @         move.l  (a3)+,(a1)+
-                                      @         .endif
+                                      -         move.l  (a3)+,(a1)+
+                                      -         .endif
                                       @         .if ST4_UNIT=2
                                       -         move.w  (a3)+,(a1)+
                                       -         .endif
                                       @         .if ST4_UNIT=1
-                                      -         move.b  (a3)+,(a1)+
-                                      -         .endif
+       0000084C  12DB                 @         move.b  (a3)+,(a1)+
+                                      @         .endif
                                       #         ST4_MOVE
                                       @         .if ST4_UNIT=4
-       00000852  22DB                 @         move.l  (a3)+,(a1)+
-                                      @         .endif
+                                      -         move.l  (a3)+,(a1)+
+                                      -         .endif
                                       @         .if ST4_UNIT=2
                                       -         move.w  (a3)+,(a1)+
                                       -         .endif
                                       @         .if ST4_UNIT=1
-                                      -         move.b  (a3)+,(a1)+
-                                      -         .endif
+       0000084E  12DB                 @         move.b  (a3)+,(a1)+
+                                      @         .endif
                                       #         ST4_MOVE
                                       @         .if ST4_UNIT=4
-       00000854  22DB                 @         move.l  (a3)+,(a1)+
-                                      @         .endif
+                                      -         move.l  (a3)+,(a1)+
+                                      -         .endif
                                       @         .if ST4_UNIT=2
                                       -         move.w  (a3)+,(a1)+
                                       -         .endif
                                       @         .if ST4_UNIT=1
-                                      -         move.b  (a3)+,(a1)+
-                                      -         .endif
+       00000850  12DB                 @         move.b  (a3)+,(a1)+
+                                      @         .endif
                                       #         ST4_MOVE
                                       @         .if ST4_UNIT=4
-       00000856  22DB                 @         move.l  (a3)+,(a1)+
-                                      @         .endif
+                                      -         move.l  (a3)+,(a1)+
+                                      -         .endif
                                       @         .if ST4_UNIT=2
                                       -         move.w  (a3)+,(a1)+
                                       -         .endif
                                       @         .if ST4_UNIT=1
-                                      -         move.b  (a3)+,(a1)+
-                                      -         .endif
+       00000852  12DB                 @         move.b  (a3)+,(a1)+
+                                      @         .endif
                                       #         ST4_MOVE
                                       @         .if ST4_UNIT=4
-       00000858  22DB                 @         move.l  (a3)+,(a1)+
-                                      @         .endif
+                                      -         move.l  (a3)+,(a1)+
+                                      -         .endif
                                       @         .if ST4_UNIT=2
                                       -         move.w  (a3)+,(a1)+
                                       -         .endif
                                       @         .if ST4_UNIT=1
-                                      -         move.b  (a3)+,(a1)+
-                                      -         .endif
+       00000854  12DB                 @         move.b  (a3)+,(a1)+
+                                      @         .endif
                                       #         ST4_MOVE
                                       @         .if ST4_UNIT=4
-       0000085A  22DB                 @         move.l  (a3)+,(a1)+
-                                      @         .endif
+                                      -         move.l  (a3)+,(a1)+
+                                      -         .endif
                                       @         .if ST4_UNIT=2
                                       -         move.w  (a3)+,(a1)+
                                       -         .endif
                                       @         .if ST4_UNIT=1
-                                      -         move.b  (a3)+,(a1)+
-                                      -         .endif
+       00000856  12DB                 @         move.b  (a3)+,(a1)+
+                                      @         .endif
                                       #         ST4_MOVE
                                       @         .if ST4_UNIT=4
-       0000085C  22DB                 @         move.l  (a3)+,(a1)+
-                                      @         .endif
+                                      -         move.l  (a3)+,(a1)+
+                                      -         .endif
                                       @         .if ST4_UNIT=2
                                       -         move.w  (a3)+,(a1)+
                                       -         .endif
                                       @         .if ST4_UNIT=1
-                                      -         move.b  (a3)+,(a1)+
-                                      -         .endif
+       00000858  12DB                 @         move.b  (a3)+,(a1)+
+                                      @         .endif
                                       #         ST4_MOVE
                                       @         .if ST4_UNIT=4
-       0000085E  22DB                 @         move.l  (a3)+,(a1)+
-                                      @         .endif
+                                      -         move.l  (a3)+,(a1)+
+                                      -         .endif
                                       @         .if ST4_UNIT=2
                                       -         move.w  (a3)+,(a1)+
                                       -         .endif
                                       @         .if ST4_UNIT=1
-                                      -         move.b  (a3)+,(a1)+
-                                      -         .endif
+       0000085A  12DB                 @         move.b  (a3)+,(a1)+
+                                      @         .endif
                                       #         ST4_MOVE
                                       @         .if ST4_UNIT=4
-       00000860  22DB                 @         move.l  (a3)+,(a1)+
-                                      @         .endif
+                                      -         move.l  (a3)+,(a1)+
+                                      -         .endif
                                       @         .if ST4_UNIT=2
                                       -         move.w  (a3)+,(a1)+
                                       -         .endif
                                       @         .if ST4_UNIT=1
-                                      -         move.b  (a3)+,(a1)+
-                                      -         .endif
+       0000085C  12DB                 @         move.b  (a3)+,(a1)+
+                                      @         .endif
                                       #         ST4_MOVE
                                       @         .if ST4_UNIT=4
-       00000862  22DB                 @         move.l  (a3)+,(a1)+
-                                      @         .endif
+                                      -         move.l  (a3)+,(a1)+
+                                      -         .endif
                                       @         .if ST4_UNIT=2
                                       -         move.w  (a3)+,(a1)+
                                       -         .endif
                                       @         .if ST4_UNIT=1
-                                      -         move.b  (a3)+,(a1)+
-                                      -         .endif
+       0000085E  12DB                 @         move.b  (a3)+,(a1)+
+                                      @         .endif
                                       #         ST4_MOVE
                                       @         .if ST4_UNIT=4
-       00000864  22DB                 @         move.l  (a3)+,(a1)+
-                                      @         .endif
+                                      -         move.l  (a3)+,(a1)+
+                                      -         .endif
                                       @         .if ST4_UNIT=2
                                       -         move.w  (a3)+,(a1)+
                                       -         .endif
                                       @         .if ST4_UNIT=1
-                                      -         move.b  (a3)+,(a1)+
-  170                                 -         .endif
+       00000860  12DB                 @         move.b  (a3)+,(a1)+
+  170                                 @         .endif
   171                                   fast_end:                               ; no counter, no kind test: fall into
   172                                   match_copied:                           ; the match epilogue
-  173  00000866  4A41                           tst.w   d1
-  174  00000868  67xx                           beq.s   match_transition
+  173  00000862  4A41                           tst.w   d1
+  174  00000864  67xx                           beq.s   match_transition
   175                                   resume_fresh:                           ; gamma or a split match may continue
-  176  0000086A  3803                           move.w  d3,d4                   ; test budget and seed the next segment
-  177  0000086C  66A2                           bne.s   segment                 ; budget remains: start/continue a segment
+  176  00000866  3803                           move.w  d3,d4                   ; test budget and seed the next segment
+  177  00000868  66A4                           bne.s   segment                 ; budget remains: start/continue a segment
   178                                   resume_return:
-  179  0000086E  4E75                           rts
+  179  0000086A  4E75                           rts
   180                                   
   181                                   literal_source:
-  182  00000870  264A                           movea.l a2,a3                   ; literals copy from stream B
-  183  00000872  9244                           sub.w   d4,d1                   ; consume n from the operation
-  184  00000874  9644                           sub.w   d4,d3                   ; and from this call's budget
+  182  0000086C  264A                           movea.l a2,a3                   ; literals copy from stream B
+  183  0000086E  9244                           sub.w   d4,d1                   ; consume n from the operation
+  184  00000870  9644                           sub.w   d4,d3                   ; and from this call's budget
   185                                   copy_slow:                              ; any n; the subs are already done
-  186  00000876  7A0F                           moveq   #15,d5                  ; d5 = n&15, partial-pass dispatch
-  187  00000878  CA44                           and.w   d4,d5
-  188  0000087A  E84C                           lsr.w   #4,d4                   ; d4 = n>>4 full passes
-  189  0000087C  DA45                           add.w   d5,d5
-  190  0000087E  4445                           neg.w   d5                      ; index = -2*(n&15)
-  191  00000880  4EFB50xx                       jmp     ladder_end(pc,d5.w)     ; pc-relative dispatch, no base register
+  186  00000872  7A0F                           moveq   #15,d5                  ; d5 = n&15, partial-pass dispatch
+  187  00000874  CA44                           and.w   d4,d5
+  188  00000876  E84C                           lsr.w   #4,d4                   ; d4 = n>>4 full passes
+  189  00000878  DA45                           add.w   d5,d5
+  190  0000087A  4445                           neg.w   d5                      ; index = -2*(n&15)
+  191  0000087C  4EFB50xx                       jmp     ladder_end(pc,d5.w)     ; pc-relative dispatch, no base register
   192                                   ladder:
   193                                   ; Sixteen unit moves: entry at ladder_end-2k copies k units.
   194                                           .rept   16
@@ -1590,183 +1591,183 @@
                                       #         .endr
                                       #         ST4_MOVE
                                       @         .if ST4_UNIT=4
-       00000884  22DB                 @         move.l  (a3)+,(a1)+
-                                      @         .endif
+                                      -         move.l  (a3)+,(a1)+
+                                      -         .endif
                                       @         .if ST4_UNIT=2
                                       -         move.w  (a3)+,(a1)+
                                       -         .endif
                                       @         .if ST4_UNIT=1
-                                      -         move.b  (a3)+,(a1)+
-                                      -         .endif
+       00000880  12DB                 @         move.b  (a3)+,(a1)+
+                                      @         .endif
                                       #         ST4_MOVE
                                       @         .if ST4_UNIT=4
-       00000886  22DB                 @         move.l  (a3)+,(a1)+
-                                      @         .endif
+                                      -         move.l  (a3)+,(a1)+
+                                      -         .endif
                                       @         .if ST4_UNIT=2
                                       -         move.w  (a3)+,(a1)+
                                       -         .endif
                                       @         .if ST4_UNIT=1
-                                      -         move.b  (a3)+,(a1)+
-                                      -         .endif
+       00000882  12DB                 @         move.b  (a3)+,(a1)+
+                                      @         .endif
                                       #         ST4_MOVE
                                       @         .if ST4_UNIT=4
-       00000888  22DB                 @         move.l  (a3)+,(a1)+
-                                      @         .endif
+                                      -         move.l  (a3)+,(a1)+
+                                      -         .endif
                                       @         .if ST4_UNIT=2
                                       -         move.w  (a3)+,(a1)+
                                       -         .endif
                                       @         .if ST4_UNIT=1
-                                      -         move.b  (a3)+,(a1)+
-                                      -         .endif
+       00000884  12DB                 @         move.b  (a3)+,(a1)+
+                                      @         .endif
                                       #         ST4_MOVE
                                       @         .if ST4_UNIT=4
-       0000088A  22DB                 @         move.l  (a3)+,(a1)+
-                                      @         .endif
+                                      -         move.l  (a3)+,(a1)+
+                                      -         .endif
                                       @         .if ST4_UNIT=2
                                       -         move.w  (a3)+,(a1)+
                                       -         .endif
                                       @         .if ST4_UNIT=1
-                                      -         move.b  (a3)+,(a1)+
-                                      -         .endif
+       00000886  12DB                 @         move.b  (a3)+,(a1)+
+                                      @         .endif
                                       #         ST4_MOVE
                                       @         .if ST4_UNIT=4
-       0000088C  22DB                 @         move.l  (a3)+,(a1)+
-                                      @         .endif
+                                      -         move.l  (a3)+,(a1)+
+                                      -         .endif
                                       @         .if ST4_UNIT=2
                                       -         move.w  (a3)+,(a1)+
                                       -         .endif
                                       @         .if ST4_UNIT=1
-                                      -         move.b  (a3)+,(a1)+
-                                      -         .endif
+       00000888  12DB                 @         move.b  (a3)+,(a1)+
+                                      @         .endif
                                       #         ST4_MOVE
                                       @         .if ST4_UNIT=4
-       0000088E  22DB                 @         move.l  (a3)+,(a1)+
-                                      @         .endif
+                                      -         move.l  (a3)+,(a1)+
+                                      -         .endif
                                       @         .if ST4_UNIT=2
                                       -         move.w  (a3)+,(a1)+
                                       -         .endif
                                       @         .if ST4_UNIT=1
-                                      -         move.b  (a3)+,(a1)+
-                                      -         .endif
+       0000088A  12DB                 @         move.b  (a3)+,(a1)+
+                                      @         .endif
                                       #         ST4_MOVE
                                       @         .if ST4_UNIT=4
-       00000890  22DB                 @         move.l  (a3)+,(a1)+
-                                      @         .endif
+                                      -         move.l  (a3)+,(a1)+
+                                      -         .endif
                                       @         .if ST4_UNIT=2
                                       -         move.w  (a3)+,(a1)+
                                       -         .endif
                                       @         .if ST4_UNIT=1
-                                      -         move.b  (a3)+,(a1)+
-                                      -         .endif
+       0000088C  12DB                 @         move.b  (a3)+,(a1)+
+                                      @         .endif
                                       #         ST4_MOVE
                                       @         .if ST4_UNIT=4
-       00000892  22DB                 @         move.l  (a3)+,(a1)+
-                                      @         .endif
+                                      -         move.l  (a3)+,(a1)+
+                                      -         .endif
                                       @         .if ST4_UNIT=2
                                       -         move.w  (a3)+,(a1)+
                                       -         .endif
                                       @         .if ST4_UNIT=1
-                                      -         move.b  (a3)+,(a1)+
-                                      -         .endif
+       0000088E  12DB                 @         move.b  (a3)+,(a1)+
+                                      @         .endif
                                       #         ST4_MOVE
                                       @         .if ST4_UNIT=4
-       00000894  22DB                 @         move.l  (a3)+,(a1)+
-                                      @         .endif
+                                      -         move.l  (a3)+,(a1)+
+                                      -         .endif
                                       @         .if ST4_UNIT=2
                                       -         move.w  (a3)+,(a1)+
                                       -         .endif
                                       @         .if ST4_UNIT=1
-                                      -         move.b  (a3)+,(a1)+
-                                      -         .endif
+       00000890  12DB                 @         move.b  (a3)+,(a1)+
+                                      @         .endif
                                       #         ST4_MOVE
                                       @         .if ST4_UNIT=4
-       00000896  22DB                 @         move.l  (a3)+,(a1)+
-                                      @         .endif
+                                      -         move.l  (a3)+,(a1)+
+                                      -         .endif
                                       @         .if ST4_UNIT=2
                                       -         move.w  (a3)+,(a1)+
                                       -         .endif
                                       @         .if ST4_UNIT=1
-                                      -         move.b  (a3)+,(a1)+
-                                      -         .endif
+       00000892  12DB                 @         move.b  (a3)+,(a1)+
+                                      @         .endif
                                       #         ST4_MOVE
                                       @         .if ST4_UNIT=4
-       00000898  22DB                 @         move.l  (a3)+,(a1)+
-                                      @         .endif
+                                      -         move.l  (a3)+,(a1)+
+                                      -         .endif
                                       @         .if ST4_UNIT=2
                                       -         move.w  (a3)+,(a1)+
                                       -         .endif
                                       @         .if ST4_UNIT=1
-                                      -         move.b  (a3)+,(a1)+
-                                      -         .endif
+       00000894  12DB                 @         move.b  (a3)+,(a1)+
+                                      @         .endif
                                       #         ST4_MOVE
                                       @         .if ST4_UNIT=4
-       0000089A  22DB                 @         move.l  (a3)+,(a1)+
-                                      @         .endif
+                                      -         move.l  (a3)+,(a1)+
+                                      -         .endif
                                       @         .if ST4_UNIT=2
                                       -         move.w  (a3)+,(a1)+
                                       -         .endif
                                       @         .if ST4_UNIT=1
-                                      -         move.b  (a3)+,(a1)+
-                                      -         .endif
+       00000896  12DB                 @         move.b  (a3)+,(a1)+
+                                      @         .endif
                                       #         ST4_MOVE
                                       @         .if ST4_UNIT=4
-       0000089C  22DB                 @         move.l  (a3)+,(a1)+
-                                      @         .endif
+                                      -         move.l  (a3)+,(a1)+
+                                      -         .endif
                                       @         .if ST4_UNIT=2
                                       -         move.w  (a3)+,(a1)+
                                       -         .endif
                                       @         .if ST4_UNIT=1
-                                      -         move.b  (a3)+,(a1)+
-                                      -         .endif
+       00000898  12DB                 @         move.b  (a3)+,(a1)+
+                                      @         .endif
                                       #         ST4_MOVE
                                       @         .if ST4_UNIT=4
-       0000089E  22DB                 @         move.l  (a3)+,(a1)+
-                                      @         .endif
+                                      -         move.l  (a3)+,(a1)+
+                                      -         .endif
                                       @         .if ST4_UNIT=2
                                       -         move.w  (a3)+,(a1)+
                                       -         .endif
                                       @         .if ST4_UNIT=1
-                                      -         move.b  (a3)+,(a1)+
-                                      -         .endif
+       0000089A  12DB                 @         move.b  (a3)+,(a1)+
+                                      @         .endif
                                       #         ST4_MOVE
                                       @         .if ST4_UNIT=4
-       000008A0  22DB                 @         move.l  (a3)+,(a1)+
-                                      @         .endif
+                                      -         move.l  (a3)+,(a1)+
+                                      -         .endif
                                       @         .if ST4_UNIT=2
                                       -         move.w  (a3)+,(a1)+
                                       -         .endif
                                       @         .if ST4_UNIT=1
-                                      -         move.b  (a3)+,(a1)+
-                                      -         .endif
+       0000089C  12DB                 @         move.b  (a3)+,(a1)+
+                                      @         .endif
                                       #         ST4_MOVE
                                       @         .if ST4_UNIT=4
-       000008A2  22DB                 @         move.l  (a3)+,(a1)+
-                                      @         .endif
+                                      -         move.l  (a3)+,(a1)+
+                                      -         .endif
                                       @         .if ST4_UNIT=2
                                       -         move.w  (a3)+,(a1)+
                                       -         .endif
                                       @         .if ST4_UNIT=1
-                                      -         move.b  (a3)+,(a1)+
-  196                                 -         .endif
+       0000089E  12DB                 @         move.b  (a3)+,(a1)+
+  196                                 @         .endif
   197                                   ladder_end:
-  198  000008A4  5344                           subq.w  #1,d4                   ; full 16-unit passes; the fall-through
-  199  000008A6  64DC                           bcc.s   ladder                  ; costs 12 where dbf paid 14, and still
-  200  000008A8  4A42                           tst.w   d2                      ; leaves d4.w = $ffff for byte_offset
-  201  000008AA  6BBA                           bmi.s   match_copied            ; an n>=17 match rejoins its epilogue
-  202  000008AC  244B                           movea.l a3,a2                   ; literals do consume input: B advanced
-  203  000008AE  4A41                           tst.w   d1
-  204  000008B0  66BC                           bne.s   resume_return           ; literals stop only on the budget
+  198  000008A0  5344                           subq.w  #1,d4                   ; full 16-unit passes; the fall-through
+  199  000008A2  64DC                           bcc.s   ladder                  ; costs 12 where dbf paid 14, and still
+  200  000008A4  4A42                           tst.w   d2                      ; leaves d4.w = $ffff for byte_offset
+  201  000008A6  6BBA                           bmi.s   match_copied            ; an n>=17 match rejoins its epilogue
+  202  000008A8  244B                           movea.l a3,a2                   ; literals do consume input: B advanced
+  203  000008AA  4A41                           tst.w   d1
+  204  000008AC  66BC                           bne.s   resume_return           ; literals stop only on the budget
   205                                   
   206                                   literals_transition:
-  207  000008B2  D040                           add.w   d0,d0                   ; Java: next(), case LITERALS (bare read)
-  208  000008B4  65xx                           bcs.s   new_offset              ; 1: new offset
-  209  000008B6  4442                           neg.w   d2                      ; from-last reuses the negated offset
-  210  000008B8  60xx                           bra.s   gamma_seed0             ; Java: beginMatchFromLastOffset()
+  207  000008AE  D040                           add.w   d0,d0                   ; Java: next(), case LITERALS (bare read)
+  208  000008B0  65xx                           bcs.s   new_offset              ; 1: new offset
+  209  000008B2  4442                           neg.w   d2                      ; from-last reuses the negated offset
+  210  000008B4  60xx                           bra.s   gamma_seed0             ; Java: beginMatchFromLastOffset()
   211                                   
   212                                   begin_literals:                         ; Java: beginLiterals()
-  213  000008BA  4442                           neg.w   d2                      ; positive lastOffset = State.LITERALS
+  213  000008B6  4442                           neg.w   d2                      ; positive lastOffset = State.LITERALS
   214                                   gamma_seed0:
-  215  000008BC  7800                           moveq   #0,d4                   ; remaining = gamma + 0; fall through
+  215  000008B8  7800                           moveq   #0,d4                   ; remaining = gamma + 0; fall through
   216                                   
   217                                   ; get_gamma: interlaced Elias gamma in d1.w; d4.w is the 0/1 length seed.
   218                                   ; Gammas are odd-length and each is followed by one flag bit, so a gamma always
@@ -1774,31 +1775,31 @@
   220                                   ; even - can only run out on a continuation bit. Data and transition reads need
   221                                   ; no refill check; 16 is even like 8, so the word queue inherits the argument.
   222                                   get_gamma:
-  223  000008BE  5241                           addq.w  #1,d1
-  224  000008C0  D040                           add.w   d0,d0                   ; first continuation bit
-  225  000008C2  67xx                           beq.s   gamma_refill
-  226  000008C4  64xx                           bcc.s   gamma_done
+  223  000008BA  5241                           addq.w  #1,d1
+  224  000008BC  D040                           add.w   d0,d0                   ; first continuation bit
+  225  000008BE  67xx                           beq.s   gamma_refill
+  226  000008C0  64xx                           bcc.s   gamma_done
   227                                   gamma_loop:
-  228  000008C6  D040                           add.w   d0,d0                   ; data bit: never a refill
-  229  000008C8  D341                           addx.w  d1,d1                   ; value = value*2 + bit
-  230  000008CA  D040                           add.w   d0,d0                   ; continuation bit
-  231  000008CC  67xx                           beq.s   gamma_refill
-  232  000008CE  65F6                           bcs.s   gamma_loop
+  228  000008C2  D040                           add.w   d0,d0                   ; data bit: never a refill
+  229  000008C4  D341                           addx.w  d1,d1                   ; value = value*2 + bit
+  230  000008C6  D040                           add.w   d0,d0                   ; continuation bit
+  231  000008C8  67xx                           beq.s   gamma_refill
+  232  000008CA  65F6                           bcs.s   gamma_loop
   233                                   gamma_done:
-  234  000008D0  D244                           add.w   d4,d1                   ; +1 only for a new-offset match
-  235  000008D2  3803                           move.w  d3,d4                   ; the resume_fresh tail, duplicated so
-  236  000008D4  6600FF3A                       bne.w   segment                 ; the parse exit takes one branch
+  234  000008CC  D244                           add.w   d4,d1                   ; +1 only for a new-offset match
+  235  000008CE  3803                           move.w  d3,d4                   ; the resume_fresh tail, duplicated so
+  236  000008D0  6600FF3C                       bne.w   segment                 ; the parse exit takes one branch
   237                                   parse_done:
-  238  000008D8  4E75                           rts
+  238  000008D4  4E75                           rts
   239                                   gamma_refill:
-  240  000008DA  3018                           move.w  (a0)+,d0
-  241  000008DC  D140                           addx.w  d0,d0
-  242  000008DE  65E6                           bcs.s   gamma_loop
-  243  000008E0  60EE                           bra.s   gamma_done
+  240  000008D6  3018                           move.w  (a0)+,d0
+  241  000008D8  D140                           addx.w  d0,d0
+  242  000008DA  65E6                           bcs.s   gamma_loop
+  243  000008DC  60EE                           bra.s   gamma_done
   244                                   
   245                                   match_transition:                       ; remaining == 0: parse after a match
-  246  000008E2  D040                           add.w   d0,d0
-  247  000008E4  64D4                           bcc.s   begin_literals
+  246  000008DE  D040                           add.w   d0,d0
+  247  000008E0  64D4                           bcc.s   begin_literals
   248                                   
   249                                   new_offset:                             ; Java: beginMatchFromNewOffset/readOffset
   250                                   ; Two class bits: the first says byte or word, the second picks a byte offset's
@@ -1807,95 +1808,95 @@
   253                                   ; of bits, so flags and gamma data bits all land on odd positions and the queue
   254                                   ; - which empties every 16 bits - can never run out on one; the bit immediately
   255                                   ; after a flag is the one exception, and it is checked.
-  256  000008E6  D040                           add.w   d0,d0                   ; class bit 1: set means a byte offset
-  257  000008E8  67xx                           beq.s   class_refill
+  256  000008E2  D040                           add.w   d0,d0                   ; class bit 1: set means a byte offset
+  257  000008E4  67xx                           beq.s   class_refill
   258                                   class_read:
-  259  000008EA  65xx                           bcs.s   byte_offset
-  260  000008EC  D040                           add.w   d0,d0                   ; class bit 2: set means end of stream
-  261  000008EE  65E8                           bcs.s   parse_done              ; the nearer of the two identical rts
-  262  000008F0  341D                           move.w  (a5)+,d2                ; -lastOffset*UNIT, stored ready to use
+  259  000008E6  65xx                           bcs.s   byte_offset
+  260  000008E8  D040                           add.w   d0,d0                   ; class bit 2: set means end of stream
+  261  000008EA  65E8                           bcs.s   parse_done              ; the nearer of the two identical rts
+  262  000008EC  341D                           move.w  (a5)+,d2                ; -lastOffset*UNIT, stored ready to use
   263                                   have_offset:
-  264  000008F2  7801                           moveq   #1,d4                   ; new-offset match: remaining = gamma+1
-  265  000008F4  60C8                           bra.s   get_gamma
+  264  000008EE  7801                           moveq   #1,d4                   ; new-offset match: remaining = gamma+1
+  265  000008F0  60C8                           bra.s   get_gamma
   266                                   
   267                                   class_refill:
-  268  000008F6  3018                           move.w  (a0)+,d0
-  269  000008F8  D140                           addx.w  d0,d0
-  270  000008FA  60EE                           bra.s   class_read
+  268  000008F2  3018                           move.w  (a0)+,d0
+  269  000008F4  D140                           addx.w  d0,d0
+  270  000008F6  60EE                           bra.s   class_read
   271                                   
   272                                   byte_offset:
   273                                   ; The copy paths leave d4.w = $ffxx - the fast ladder's -2n dispatch index, or
   274                                   ; the counted terminator's $ffff - so one move.b makes $ff00 + (256-offset),
   275                                   ; which already IS -offset as a word. The bank bit moves it 256 units further.
-  276  000008FC  181C                           move.b  (a4)+,d4
-  277  000008FE  D040                           add.w   d0,d0                   ; class bit 2: the 256-unit bank
-  278  00000900  64xx                           bcc.s   scale_offset
-  279  00000902  987C0100                       sub.w   #256,d4                 ; the far bank: 257..512 units
+  276  000008F8  181C                           move.b  (a4)+,d4
+  277  000008FA  D040                           add.w   d0,d0                   ; class bit 2: the 256-unit bank
+  278  000008FC  64xx                           bcc.s   scale_offset
+  279  000008FE  987C0100                       sub.w   #256,d4                 ; the far bank: 257..512 units
   280                                   scale_offset:
   281                                   ; The offset arrives in units and is kept in bytes, so the match source is one
   282                                   ; adda.w away for the rest of the operation.
   283                                           .if ST4_UNIT>1
-  284  00000906  D844                           add.w   d4,d4
-  285                                           .endif
+  284                                 -         add.w   d4,d4
+  285                                 -         .endif
   286                                           .if ST4_UNIT>2
-  287  00000908  D844                           add.w   d4,d4
-  288                                           .endif
-  289  0000090A  3404                           move.w  d4,d2                   ; install -lastOffset*UNIT, keep d2.high
-  290  0000090C  7801                           moveq   #1,d4                   ; new-offset match: remaining = gamma+1
-  291  0000090E  60AE                           bra.s   get_gamma               ; one branch, not two through have_offset
-          .advance 0000000000000424  t           SD_ELAST 0000000000000000  a       YX6_OLDTCDCR 000000000000003F  a          yx6_buzzD 0000000000000612  t 
-            .armed 00000000000006DE  t             SD_ISR 000000000000000C  a          YX6_OLDTD 000000000000003A  a          yx6_desc1 00000000000004FE  t 
-     .cursor_ready 0000000000000432  t           SD_OTHER 0000000000000010  a        YX6_OLDTDDR 0000000000000041  a          yx6_desc2 0000000000000512  t 
-             .done 0000000000000268  t            SD_PARM 0000000000000008  a         YX6_OLDUSP 0000000000000054  a          yx6_drumA 0000000000000526  t 
-             .drum 00000000000006DA  t           SD_TLAST 0000000000000001  a        YX6_PATCHES 0000000000000043  a    yx6_drumA_clear 000000000000055A  t 
-     .effects_done 000000000000031E  t             SD_VEC 0000000000000006  a     YX6_PATCH_ADDR 0000000000000048  a          yx6_drumD 00000000000005A4  t 
-            .ended 0000000000000548  t      ST4_SIGNATURE 0000000053340404  a      YX6_PATCH_VAL 0000000000000044  a    yx6_drumD_clear 00000000000005D8  t 
-            .ended 00000000000005C6  t           ST4_UNIT 0000000000000004  a          YX6_PORTS 00000000000000C0  a     yx6_drum_start 0000000000000758  t 
-    .envelope_held 00000000000003DC  t           ST4_init 00000000000007EE  t            YX6_PSG 00000000FFFF8800  a          yx6_drums 0000000000000622  t 
-      .first_group 000000000000009E  t         ST4_resume 000000000000080E  t          YX6_R7OFF 0000000000000032  a           yx6_link 0000000000000624  t 
-            .frame 00000000000002DE  t           YH_CHUNK 0000000000000012  a      YX6_REGISTERS 000000000000000E  a        yx6_mfpbits 00000000000004EE  t 
-             .held 000000000000071C  t           YH_CLOCK 0000000000000018  a        YX6_RINGEND 000000000000000C  a           yx6_open 00000000000002B2  t 
-             .keep 00000000000007A6  t       YH_DRUMCOUNT 0000000000000020  a          YX6_RINGS 0000000000000010  a          yx6_parkA 0000000000000560  t 
-      .loop_length 0000000000000084  t           YH_DRUMS 000000000000001C  a           YX6_SLOT 0000000000000028  a          yx6_parkD 00000000000005DE  t 
-           .mfpbit 000000000000019E  t           YH_FLAGS 0000000000000006  a          YX6_STATE 0000000000000058  a       yx6_sidA_off 000000000000057E  t 
-           .mfpbit 00000000000004B4  t          YH_FRAMES 0000000000000008  a     YX6_STATE_SIZE 0000000000000040  a        yx6_sidA_on 0000000000000568  t 
-          .mfpkeep 00000000000004BE  t     YH_INTRO_TABLE 0000000000000022  a        YX6_STREAMS 0000000000000012  a       yx6_sidD_off 00000000000005FC  t 
-           .mfpoff 00000000000001A8  t            YH_LOOP 0000000000000014  a     YX6_SUPER_HOST 0000000000000000  a        yx6_sidD_on 00000000000005E6  t 
-         .mixer_ok 0000000000000336  t      YH_LOOP_TABLE 000000000000006A  a          YX6_TOTAL 0000000000000018  a           yx6_slot 0000000000000660  t 
-          .no_loop 00000000000002B0  t           YH_MAGIC 0000000000000000  a        YX6_VERSION 0000000000000004  a 
-              .out 000000000000071A  t       YH_PLAYER_HZ 000000000000000C  a           YX6_fill 00000000000001F8  t 
-         .partners 000000000000064A  t            YH_RING 0000000000000010  a           YX6_init 000000000000000C  t 
-            .piece 0000000000000208  t    YH_STREAM_COUNT 000000000000000E  a           YX6_play 00000000000002D2  t 
-       .piece_size 000000000000021E  t         YH_VERSION 0000000000000004  a     YX6_start_loop 000000000000026E  t 
-           .played 0000000000000464  t            YS_BOFF 0000000000000014  a           YX6_stop 0000000000000468  t 
-         .pristine 00000000000003F8  t              YS_D1 0000000000000000  a             _RMAC_ 0000000002040003  a 
-           .refill 000000000000041E  t              YS_D2 0000000000000004  a     begin_literals 00000000000008BA  t 
-         .rejected 00000000000001F4  t             YS_END 0000000000000024  a        budget_fits 0000000000000816  t 
-         .released 0000000000000708  t           YS_INPUT 0000000000000008  a        byte_offset 00000000000008FC  t 
-          .restore 00000000000003F0  t            YS_LEFT 0000000000000028  a         class_read 00000000000008EA  t 
-          .section 00000000000000E4  t             YS_LIT 0000000000000010  a       class_refill 00000000000008F6  t 
-          .section 0000000000000218  t           YS_QUEUE 000000000000001C  a               copy 0000000000000834  t 
-              .sid 00000000000006AC  t           YS_START 0000000000000020  a          copy_slow 0000000000000876  t 
-         .sid_free 00000000000006BA  t            YS_WOFF 0000000000000018  a           fast_end 0000000000000866  t 
-          .silence 00000000000004DC  t           YS_WRITE 000000000000000C  a        fast_ladder 0000000000000846  t 
-       .slot1_idle 0000000000000306  t              YX6_C 0000000000000026  a         gamma_done 00000000000008D0  t 
-            .slot2 000000000000030A  t         YX6_CURSOR 0000000000000000  a         gamma_loop 00000000000008C6  t 
-       .slot_ready 000000000000044A  t         YX6_EFXOFF 000000000000002E  a       gamma_refill 00000000000008DA  t 
-           .stored 000000000000024E  t       YX6_ENVELOPE 000000000000000D  a        gamma_seed0 00000000000008BC  t 
-           .stream 00000000000000A6  t           YX6_FILE 0000000000000014  a          get_gamma 00000000000008BE  t 
-            .track 0000000000000738  t          YX6_FIXED 00000000000004D8  a        have_offset 00000000000008F2  t 
-              .vol 0000000000000752  t     YX6_FLAG_LOOPS 0000000000000001  a             ladder 0000000000000884  t 
-          ISR_BUZZ 000000000000006E  a          YX6_INDEX 000000000000002A  a         ladder_end 00000000000008A4  t 
-    ISR_BUZZ_SHAPE 0000000000000072  a         YX6_LEFTFR 0000000000000004  a     literal_source 0000000000000870  t 
-         ISR_CLEAR 0000000000000037  a           YX6_LOOP 0000000000000020  a   literals_transition 00000000000008B2  t 
-      ISR_DRUM_PTR 0000000000000008  a        YX6_LOOPLEN 000000000000001C  a       match_copied 0000000000000866  t 
-      ISR_DRUM_SEL 0000000000000003  a          YX6_LOOPS 000000000000002C  a   match_transition 00000000000008E2  t 
-        ISR_SIDOFF 0000000000000058  a          YX6_MAGIC 0000000059583621  a         new_offset 00000000000008E6  t 
-   ISR_SIDOFF_NEXT 0000000000000062  a          YX6_MIXER 0000000000000007  a         parse_done 00000000000008D8  t 
-    ISR_SIDOFF_SEL 000000000000005A  a              YX6_N 0000000000000024  a       resume_fresh 000000000000086A  t 
-         ISR_SIDON 0000000000000042  a           YX6_NEXT 0000000000000008  a      resume_return 000000000000086E  t 
-    ISR_SIDON_NEXT 000000000000004C  a         YX6_NO_ENV 00000000000000FF  a       scale_offset 0000000000000906  t 
-     ISR_SIDON_SEL 0000000000000044  a         YX6_OLDMFP 0000000000000042  a            segment 0000000000000810  t 
-       ISR_SID_VOL 0000000000000046  a          YX6_OLDTA 0000000000000036  a     source_wrapped 0000000000000804  t 
-           SD_CTRL 0000000000000002  a        YX6_OLDTACR 000000000000003E  a         yx6_borrow 00000000000007CE  t 
-           SD_DATA 0000000000000004  a        YX6_OLDTADR 0000000000000040  a          yx6_buzzA 0000000000000594  t 
+  287                                 -         add.w   d4,d4
+  288                                 -         .endif
+  289  00000902  3404                           move.w  d4,d2                   ; install -lastOffset*UNIT, keep d2.high
+  290  00000904  7801                           moveq   #1,d4                   ; new-offset match: remaining = gamma+1
+  291  00000906  60B2                           bra.s   get_gamma               ; one branch, not two through have_offset
+          .advance 0000000000000422  t           SD_ELAST 0000000000000000  a       YX6_OLDTCDCR 000000000000003F  a          yx6_buzzD 0000000000000610  t 
+            .armed 00000000000006DC  t             SD_ISR 000000000000000C  a          YX6_OLDTD 000000000000003A  a          yx6_desc1 00000000000004FC  t 
+     .cursor_ready 0000000000000430  t           SD_OTHER 0000000000000010  a        YX6_OLDTDDR 0000000000000041  a          yx6_desc2 0000000000000510  t 
+             .done 0000000000000266  t            SD_PARM 0000000000000008  a         YX6_OLDUSP 0000000000000054  a          yx6_drumA 0000000000000524  t 
+             .drum 00000000000006D8  t           SD_TLAST 0000000000000001  a        YX6_PATCHES 0000000000000043  a    yx6_drumA_clear 0000000000000558  t 
+     .effects_done 000000000000031C  t             SD_VEC 0000000000000006  a     YX6_PATCH_ADDR 0000000000000048  a          yx6_drumD 00000000000005A2  t 
+            .ended 0000000000000546  t      ST4_SIGNATURE 0000000053340401  a      YX6_PATCH_VAL 0000000000000044  a    yx6_drumD_clear 00000000000005D6  t 
+            .ended 00000000000005C4  t           ST4_UNIT 0000000000000001  a          YX6_PORTS 00000000000000C0  a     yx6_drum_start 0000000000000756  t 
+    .envelope_held 00000000000003DA  t           ST4_init 00000000000007EC  t            YX6_PSG 00000000FFFF8800  a          yx6_drums 0000000000000620  t 
+      .first_group 000000000000009E  t         ST4_resume 000000000000080C  t          YX6_R7OFF 0000000000000032  a           yx6_link 0000000000000622  t 
+            .frame 00000000000002DC  t           YH_CHUNK 0000000000000012  a      YX6_REGISTERS 000000000000000E  a        yx6_mfpbits 00000000000004EC  t 
+             .held 000000000000071A  t           YH_CLOCK 0000000000000018  a        YX6_RINGEND 000000000000000C  a           yx6_open 00000000000002B0  t 
+             .keep 00000000000007A4  t       YH_DRUMCOUNT 0000000000000020  a          YX6_RINGS 0000000000000010  a          yx6_parkA 000000000000055E  t 
+      .loop_length 0000000000000084  t           YH_DRUMS 000000000000001C  a           YX6_SLOT 0000000000000028  a          yx6_parkD 00000000000005DC  t 
+           .mfpbit 000000000000019E  t           YH_FLAGS 0000000000000006  a          YX6_STATE 0000000000000058  a       yx6_sidA_off 000000000000057C  t 
+           .mfpbit 00000000000004B2  t          YH_FRAMES 0000000000000008  a     YX6_STATE_SIZE 0000000000000040  a        yx6_sidA_on 0000000000000566  t 
+          .mfpkeep 00000000000004BC  t     YH_INTRO_TABLE 0000000000000022  a        YX6_STREAMS 0000000000000012  a       yx6_sidD_off 00000000000005FA  t 
+           .mfpoff 00000000000001A8  t            YH_LOOP 0000000000000014  a     YX6_SUPER_HOST 0000000000000001  a        yx6_sidD_on 00000000000005E4  t 
+         .mixer_ok 0000000000000334  t      YH_LOOP_TABLE 000000000000006A  a          YX6_TOTAL 0000000000000018  a           yx6_slot 000000000000065E  t 
+          .no_loop 00000000000002AE  t           YH_MAGIC 0000000000000000  a        YX6_VERSION 0000000000000004  a 
+              .out 0000000000000718  t       YH_PLAYER_HZ 000000000000000C  a           YX6_fill 00000000000001F8  t 
+         .partners 0000000000000648  t            YH_RING 0000000000000010  a           YX6_init 000000000000000C  t 
+            .piece 0000000000000208  t    YH_STREAM_COUNT 000000000000000E  a           YX6_play 00000000000002D0  t 
+       .piece_size 000000000000021E  t         YH_VERSION 0000000000000004  a     YX6_start_loop 000000000000026C  t 
+           .played 0000000000000462  t            YS_BOFF 0000000000000014  a           YX6_stop 0000000000000466  t 
+         .pristine 00000000000003F6  t              YS_D1 0000000000000000  a             _RMAC_ 0000000002040003  a 
+           .refill 000000000000041C  t              YS_D2 0000000000000004  a     begin_literals 00000000000008B6  t 
+         .rejected 00000000000001F4  t             YS_END 0000000000000024  a        budget_fits 0000000000000814  t 
+         .released 0000000000000706  t           YS_INPUT 0000000000000008  a        byte_offset 00000000000008F8  t 
+          .restore 00000000000003EE  t            YS_LEFT 0000000000000028  a         class_read 00000000000008E6  t 
+          .section 00000000000000E4  t             YS_LIT 0000000000000010  a       class_refill 00000000000008F2  t 
+          .section 0000000000000218  t           YS_QUEUE 000000000000001C  a               copy 0000000000000830  t 
+              .sid 00000000000006AA  t           YS_START 0000000000000020  a          copy_slow 0000000000000872  t 
+         .sid_free 00000000000006B8  t            YS_WOFF 0000000000000018  a           fast_end 0000000000000862  t 
+          .silence 00000000000004DA  t           YS_WRITE 000000000000000C  a        fast_ladder 0000000000000842  t 
+       .slot1_idle 0000000000000304  t              YX6_C 0000000000000026  a         gamma_done 00000000000008CC  t 
+            .slot2 0000000000000308  t         YX6_CURSOR 0000000000000000  a         gamma_loop 00000000000008C2  t 
+       .slot_ready 0000000000000448  t         YX6_EFXOFF 000000000000002E  a       gamma_refill 00000000000008D6  t 
+           .stored 000000000000024C  t       YX6_ENVELOPE 000000000000000D  a        gamma_seed0 00000000000008B8  t 
+           .stream 00000000000000A6  t           YX6_FILE 0000000000000014  a          get_gamma 00000000000008BA  t 
+            .track 0000000000000736  t          YX6_FIXED 00000000000004D8  a        have_offset 00000000000008EE  t 
+              .vol 0000000000000750  t     YX6_FLAG_LOOPS 0000000000000001  a             ladder 0000000000000880  t 
+          ISR_BUZZ 000000000000006E  a          YX6_INDEX 000000000000002A  a         ladder_end 00000000000008A0  t 
+    ISR_BUZZ_SHAPE 0000000000000072  a         YX6_LEFTFR 0000000000000004  a     literal_source 000000000000086C  t 
+         ISR_CLEAR 0000000000000037  a           YX6_LOOP 0000000000000020  a   literals_transition 00000000000008AE  t 
+      ISR_DRUM_PTR 0000000000000008  a        YX6_LOOPLEN 000000000000001C  a       match_copied 0000000000000862  t 
+      ISR_DRUM_SEL 0000000000000003  a          YX6_LOOPS 000000000000002C  a   match_transition 00000000000008DE  t 
+        ISR_SIDOFF 0000000000000058  a          YX6_MAGIC 0000000059583621  a         new_offset 00000000000008E2  t 
+   ISR_SIDOFF_NEXT 0000000000000062  a          YX6_MIXER 0000000000000007  a         parse_done 00000000000008D4  t 
+    ISR_SIDOFF_SEL 000000000000005A  a              YX6_N 0000000000000024  a       resume_fresh 0000000000000866  t 
+         ISR_SIDON 0000000000000042  a           YX6_NEXT 0000000000000008  a      resume_return 000000000000086A  t 
+    ISR_SIDON_NEXT 000000000000004C  a         YX6_NO_ENV 00000000000000FF  a       scale_offset 0000000000000902  t 
+     ISR_SIDON_SEL 0000000000000044  a         YX6_OLDMFP 0000000000000042  a            segment 000000000000080E  t 
+       ISR_SID_VOL 0000000000000046  a          YX6_OLDTA 0000000000000036  a     source_wrapped 0000000000000802  t 
+           SD_CTRL 0000000000000002  a        YX6_OLDTACR 000000000000003E  a         yx6_borrow 00000000000007CC  t 
+           SD_DATA 0000000000000004  a        YX6_OLDTADR 0000000000000040  a          yx6_buzzA 0000000000000592  t 

@@ -182,9 +182,17 @@ byte of it - so the stage BORROWS bytes rather than taking them: every edit
 is logged and undone right after the burst. The chip hears the sanitized
 frame; the ring never keeps the edit. (Implementation note: this was learned
 the hard way - a rig test now packs a pattern that a later match copies
-across a sanitized byte's position, and fails if the byte is not returned.) Idle cost: four ring pops and
-two zero tests, ~60 cycles on top of today's player; a running drum adds
-~20 for the r7 fix.
+across a sanitized byte's position, and fails if the byte is not returned.) Idle cost: with the stage inlined
+into YX6_play and each slot gated on E | E-last, an idle frame pays two ring
+pops and two zero tests, ~140 cycles measured from the tables; a running
+drum adds the r7 borrow. One slot machine serves both slots, aimed by a
+descriptor - last code and count, timer registers, the slot's tick-handler
+block - so the two timers' only remaining difference is data. The tick
+handlers sign off with an immediate byte write to the in-service register
+(it ignores written ones), and a host that never runs user-mode code can
+build with YX6_SUPER_HOST=1 to park the drum tick's a0 in the USP, 16
+cycles under the stack; the park is one-way for the USP itself, so
+YX6_init saves it and YX6_stop hands it back in every build.
 
 The per-frame volume write and a running SID cooperate by design: the nibble
 the burst writes IS the SID volume parameter, and the ISR overwrites the

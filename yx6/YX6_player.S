@@ -193,6 +193,9 @@ puts:
         rts
 
 ; ------------------------------------------------------------------ the library
+; The whole session runs in supervisor mode under one Supexec, so the USP is
+; genuinely spare: the drum tick may use it as its scratch slot.
+YX6_SUPER_HOST  equ     1
         include "YX6.S"
         include "ST4_wrap.S"
 

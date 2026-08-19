@@ -17,7 +17,7 @@ other player including the format author's.
 | Piece | What it is |
 |---|---|
 | [`org.yx6.Yx6`](../src/main/java/org/yx6/Yx6.java) | the packer: YM5!/YM6! in, `.yx6` out |
-| [YX6.S](YX6.S) | the player library, 2,512 bytes plus ST4_wrap's 292 |
+| [YX6.S](YX6.S) | the player library, 2,046 bytes plus ST4_wrap's 292 |
 | [YX6_player.S](YX6_player.S) | a VBL front end: a complete TOS program |
 | [mkprg.sh](mkprg.sh) | links the two around a song into a runnable `.PRG` |
 | [play.sh](play.sh) | one command: pack a `.ym`, build it, play it under Hatari |
@@ -251,12 +251,12 @@ and reports the cost:
 ```text
 SUM=OK wraps=1 sum=2941391492
 CALIB 12 241
-T 1700 107
+T 1700 99
 ```
 
-107 ticks of the 200 Hz clock for 1700 frames, with the calibration loop's
-7,864,630 cycles measured at 241 ticks, works out at about **2,050 cycles per
-frame** — roughly 1.3% of a 50 Hz frame on an 8 MHz ST, including the harness's
+99 ticks of the 200 Hz clock for 1700 frames, with the calibration loop's
+7,864,630 cycles measured at 241 ticks, works out at about **1,900 cycles per
+frame** — roughly 1.2% of a 50 Hz frame on an 8 MHz ST, including the harness's
 own loop, the sound chip's bus wait states and the effect stage finding both
 slots idle (the harness tune's effect codes are deliberately inert, so the
 checksum stays deterministic). Measure your own tune before budgeting: the
