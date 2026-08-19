@@ -115,6 +115,33 @@ final class YmEffectsTest {
     }
 
     @Test
+    void aTooFastDrumIsDownsampledNotDropped() {
+        byte[][] r = blank();
+        r[3][2] = 0x50;                     // drum voice A on slot 2 at
+        r[8][2] = 1 << 5;                   // TP=1 TC=16: 38400 Hz - twice
+        r[15][2] = 16;                      // the ceiling
+        r[8][4] = (byte) ((1 << 5) | 0);    // and a second trigger at an
+        r[3][4] = 0x50;                     // already-playable rate
+        r[15][4] = (byte) 200;              // (3072 Hz)
+        YmEffects.Extraction effects = YmEffects.extract(song("YM6!", r, 1, 1));
+
+        assertEquals(0, effects.tooFast());
+        assertEquals(1, effects.notes().size());
+        // The sample halved, neighbouring values averaged: the 8-bit source
+        // {0x80, 0xF3, 0x21} converts to volumes {8, 15, 2}, then pairs to
+        // one value (8+15+1)/2 -> {12} once the odd tail is dropped.
+        assertEquals(1, effects.drums()[0].length);
+        assertEquals(12, effects.drums()[0][0]);
+        // Both triggers scale their divisor by two, keeping pitch: 4*16*2
+        // = 128 fits as prescaler 1, count 32; 4*200*2 = 1600 as
+        // prescaler 2, count 160.
+        assertEquals(0x51, effects.e2()[2] & 0xFF);
+        assertEquals(32, effects.t2()[2] & 0xFF);
+        assertEquals(0x52, effects.e2()[4] & 0xFF);
+        assertEquals(160, effects.t2()[4] & 0xFF);
+    }
+
+    @Test
     void drumsConvertByWidth() {
         // 8-bit samples: the high nibble, the reference player's own
         // real-hardware mapping. 4-bit files: the byte as it is.

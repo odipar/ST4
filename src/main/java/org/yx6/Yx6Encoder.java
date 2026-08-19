@@ -99,6 +99,18 @@ public final class Yx6Encoder {
      */
     public static Result encode(Ym6Reader.Song song, int ringSize, int chunk,
                                 int loopFrame, boolean progress, int unit) {
+        return encode(song, ringSize, chunk, loopFrame, progress, unit,
+                YmEffects.MAX_TIMER_HZ);
+    }
+
+    /**
+     * As above, with the drum rate ceiling: a drum whose triggers ask for a
+     * faster timer is downsampled to fit under it - see
+     * {@link YmEffects#extract(Ym6Reader.Song, int)}.
+     */
+    public static Result encode(Ym6Reader.Song song, int ringSize, int chunk,
+                                int loopFrame, boolean progress, int unit,
+                                int drumHz) {
         String problem = Yx6Format.checkShape(ringSize, chunk, unit);
         if (!problem.isEmpty()) {
             throw new IllegalArgumentException(problem);
@@ -125,7 +137,7 @@ public final class Yx6Encoder {
         // The eighteen vectors: the masked registers, then the effect streams
         // exactly as the player wants them - same length, same split, same
         // rules, just different content.
-        YmEffects.Extraction effects = YmEffects.extract(song);
+        YmEffects.Extraction effects = YmEffects.extract(song, drumHz);
         byte[][] vectors = new byte[Yx6Format.STREAMS][];
         for (int register = 0; register < Yx6Format.REGISTER_STREAMS; register++) {
             vectors[register] = Ym2149.mask(register, song.registers()[register]);
