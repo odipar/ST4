@@ -53,7 +53,7 @@ PSG_PAGE = 0xFFFF8000
 MFP_PAGE = 0xFFFFF000           # $FFFFFAxx: the effect stage's timers
 VECTORS = 0x000000              # $110/$134: the two timer vectors
 STREAMS = 18                    # what a v4 file carries
-YX6_FIXED = 96 + STREAMS * 64   # the workspace before the rings
+YX6_FIXED = 88 + STREAMS * 64   # the workspace before the rings
 
 QUICK = '--quick' in sys.argv
 
@@ -72,17 +72,22 @@ SCRATCH_REGISTERS = (UC_M68K_REG_D1, UC_M68K_REG_D2, UC_M68K_REG_D3,
 _ASSEMBLED = {}
 
 
-def assemble(unit: int = 1):
-    """YX6.S plus the decoder, built for one unit size, as one flat blob."""
-    if unit in _ASSEMBLED:
-        return _ASSEMBLED[unit]
+def assemble(unit: int = 1, super_host: bool = False):
+    """YX6.S plus the decoder, built for one unit size, as one flat blob.
+    super_host builds the YX6_SUPER_HOST variant: the drum tick parks a0 in
+    the USP instead of the stack."""
+    key = (unit, super_host)
+    if key in _ASSEMBLED:
+        return _ASSEMBLED[key]
     SCRATCH.mkdir(exist_ok=True)
-    source = SCRATCH / f'link{unit}.S'
+    tag = f'{unit}u' if super_host else f'{unit}'
+    source = SCRATCH / f'link{tag}.S'
     source.write_text(f'ST4_UNIT    equ     {unit}\n'
-                      '        include "YX6.S"\n'
+                      + ('YX6_SUPER_HOST equ  1\n' if super_host else '')
+                      + '        include "YX6.S"\n'
                       '        include "ST4_wrap.S"\n')
-    binary = SCRATCH / f'link{unit}.bin'
-    listing = SCRATCH / f'link{unit}.lst'
+    binary = SCRATCH / f'link{tag}.bin'
+    listing = SCRATCH / f'link{tag}.lst'
     command = ['rmac', '-m68000', '-fr', '+o3',
                '-i' + str(YX6), '-i' + str(REPO / '68k'),
                f'-l*{listing}', '-o', str(binary), str(source)]
@@ -90,7 +95,7 @@ def assemble(unit: int = 1):
     if result.returncode:
         raise SystemExit(result.stdout + result.stderr)
     built = (binary.read_bytes(), symbol_table(listing))
-    _ASSEMBLED[unit] = built
+    _ASSEMBLED[key] = built
     return built
 
 
@@ -137,7 +142,8 @@ def pack(tune: bytes, ring: int, chunk: int, loop, unit: int = 1) -> bytes:
 class Player:
     """One emulated ST running YX6 over a packed tune."""
 
-    def __init__(self, packed: bytes, workspace_size: int, unit: int = 1):
+    def __init__(self, packed: bytes, workspace_size: int, unit: int = 1,
+                 super_host: bool = False):
         self.uc = Uc(UC_ARCH_M68K, UC_MODE_BIG_ENDIAN)
         self.uc.ctl_set_cpu_model(UC_CPU_M68K_M68000)
         for base, size in ((CODE, 0x4000), (FILE, 0x30000), (WORK, 0x40000),
@@ -145,7 +151,7 @@ class Player:
                            (PSG_PAGE, 0x1000), (MFP_PAGE, 0x1000),
                            (VECTORS, 0x1000)):
             self.uc.mem_map(base, size)
-        self.binary, self.symbols = assemble(unit)
+        self.binary, self.symbols = assemble(unit, super_host)
         self.uc.mem_write(CODE, self.binary)
         # Odd-but-even addresses on purpose: the 68000 needs word alignment,
         # not long alignment, and the player must not assume more.
@@ -206,6 +212,22 @@ class Player:
     def init(self):
         return self.call('YX6_init', ((UC_M68K_REG_A0, self.file),
                                       (UC_M68K_REG_A1, self.work)))
+
+    def stop(self):
+        return self.call('YX6_stop', ((UC_M68K_REG_A0, self.work),))
+
+    def set_usp(self, value):
+        """Runs move a0,usp in supervisor mode: Unicorn has no USP register."""
+        self.uc.mem_write(MAGIC + 0x100, bytes.fromhex('4E60'))
+        self.uc.reg_write(UC_M68K_REG_SR, 0x2700)
+        self.uc.reg_write(UC_M68K_REG_A0, value)
+        self.uc.emu_start(MAGIC + 0x100, MAGIC + 0x102, count=1)
+
+    def usp(self):
+        self.uc.mem_write(MAGIC + 0x100, bytes.fromhex('4E68'))
+        self.uc.reg_write(UC_M68K_REG_SR, 0x2700)
+        self.uc.emu_start(MAGIC + 0x100, MAGIC + 0x102, count=1)
+        return self.uc.reg_read(UC_M68K_REG_A0)
 
     def frame(self):
         """Plays one frame; returns (result, [(register, value), ...])."""
@@ -314,10 +336,11 @@ TACR, TADR = 0xFFFFFA19, 0xFFFFFA1F
 TCDCR, TDDR = 0xFFFFFA1D, 0xFFFFFA25
 
 
-def run_effects() -> str:
+def run_effects(super_host: bool = False) -> str:
     """The effect stage, frame by frame: a SID held and released on slot 1,
     a drum started on slot 2 - checking the timer writes, the sanitized
-    burst, the forced mixer, and the drum skeleton by direct invocation."""
+    burst, the forced mixer, and the drum skeleton by direct invocation.
+    Run twice: the stack build and the YX6_SUPER_HOST (USP) build."""
     frames = 72
     values = [bytearray(frames) for _ in range(16)]
     for frame in range(frames):
@@ -367,9 +390,21 @@ def run_effects() -> str:
     drums = (bytes([0x80, 0x40]), bytes([0x10, 0xF0, 0x50]))
 
     packed = pack(gen_ym.ym6_file(frames, values, drums=drums), 960, 24, 0, 1)
-    player = Player(packed, workspace_size(960))
-    if player.init() != 0:
-        return 'effects: YX6_init rejected the file'
+    player = Player(packed, workspace_size(960), super_host=super_host)
+    player.set_usp(0x00012345)          # a sentinel the session must not lose:
+    if player.init() != 0:              # the USP-parking drum tick clobbers
+        return 'effects: YX6_init rejected the file'    # it, stop hands it back
+
+    # The two tick-handler blocks must be byte-congruent: the slot machine
+    # reaches every patched operand through offsets measured on the A block.
+    sym = player.symbols
+    for a, d in (('yx6_drumA_clear', 'yx6_drumD_clear'),
+                 ('yx6_sidA_on', 'yx6_sidD_on'),
+                 ('yx6_sidA_off', 'yx6_sidD_off'),
+                 ('yx6_buzzA', 'yx6_buzzD'),
+                 ('yx6_parkA', 'yx6_parkD')):
+        if sym[a] - sym['yx6_drumA'] != sym[d] - sym['yx6_drumD']:
+            return f'effects: {a}/{d} broke the ISR block congruence'
 
     code = CODE + player.symbols['yx6_drumD']
     clear = CODE + player.symbols['yx6_drumD_clear']
@@ -461,7 +496,7 @@ def run_effects() -> str:
         return f'effects: the marker tick wrote {pairs}'
     if player.uc.mem_read(flags, 1)[0] != 2:
         return 'effects: the marker did not drop the flag'
-    if player.mfp[-2:] != [(TCDCR, 0), (0xFFFFFA11, 0)]:
+    if player.mfp[-2:] != [(TCDCR, 0), (0xFFFFFA11, 0xEF)]:
         return f'effects: the marker tick programmed {player.mfp[-2:]}'
 
     # The scene's drum on slot 1, the same way: sample 0 is 0x80, 0x40 ->
@@ -476,7 +511,7 @@ def run_effects() -> str:
         return f'effects: slot 1 marker tick wrote {pairs}'
     if player.uc.mem_read(flags, 1)[0] != 0:
         return 'effects: slot 1 marker did not drop the flag'
-    if player.mfp[-2:] != [(TACR, 0), (0xFFFFFA0F, 0)]:
+    if player.mfp[-2:] != [(TACR, 0), (0xFFFFFA0F, 0xDF)]:
         return f'effects: slot 1 marker programmed {player.mfp[-2:]}'
 
     # The SID square from frame 5's start: the loud half writes the volume
@@ -501,6 +536,12 @@ def run_effects() -> str:
     _, writes = player.frame()
     if dict(writes).get(7) != 0x38 | 0xC0:
         return 'effects: the mixer stayed forced after the drum'
+
+    # The drum ticks above parked a0 in the USP on the super-host build;
+    # YX6_stop must hand the USP back exactly as YX6_init found it.
+    player.stop()
+    if player.usp() != 0x00012345:
+        return f'effects: the session lost the USP ({player.usp():#x})'
     return ''
 
 
@@ -567,12 +608,15 @@ def main() -> int:
             where = 'plays once' if loop is None else f'loops at {loop}'
             print(f'OK   {label:26s} ({frames} frames, {ring}-byte rings, {where})')
 
-    problem = run_effects()
-    if problem:
-        print(f'FAIL {problem}')
-        failures += 1
-    else:
-        print('OK   the effect stage         (timers, sanitize, mixer, skeleton)')
+    for super_host in (False, True):
+        problem = run_effects(super_host)
+        if problem:
+            build = 'USP build: ' if super_host else ''
+            print(f'FAIL {build}{problem}')
+            failures += 1
+        else:
+            label = 'the effect stage, USP a0' if super_host else 'the effect stage'
+            print(f'OK   {label:26s} (timers, sanitize, mixer, skeleton)')
 
     print('ALL YX6 PLAYER TESTS PASS' if not failures else f'{failures} FAILURES')
     return 1 if failures else 0
