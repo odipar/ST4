@@ -53,3 +53,6 @@ csharp/**/obj/
 .sndh_work/
 .ym_work/
 .prg_work/
+
+# the YM player rig caches packed corpora and its SNDH build here
+yx6/test/emu/.work/

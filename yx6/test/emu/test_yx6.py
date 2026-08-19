@@ -72,18 +72,19 @@ SCRATCH_REGISTERS = (UC_M68K_REG_D1, UC_M68K_REG_D2, UC_M68K_REG_D3,
 _ASSEMBLED = {}
 
 
-def assemble(unit: int = 1, super_host: bool = False):
+def assemble(unit: int = 1, super_host: bool = False, perf: bool = False):
     """YX6.S plus the decoder, built for one unit size, as one flat blob.
     super_host builds the YX6_SUPER_HOST variant: the drum tick parks a0 in
-    the USP instead of the stack."""
-    key = (unit, super_host)
+    the USP instead of the stack. perf builds the raster monitor in."""
+    key = (unit, super_host, perf)
     if key in _ASSEMBLED:
         return _ASSEMBLED[key]
     SCRATCH.mkdir(exist_ok=True)
-    tag = f'{unit}u' if super_host else f'{unit}'
+    tag = f'{unit}{"u" if super_host else ""}{"p" if perf else ""}'
     source = SCRATCH / f'link{tag}.S'
     source.write_text(f'ST4_UNIT    equ     {unit}\n'
                       + ('YX6_SUPER_HOST equ  1\n' if super_host else '')
+                      + ('YX6_PERF    equ     1\n' if perf else '')
                       + '        include "YX6.S"\n'
                       '        include "ST4_wrap.S"\n')
     binary = SCRATCH / f'link{tag}.bin'
@@ -143,7 +144,7 @@ class Player:
     """One emulated ST running YX6 over a packed tune."""
 
     def __init__(self, packed: bytes, workspace_size: int, unit: int = 1,
-                 super_host: bool = False):
+                 super_host: bool = False, perf: bool = False):
         self.uc = Uc(UC_ARCH_M68K, UC_MODE_BIG_ENDIAN)
         self.uc.ctl_set_cpu_model(UC_CPU_M68K_M68000)
         for base, size in ((CODE, 0x4000), (FILE, 0x30000), (WORK, 0x40000),
@@ -151,7 +152,7 @@ class Player:
                            (PSG_PAGE, 0x1000), (MFP_PAGE, 0x1000),
                            (VECTORS, 0x1000)):
             self.uc.mem_map(base, size)
-        self.binary, self.symbols = assemble(unit, super_host)
+        self.binary, self.symbols = assemble(unit, super_host, perf)
         self.uc.mem_write(CODE, self.binary)
         # Odd-but-even addresses on purpose: the 68000 needs word alignment,
         # not long alignment, and the player must not assume more.
@@ -162,10 +163,14 @@ class Player:
         self.uc.mem_write(self.work, b'\xA5' * workspace_size)
         self.writes = []
         self.mfp = []                   # (address, value) writes to the MFP
+        self.palette = []               # word writes to $FFFF8240 (perf)
         self.stray = []
         self.uc.hook_add(UC_HOOK_MEM_WRITE, self._watch)
 
     def _watch(self, uc, access, address, size, value, data):
+        if address == 0xFFFF8240:       # the raster monitor's background
+            self.palette.append(value)
+            return
         if PSG_PAGE <= address < PSG_PAGE + 0x1000:
             # A wide write lands one byte per bus lane: a move.l to $8800 is
             # the select at $8800 and the data at $8802, exactly as the chip
@@ -323,7 +328,7 @@ TACR, TADR = 0xFFFFFA19, 0xFFFFFA1F
 TCDCR, TDDR = 0xFFFFFA1D, 0xFFFFFA25
 
 
-def run_effects(super_host: bool = False) -> str:
+def run_effects(super_host: bool = False, perf: bool = False) -> str:
     """The effect stage, frame by frame: a SID held and released on slot 1,
     a drum started on slot 2 - checking the timer writes, the sanitized
     burst, the forced mixer, and the drum skeleton by direct invocation.
@@ -385,7 +390,8 @@ def run_effects(super_host: bool = False) -> str:
     drums = (bytes([0x80, 0x40]), bytes([0x10, 0xF0, 0x50]))
 
     packed = pack(gen_ym.ym6_file(frames, values, drums=drums), 960, 24, 0, 1)
-    player = Player(packed, workspace_size(960), super_host=super_host)
+    player = Player(packed, workspace_size(960), super_host=super_host,
+                    perf=perf)
     if player.init() != 0:
         return 'effects: YX6_init rejected the file'
 
@@ -459,7 +465,8 @@ def run_effects(super_host: bool = False) -> str:
                 return 'effects: frame 30 wrote the drummed volume'  # gated
             if registers.get(7) != 0x38 | 0xC0 | 0x24:
                 return f'effects: frame 30 mixer {registers.get(7):#x}'
-            position = int.from_bytes(player.uc.mem_read(code + 8, 4), 'big')
+            position = int.from_bytes(player.uc.mem_read(
+                code + player.symbols['ISR_DRUM_PTR'], 4), 'big')
             drum = int.from_bytes(player.uc.mem_read(
                 player.file + Yx6_DRUM_TABLE(player) + 6, 4), 'big')
             if position != player.file + drum:
@@ -469,7 +476,8 @@ def run_effects(super_host: bool = False) -> str:
                 return f'effects: frame 31 programmed {mfp}'
             if 10 in registers:
                 return 'effects: frame 31 wrote the drummed volume'
-            position = int.from_bytes(player.uc.mem_read(code + 8, 4), 'big')
+            position = int.from_bytes(player.uc.mem_read(
+                code + player.symbols['ISR_DRUM_PTR'], 4), 'big')
             drum = int.from_bytes(player.uc.mem_read(
                 player.file + Yx6_DRUM_TABLE(player), 4), 'big')
             if position != player.file + drum:
@@ -531,11 +539,18 @@ def run_effects(super_host: bool = False) -> str:
         return 'effects: slot 1 marker did not drop the flag'
     if player.mfp[-2:] != [(TACR, 0), (0xFFFFFA0F, 0xDF)]:
         return f'effects: slot 1 marker programmed {player.mfp[-2:]}'
+    acc = lambda: int.from_bytes(
+        player.uc.mem_read(CODE + player.symbols['yx6_perf_acc'], 2), 'big') \
+        if perf else 0
+    if perf and acc() != 21 + 21 + 23:  # two sample ticks and the marker
+        return f'effects: the drum ticks accumulated {acc()}, not 65'
 
     # And the next frame plays voice B's volume from the ring again.
     _, writes = player.frame()
     if 9 not in dict(writes):
         return 'effects: slot 1 marker kept the burst gate shut'
+    if perf and acc() != 0:
+        return 'effects: the frame did not clear the perf accumulator'
 
     # The SID square from frame 5's start: the loud half writes the volume
     # and installs the quiet half one word into the vector, and back.
@@ -554,11 +569,29 @@ def run_effects(super_host: bool = False) -> str:
     pairs = invoke_isr(player, CODE + player.symbols['yx6_buzzA'])
     if pairs != [(13, 11)]:
         return f'effects: the buzzer tick wrote {pairs}'
+    if perf and acc() != 15 + 15 + 12:  # the SID halves and the buzzer
+        return f'effects: the ticks accumulated {acc()}, not 42'
 
     # And the next frame plays a clean mixer again.
     _, writes = player.frame()
     if dict(writes).get(7) != 0x38 | 0xC0:
         return 'effects: the mixer stayed forced after the drum'
+
+    # The monitor's color protocol: every frame paints the yellow timer bar,
+    # then its own red, then puts the original back; every tick paints its
+    # timer's color and restores. Timer A green, Timer D blue, and the last
+    # write always hands the original ($0000 here) back.
+    if perf:
+        seen = player.palette
+        if set(seen) != {0x770, 0x700, 0x070, 0x007, 0}:
+            return f'effects: the monitor painted {sorted(set(seen))}'
+        if seen.count(0x770) != seen.count(0x700):
+            return 'effects: a timer bar without its frame band'
+        if seen[-1] != 0 or seen.count(0) != len(seen) - 2 * seen.count(0x770) \
+                - seen.count(0x070) - seen.count(0x007):
+            return 'effects: the monitor did not restore the background'
+    elif player.palette:
+        return 'effects: the monitor painted in a build without it'
 
     # The library's stop contract: it quiesces its claim - timers stopped,
     # their interrupt bits disabled and masked - and restores nothing; the
@@ -825,14 +858,14 @@ def main() -> int:
     else:
         print('OK   the SNDH container       (subtunes, handback, re-init)')
 
-    for super_host in (False, True):
-        problem = run_effects(super_host)
+    for super_host, perf in ((False, False), (True, False), (False, True)):
+        problem = run_effects(super_host, perf)
+        build = 'USP a0' if super_host else 'PERF build' if perf else ''
         if problem:
-            build = 'USP build: ' if super_host else ''
-            print(f'FAIL {build}{problem}')
+            print(f'FAIL {build}: {problem}' if build else f'FAIL {problem}')
             failures += 1
         else:
-            label = 'the effect stage, USP a0' if super_host else 'the effect stage'
+            label = 'the effect stage' + (', ' + build if build else '')
             print(f'OK   {label:26s} (timers, sanitize, mixer, skeleton)')
 
     print('ALL YX6 PLAYER TESTS PASS' if not failures else f'{failures} FAILURES')

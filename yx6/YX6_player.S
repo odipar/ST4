@@ -195,12 +195,13 @@ puts:
         rts
 
         .data
-m_banner:   dc.b    "YX6 player v0.7 - ZX1 streaming through ST4",13,10,0
-m_playing:  dc.b    "Playing. SPACE stops"
-        .if YX6_TUNES-1
-            dc.b    ", 1-",'0'+YX6_TUNES," picks a subtune"
+m_banner:   dc.b    "YX6 player v0.7 - streaming through ST4",13,10,0
+m_playing:  dc.b    "Playing. SPACE stops."
+        .if YX6_TUNES-1                 ; a line of its own: the console is
+            dc.b    13,10               ; 40 columns and one line ran over
+            dc.b    "1-",'0'+YX6_TUNES," picks a subtune."
         .endif
-            dc.b    ".",13,10,0
+            dc.b    13,10,0
         .if YX6_EXIT_MARKER
 m_marker:   dc.b    "YX6DONE.MRK",0
         .endif

@@ -46,6 +46,8 @@ yx6/play.sh song.ym                   # 960-byte rings, 24 values per call
 yx6/play.sh -n256 song.ym             # smaller rings: less RAM, worse ratio
 yx6/play.sh -n2048 -c32 song.ym       # longer calls: cheaper on average
 yx6/play.sh -o song.ym                # play once instead of looping
+yx6/play.sh -perf song.ym             # build the raster monitor in
+yx6/play.sh one.ym two.ym three.ym    # a set: number keys pick the subtune
 ```
 
 [play.sh](play.sh) packs the tune, builds a player around it and starts Hatari
@@ -53,7 +55,10 @@ with sound on. **Press SPACE in the Hatari window to stop**: the program exits,
 and the script closes the emulator behind it — nothing asks you to confirm
 anything. Point it at your own install with `HATARI=` and `TOS=`. Everything it
 builds is kept next to the tune in `<name>-n<ring>-c<chunk>/`, so you can
-compare two ring sizes by ear and keep both.
+compare two ring sizes by ear and keep both. Hand it several tunes and they
+become one program's subtunes — packed with one configuration, titled and
+named from their own YM headers, switched with the number keys — in a
+`<first name>+<n more>-n<ring>-c<chunk>/` directory of their own.
 
 Or do the steps yourself:
 
@@ -65,6 +70,23 @@ yx6/mkprg.sh song.yx6                 # -> SONG.PRG, runnable on an ST
 `mkprg.sh -m` builds the same program but has it drop a `YX6DONE.MRK` file as
 it exits; that is how `play.sh` knows the tune has stopped. A plain build never
 touches the disk.
+
+`-perf` — on play.sh, mkprg.sh, mksndh.sh and ym_sndh.sh alike — assembles
+the raster monitor in (`YX6_PERF equ 1`): the frame step paints the
+background red for exactly as long as it runs, so its cost reads directly in
+scanlines (one scanline = 512 cycles), and every timer tick paints its own
+sliver — Timer A green, Timer D blue — wherever the beam happens to be.
+Because ticks are far too short to count by eye, the handlers also tally an
+estimated cost, and the next frame burns it off as a solid yellow bar ahead
+of the red one: the timers' total for that frame, as one readable block. The
+frame step waits for the display to start before painting anything: the VBL
+fires dozens of lines above the visible screen, so an unsynced monitor draws
+its bands into the top border where you cannot see them. It syncs on the
+video address counter — which moves only while the chip is fetching pixels —
+with a bounded loop, so a host that calls the player mid-screen gives up
+rather than hangs, and the wait distorts nothing it measures. It is an estimate (10-cycle quanta, fixed per-tick costs), and it
+is free when off: the default build is byte-identical to one made before the
+option existed.
 
 ## The SNDH container
 
