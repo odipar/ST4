@@ -1194,14 +1194,21 @@ yx6_held:                               ; flags: 1 = reload the count, 2 =
 .done:
         rts
 
-yx6_sid_start:                          ; a fresh square starts on the loud
-        bsr.s   yx6_voice               ; half; retunes never come here
-        movea.l SD_ISR(a5),a2
-        move.w  d5,d1
-        lsr.w   #2,d1
-        addq.w  #8,d1                   ; the voice's volume register
+yx6_sid_start:                          ; a fresh square restarts at phase
+        bsr     yx6_voice               ; zero: the voice goes silent NOW,
+        movea.l SD_ISR(a5),a2           ; and the first tick - one timer
+        move.w  d5,d1                   ; period out - plays the loud half.
+        lsr.w   #2,d1                   ; Retunes never come here: a held
+        addq.w  #8,d1                   ; square's phase free-runs
         move.b  d1,ISR_SIDON_SEL(a2)
         move.b  d1,ISR_SIDOFF_SEL(a2)
+        lea     YX6_PSG,a1
+        move.w  sr,-(sp)                ; select and write are two bus
+        ori.w   #$0700,sr               ; cycles: no tick in between
+        move.b  d1,(a1)
+        clr.b   2(a1)                   ; the silent first half
+        move.w  (sp)+,sr
+        bsr     yx6_voice
         move.b  (a1),d1
         and.w   #15,d1
         move.b  d1,ISR_SID_VOL(a2)
@@ -1210,7 +1217,7 @@ yx6_sid_start:                          ; a fresh square starts on the loud
         bra.s   yx6_program
 
 yx6_sid_retune:                         ; the vector is NEVER touched: the
-        bsr.s   yx6_voice               ; square's phase lives through every
+        bsr     yx6_voice               ; square's phase lives through every
         move.b  (a1),d1                 ; retune, and through a resume after
         and.w   #15,d1                  ; a drum borrowed the voice
         movea.l SD_ISR(a5),a2

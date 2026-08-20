@@ -347,6 +347,8 @@ def run_effects(super_host: bool = False, perf: bool = False) -> str:
         values[1][frame] |= 0x10
         values[6][frame] |= 1 << 5
         values[14][frame] = 80 if frame >= 15 else 100
+    for frame in range(6, 15):                      # ...whose volume SLIDES:
+        values[8][frame] = 10 - (frame - 4) // 2    # the script must track it
     # The retune scene: the same SID slides across a prescaler boundary -
     # E $11 to $12 at frame 25 - as wobbling basses do many times a second.
     # The script emits SID_RETUNE: the timer reprograms, the vector is
@@ -433,11 +435,17 @@ def run_effects(super_host: bool = False, perf: bool = False) -> str:
                 return f'effects: frame 5 programmed {mfp}'
             if gate(0) != 0:
                 return 'effects: frame 5 left the SID voice open'
-        elif 6 <= frame <= 20 and frame != 15:      # held, nothing changed:
-            if mfp:                                 # not one write, not one
-                return f'effects: frame {frame} wrote {mfp}'    # action
+        elif 6 <= frame <= 20 and frame != 15:      # held: the slide patches
+            if mfp:                                 # the tick's immediate,
+                return f'effects: frame {frame} wrote {mfp}'    # never the MFP
             if 8 in registers:
                 return f'effects: frame {frame} wrote the SID voice volume'
+            want = 10 - (frame - 4) // 2 if frame <= 14 else 10
+            vol = player.uc.mem_read(
+                CODE + sym['yx6_drumA'] + sym['ISR_SID_VOL'], 1)[0]
+            if vol != want:
+                return (f'effects: frame {frame} tick volume {vol}, '
+                        f'the slide says {want}')
         elif frame == 15:                           # the count changed: a
             if mfp != [(TADR, 80)]:                 # HELD reload, data only
                 return f'effects: frame 15 wrote {mfp}'
@@ -446,13 +454,13 @@ def run_effects(super_host: bool = False, perf: bool = False) -> str:
                 return f'effects: frame 21 wrote {mfp}'         # the frame
             if 8 not in registers:
                 return 'effects: frame 21 kept the SID volume gate shut'
-        elif frame == 22:                           # the re-start finds the
-            if mfp != [(TACR, 0), (TADR, 90), (TACR, 1)]:   # vector intact:
-                return f'effects: frame 22 programmed {mfp}'    # a retune -
+        elif frame == 22:                           # a re-start is a FULL
+            if mfp != [(TACR, 0), (TADR, 90), (TACR, 1)]:   # start: the loud
+                return f'effects: frame 22 programmed {mfp}'    # half's phase
             vector = int.from_bytes(player.uc.mem_read(0x134, 4), 'big')
-            if vector != sid_on:                    # fr5 installed the loud
-                return ('effects: the resume replaced the vector with '
-                        f'{vector:#x}')             # half; nothing since
+            if vector != sid_on:                    # reset is part of the
+                return ('effects: the start did not install the loud half: '
+                        f'{vector:#x}')             # sound, as v1 played it
         elif frame in (23, 24):
             if mfp:
                 return f'effects: frame {frame} wrote {mfp}'
@@ -533,12 +541,13 @@ def run_effects(super_host: bool = False, perf: bool = False) -> str:
             if mfp:                                 # nothing at all - v1 spun
                 return f'effects: frame 49 wrote {mfp}'     # ~560 cycles here
         elif frame == 50:                           # the computed end: the
-            want = [(TCDCR, 0), (TDDR, 90), (TCDCR, 1)]     # SID resumes BY
-            if mfp != want:                         # RETUNE - phase intact
+            want = [(TCDCR, 0), (TDDR, 90), (TCDCR, 1)]     # SID re-STARTS -
+            if mfp != want:                         # deterministic, phase 0
                 return f'effects: frame 50 programmed {mfp}'
-            if 9 in registers:                      # reopened and re-muted
-                return 'effects: frame 50 wrote the re-owned volume'    # in one
-            if registers.get(7) != 0x38 | 0xC0:     # frame: net still muted
+            if registers.get(9) != 0:               # the start's own silence:
+                return ('effects: frame 50 volume '     # one quiet period,
+                        f'{registers.get(9)}, not the silent first half')
+            if registers.get(7) != 0x38 | 0xC0:
                 return f'effects: frame 50 mixer {registers.get(7):#x}'
         elif frame in (51, 52):
             if mfp:
