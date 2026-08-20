@@ -52,8 +52,8 @@ PSG = 0xFFFF8800
 PSG_PAGE = 0xFFFF8000
 MFP_PAGE = 0xFFFFF000           # $FFFFFAxx: the effect stage's timers
 VECTORS = 0x000000              # $110/$134: the two timer vectors
-STREAMS = 18                    # what a v4 file carries
-YX6_FIXED = 70 + STREAMS * 64   # the workspace before the rings
+STREAMS = 19                    # what a v4 file carries
+YX6_FIXED = 50 + STREAMS * 64   # the workspace before the rings
 
 QUICK = '--quick' in sys.argv
 
@@ -329,10 +329,12 @@ TCDCR, TDDR = 0xFFFFFA1D, 0xFFFFFA25
 
 
 def run_effects(super_host: bool = False, perf: bool = False) -> str:
-    """The effect stage, frame by frame: a SID held and released on slot 1,
-    a drum started on slot 2 - checking the timer writes, the sanitized
-    burst, the forced mixer, and the drum skeleton by direct invocation.
-    Run twice: the stack build and the YX6_SUPER_HOST (USP) build."""
+    """The effect stage, frame by frame, against the compiled script: a SID
+    held, reloaded and retuned on slot 1, drums triggered and retriggered on
+    slot 2, a buzzer, the same-voice arbitration - the same scene the v1
+    interpreter was tested on, asserted at v2's frame-aligned edges. The
+    tick handlers are then driven by direct invocation, after the walk, so
+    the script and the hand-run ticks never disagree about state."""
     frames = 72
     values = [bytearray(frames) for _ in range(16)]
     for frame in range(frames):
@@ -347,8 +349,8 @@ def run_effects(super_host: bool = False, perf: bool = False) -> str:
         values[14][frame] = 80 if frame >= 15 else 100
     # The retune scene: the same SID slides across a prescaler boundary -
     # E $11 to $12 at frame 25 - as wobbling basses do many times a second.
-    # The player must retune the timer WITHOUT resetting the square's phase:
-    # the vector keeps whichever half was installed.
+    # The script emits SID_RETUNE: the timer reprograms, the vector is
+    # untouched, the square keeps whichever half was installed.
     for frame in range(22, 27):
         values[1][frame] |= 0x10
         values[6][frame] |= (1 if frame < 25 else 2) << 5
@@ -358,17 +360,17 @@ def run_effects(super_host: bool = False, perf: bool = False) -> str:
     values[15][30] = 122                            # ...at 5036 Hz
     # Real dumps trigger drums on back-to-back frames - an attack sample,
     # then a body sample - so frame 31 codes the same drum again with a
-    # different number underneath: a held code must retrigger.
+    # different number underneath: the script emits a fresh DRUM either way.
     values[3][31] = 0x70
     values[8][31] |= 1 << 5
     values[15][31] = 122
     # The ring-integrity trap: an 11-byte R10 pattern spanning the drum frame,
-    # repeated 30 frames later - the packer emits a match that copies the
-    # sanitized byte's ring position, so frame 60 only plays right if the
-    # effect stage gave the ring its byte back after the burst. Frame 30's
-    # value doubles as the drum number: sample 1.
-    pattern = [3, 4, 5, 6, 7, 1, 0, 6, 5, 4, 3]     # 31's byte doubles as the
-    for i, v in enumerate(pattern):                 # retrigger's number: 0
+    # repeated 30 frames later - the packer emits a match that copies those
+    # ring positions. v2 never edits the ring at runtime, so the trap now
+    # simply proves the drum number travels in the ring unharmed. Frame 30's
+    # value doubles as the drum number: sample 1; frame 31's names sample 0.
+    pattern = [3, 4, 5, 6, 7, 1, 0, 6, 5, 4, 3]
+    for i, v in enumerate(pattern):
         values[10][25 + i] = v
         values[10][55 + i] = v
     for frame in range(40, 43):                     # sync-buzzer voice B, 123 Hz
@@ -376,9 +378,10 @@ def run_effects(super_host: bool = False, perf: bool = False) -> str:
         values[6][frame] |= 6 << 5
         values[14][frame] = 200
     # The arbitration scene: a SID runs on voice B from slot 2, and at frame
-    # 48 a drum fires on the SAME voice from slot 1. The drum must stop the
-    # SID's timer and own the volume register; the SID retries every frame
-    # while the voice stays flagged, silently.
+    # 48 a drum fires on the SAME voice from slot 1. The script compiled the
+    # whole exchange: DRUM_ARB stops the SID's timer first, the suppressed
+    # SID costs nothing at all, and it resumes BY RETUNE - phase intact - at
+    # the frame after the drum's computed end.
     for frame in range(45, 53):
         values[3][frame] |= 0x20
         values[8][frame] |= 1 << 5
@@ -395,51 +398,62 @@ def run_effects(super_host: bool = False, perf: bool = False) -> str:
     if player.init() != 0:
         return 'effects: YX6_init rejected the file'
 
-    # The two tick-handler blocks must be byte-congruent: the slot machine
-    # reaches every patched operand through offsets measured on the A block.
+    # The two tick-handler blocks must be byte-congruent: the action
+    # handlers reach every patched operand through offsets measured on the
+    # A block.
     sym = player.symbols
-    for a, d in (('yx6_drumA_clear', 'yx6_drumD_clear'),
-                 ('yx6_drumA_gate', 'yx6_drumD_gate'),
-                 ('yx6_sidA_on', 'yx6_sidD_on'),
+    for a, d in (('yx6_sidA_on', 'yx6_sidD_on'),
                  ('yx6_sidA_off', 'yx6_sidD_off'),
                  ('yx6_buzzA', 'yx6_buzzD'),
                  ('yx6_parkA', 'yx6_parkD')):
         if sym[a] - sym['yx6_drumA'] != sym[d] - sym['yx6_drumD']:
             return f'effects: {a}/{d} broke the ISR block congruence'
 
-    code = CODE + player.symbols['yx6_drumD']
-    clear = CODE + player.symbols['yx6_drumD_clear']
-    flags = CODE + player.symbols['yx6_drums']
-    sid_on = CODE + player.symbols['yx6_sidA_on']
-    sid_off = CODE + player.symbols['yx6_sidA_off']
+    drum_d = CODE + sym['yx6_drumD']
+    sid_on = CODE + sym['yx6_sidA_on']
+    sid_off = CODE + sym['yx6_sidA_off']
+
+    def gate(voice):
+        """The voice's burst-gate displacement word: 2 open, 0 muted."""
+        at = CODE + sym['yx6_wB'] + 8 + 10 * voice
+        return int.from_bytes(player.uc.mem_read(at, 2), 'big')
+
+    acc = lambda: int.from_bytes(
+        player.uc.mem_read(CODE + sym['yx6_perf_acc'], 2), 'big') \
+        if perf else 0
+
     for frame in range(72):
-        if frame == 25:                             # the square sits in its
-            invoke_isr(player, sid_on)              # quiet half when the
-        if frame == 35:                             # the drum plays out, tick
-            problem = drum_ticks(player, code, flags)   # by tick, mid-run:
-            if problem:                             # the marker drops the
-                return problem                      # flag and reopens the
-        _, writes = player.frame()                  # burst gate
+        if frame == 25:                             # flip the square to its
+            invoke_isr(player, sid_on)              # quiet half: the retune
+        _, writes = player.frame()                  # below must preserve it
         mfp = player.mfp
         registers = dict(writes)
         if frame == 5:                              # SID start: stop, count, run
             if mfp != [(TACR, 0), (TADR, 100), (TACR, 1)]:
                 return f'effects: frame 5 programmed {mfp}'
-        elif 6 <= frame <= 20 and frame != 15:      # held, same count: silence -
-            if mfp:                                 # a redundant reload can land
-                return f'effects: frame {frame} wrote {mfp}'
-            if 8 in registers:                      # the square owns R8: the
+            if gate(0) != 0:
+                return 'effects: frame 5 left the SID voice open'
+        elif 6 <= frame <= 20 and frame != 15:      # held, nothing changed:
+            if mfp:                                 # not one write, not one
+                return f'effects: frame {frame} wrote {mfp}'    # action
+            if 8 in registers:
                 return f'effects: frame {frame} wrote the SID voice volume'
-        elif frame == 15:                           # while the counter passes 01
-            if mfp != [(TADR, 80)]:                 # a changed count does reload
+        elif frame == 15:                           # the count changed: a
+            if mfp != [(TADR, 80)]:                 # HELD reload, data only
                 return f'effects: frame 15 wrote {mfp}'
-        elif frame == 21:                           # released: stopped
-            if mfp != [(TACR, 0)]:
-                return f'effects: frame 21 wrote {mfp}'
-        elif frame == 22:                           # the scene's SID start
-            if mfp != [(TACR, 0), (TADR, 90), (TACR, 1)]:
-                return f'effects: frame 22 programmed {mfp}'
-        elif frame in (23, 24):                     # held, same count
+        elif frame == 21:                           # released: stopped, and
+            if mfp != [(TACR, 0)]:                  # the gate reopens with
+                return f'effects: frame 21 wrote {mfp}'         # the frame
+            if 8 not in registers:
+                return 'effects: frame 21 kept the SID volume gate shut'
+        elif frame == 22:                           # the re-start finds the
+            if mfp != [(TACR, 0), (TADR, 90), (TACR, 1)]:   # vector intact:
+                return f'effects: frame 22 programmed {mfp}'    # a retune -
+            vector = int.from_bytes(player.uc.mem_read(0x134, 4), 'big')
+            if vector != sid_on:                    # fr5 installed the loud
+                return ('effects: the resume replaced the vector with '
+                        f'{vector:#x}')             # half; nothing since
+        elif frame in (23, 24):
             if mfp:
                 return f'effects: frame {frame} wrote {mfp}'
         elif frame == 25:                           # prescaler-only change:
@@ -455,47 +469,46 @@ def run_effects(super_host: bool = False, perf: bool = False) -> str:
         elif frame == 27:                           # the scene's release
             if mfp != [(TACR, 0)]:
                 return f'effects: frame 27 wrote {mfp}'
-        elif frame == 28:                           # released: the burst writes
-            if 8 not in registers:                  # the voice again
-                return 'effects: frame 28 kept the SID volume gate shut'
         elif frame == 30:                           # the drum start, slot 2
             if mfp != [(TCDCR, 0), (TDDR, 122), (TCDCR, 1)]:
                 return f'effects: frame 30 programmed {mfp}'
-            if 10 in registers:                     # the drum owns R10 now:
-                return 'effects: frame 30 wrote the drummed volume'  # gated
-            if registers.get(7) != 0x38 | 0xC0 | 0x24:
+            if 10 in registers:                     # the drum owns R10 now
+                return 'effects: frame 30 wrote the drummed volume'
+            if registers.get(7) != 0x38 | 0xC0 | 0x24:  # baked, not forced
                 return f'effects: frame 30 mixer {registers.get(7):#x}'
             position = int.from_bytes(player.uc.mem_read(
-                code + player.symbols['ISR_DRUM_PTR'], 4), 'big')
+                drum_d + player.symbols['ISR_DRUM_PTR'], 4), 'big')
             drum = int.from_bytes(player.uc.mem_read(
                 player.file + Yx6_DRUM_TABLE(player) + 6, 4), 'big')
             if position != player.file + drum:
-                return 'effects: the skeleton points at the wrong sample'
+                return 'effects: the trigger points at the wrong sample'
         elif frame == 31:                           # the same code again: a
-            if mfp != [(TCDCR, 0), (TDDR, 122), (TCDCR, 1)]:    # fresh trigger
+            if mfp != [(TCDCR, 0), (TDDR, 122), (TCDCR, 1)]:    # fresh DRUM
                 return f'effects: frame 31 programmed {mfp}'
-            if 10 in registers:
-                return 'effects: frame 31 wrote the drummed volume'
             position = int.from_bytes(player.uc.mem_read(
-                code + player.symbols['ISR_DRUM_PTR'], 4), 'big')
+                drum_d + player.symbols['ISR_DRUM_PTR'], 4), 'big')
             drum = int.from_bytes(player.uc.mem_read(
                 player.file + Yx6_DRUM_TABLE(player), 4), 'big')
             if position != player.file + drum:
                 return 'effects: the retrigger points at the wrong sample'
-        elif frame == 32:                           # the drum outlives its code
-            if mfp:
+        elif frame == 32:                           # the drum outlives its
+            if mfp:                                 # code; the bake holds
                 return f'effects: frame 32 wrote {mfp}'
             if registers.get(7) != 0x38 | 0xC0 | 0x24:
                 return 'effects: frame 32 released the mixer too early'
-        elif frame == 36:                           # the marker ran at 35: the
-            if registers.get(7) != 0x38 | 0xC0:     # flag dropped, the mixer
-                return 'effects: frame 36 mixer still forced'   # is clean...
-            if 10 not in registers:                 # ...and the voice's burst
-                return 'effects: frame 36 kept the drum gate shut'  # is back
+            if 10 in registers:
+                return 'effects: frame 32 wrote the drummed volume'
+        elif frame == 33:                           # the computed end, frame
+            if mfp:                                 # aligned: gate and mixer
+                return f'effects: frame 33 wrote {mfp}'     # come back as one
+            if registers.get(7) != 0x38 | 0xC0:
+                return 'effects: frame 33 mixer still forced'
+            if 10 not in registers:
+                return 'effects: frame 33 kept the drum gate shut'
         elif frame == 40:                           # buzzer start on slot 1
             if mfp != [(TACR, 0), (TADR, 200), (TACR, 6)]:
                 return f'effects: frame 40 programmed {mfp}'
-        elif frame in (41, 42):                     # held, same count: silence
+        elif frame in (41, 42):                     # held, nothing changed
             if mfp:
                 return f'effects: frame {frame} wrote {mfp}'
         elif frame == 43:
@@ -504,83 +517,98 @@ def run_effects(super_host: bool = False, perf: bool = False) -> str:
         elif frame == 45:                           # the scene's SID, slot 2
             if mfp != [(TCDCR, 0), (TDDR, 90), (TCDCR, 1)]:
                 return f'effects: frame 45 programmed {mfp}'
-        elif frame in (46, 47):                     # the scene's SID holds
-            if 9 in registers:                      # voice B: its volume is
-                return f'effects: frame {frame} wrote the gated volume'  # gated
-        elif frame == 48:                           # the same-voice drum: stops
-            want = [(TCDCR, 0),                     # the SID's timer first,
-                    (TACR, 0), (TADR, 60), (TACR, 1)]   # then arms its own
+        elif frame in (46, 47):                     # held: its volume is gated
+            if 9 in registers:
+                return f'effects: frame {frame} wrote the gated volume'
+        elif frame == 48:                           # DRUM_ARB: the SID's
+            want = [(TCDCR, 0),                     # timer stops FIRST,
+                    (TACR, 0), (TADR, 60), (TACR, 1)]   # then the drum arms
             if mfp != want:
                 return f'effects: frame 48 programmed {mfp}'
-            if 9 in registers:                      # the drum holds the gate:
+            if 9 in registers:
                 return 'effects: frame 48 wrote the drummed volume'
-            if registers.get(7) != 0x38 | 0xC0 | 0x12:  # only voice B: C's
-                return f'effects: frame 48 mixer {registers.get(7):#x}'    # flag fell at 35
+            if registers.get(7) != 0x38 | 0xC0 | 0x12:
+                return f'effects: frame 48 mixer {registers.get(7):#x}'
+        elif frame == 49:                           # the suppressed SID costs
+            if mfp:                                 # nothing at all - v1 spun
+                return f'effects: frame 49 wrote {mfp}'     # ~560 cycles here
+        elif frame == 50:                           # the computed end: the
+            want = [(TCDCR, 0), (TDDR, 90), (TCDCR, 1)]     # SID resumes BY
+            if mfp != want:                         # RETUNE - phase intact
+                return f'effects: frame 50 programmed {mfp}'
+            if 9 in registers:                      # reopened and re-muted
+                return 'effects: frame 50 wrote the re-owned volume'    # in one
+            if registers.get(7) != 0x38 | 0xC0:     # frame: net still muted
+                return f'effects: frame 50 mixer {registers.get(7):#x}'
+        elif frame in (51, 52):
+            if mfp:
+                return f'effects: frame {frame} wrote {mfp}'
+        elif frame == 53:                           # the resumed SID releases
+            if mfp != [(TCDCR, 0)]:
+                return f'effects: frame 53 wrote {mfp}'
+            if 9 not in registers:
+                return 'effects: frame 53 kept the voice gate shut'
         elif mfp:
             return f'effects: frame {frame} unexpectedly wrote {mfp}'
         if frame == 60 and registers.get(10) != 1:
             return (f'effects: frame 60 played {registers.get(10)} - the ring '
-                    'lost the byte the sanitize borrowed')
+                    'did not keep the byte the drum number rode in on')
 
-    if player.uc.mem_read(flags, 1)[0] != 2:
-        return 'effects: only voice B should still be flagged after the loop'
+    # Both drums, tick by tick, by direct invocation: frame 31's on Timer D
+    # (voice C), frame 48's on Timer A (voice B). Sample 0 is 0x80, 0x40 ->
+    # nibbles 8, 4, then the marker parks the volume and stops the timer -
+    # and nothing else: the script already scheduled the gate and mixer
+    # edges at the frame boundary.
+    problem = drum_ticks(player, drum_d, 10, TCDCR, 0xFFFFFA11, 0xEF)
+    if problem:
+        return problem
+    problem = drum_ticks(player, CODE + sym['yx6_drumA'], 9, TACR, 0xFFFFFA0F, 0xDF)
+    if problem:
+        return problem
+    if perf and acc() != 2 * (21 + 21 + 23):    # both drums' playouts
+        return f'effects: the drum ticks accumulated {acc()}, not 130'
 
-    # The scene's drum on slot 1, tick by tick: sample 0 is 0x80, 0x40 ->
-    # nibbles 8, 4 on voice B's register, then its marker parks Timer A.
-    code = CODE + player.symbols['yx6_drumA']
-    for tick, value in enumerate((8, 4)):
-        pairs = invoke_isr(player, code)
-        if pairs != [(9, value)]:
-            return f'effects: slot 1 drum tick {tick} wrote {pairs}'
-    pairs = invoke_isr(player, code)
-    if pairs != [(9, 0x80), (9, 0x0D)]:
-        return f'effects: slot 1 marker tick wrote {pairs}'
-    if player.uc.mem_read(flags, 1)[0] != 0:
-        return 'effects: slot 1 marker did not drop the flag'
-    if player.mfp[-2:] != [(TACR, 0), (0xFFFFFA0F, 0xDF)]:
-        return f'effects: slot 1 marker programmed {player.mfp[-2:]}'
-    acc = lambda: int.from_bytes(
-        player.uc.mem_read(CODE + player.symbols['yx6_perf_acc'], 2), 'big') \
-        if perf else 0
-    if perf and acc() != 21 + 21 + 23:  # two sample ticks and the marker
-        return f'effects: the drum ticks accumulated {acc()}, not 65'
-
-    # And the next frame plays voice B's volume from the ring again.
-    _, writes = player.frame()
-    if 9 not in dict(writes):
-        return 'effects: slot 1 marker kept the burst gate shut'
-    if perf and acc() != 0:
-        return 'effects: the frame did not clear the perf accumulator'
-
-    # The SID square from frame 5's start: the loud half writes the volume
-    # and installs the quiet half one word into the vector, and back.
-    sid_on = CODE + player.symbols['yx6_sidA_on']
-    sid_off = CODE + player.symbols['yx6_sidA_off']
-    pairs = invoke_isr(player, sid_on)
-    vector = int.from_bytes(player.uc.mem_read(0x136, 2), 'big')
-    if pairs != [(8, 10)] or vector != (sid_off & 0xFFFF):
+    # The SID square: the loud half writes the volume and installs the quiet
+    # half as a whole vector, and back.
+    pairs = invoke_isr(player, sid_on)              # the A block still holds
+    vector = int.from_bytes(player.uc.mem_read(0x134, 4), 'big')
+    if pairs != [(8, 10)] or vector != sid_off:     # frame 5's voice A and
         return f'effects: the loud half wrote {pairs}, vector {vector:#x}'
-    pairs = invoke_isr(player, sid_off)
-    vector = int.from_bytes(player.uc.mem_read(0x136, 2), 'big')
-    if pairs != [(8, 0)] or vector != (sid_on & 0xFFFF):
+    pairs = invoke_isr(player, sid_off)             # frame 25's volume
+    vector = int.from_bytes(player.uc.mem_read(0x134, 4), 'big')
+    if pairs != [(8, 0)] or vector != sid_on:
         return f'effects: the quiet half wrote {pairs}, vector {vector:#x}'
 
     # And the buzzer from frame 40: every tick rewrites the shape to R13.
-    pairs = invoke_isr(player, CODE + player.symbols['yx6_buzzA'])
+    pairs = invoke_isr(player, CODE + sym['yx6_buzzA'])
     if pairs != [(13, 11)]:
         return f'effects: the buzzer tick wrote {pairs}'
-    if perf and acc() != 15 + 15 + 12:  # the SID halves and the buzzer
-        return f'effects: the ticks accumulated {acc()}, not 42'
+    if perf and acc() != 130 + 15 + 15 + 12:
+        return f'effects: the ticks accumulated {acc()}'
 
-    # And the next frame plays a clean mixer again.
-    _, writes = player.frame()
-    if dict(writes).get(7) != 0x38 | 0xC0:
-        return 'effects: the mixer stayed forced after the drum'
+    # One more frame clears the raster monitor's accumulator; the frame
+    # itself replays the loop head, whose writes are the script's business.
+    player.frame()
+    if perf and acc() != 0:
+        return 'effects: the frame did not clear the perf accumulator'
 
-    # The monitor's color protocol: every frame paints the yellow timer bar,
-    # then its own red, then puts the original back; every tick paints its
-    # timer's color and restores. Timer A green, Timer D blue, and the last
-    # write always hands the original ($0000 here) back.
+    # The library's stop contract: it quiesces its claim - timers stopped,
+    # their interrupt bits disabled and masked, every gate open - and
+    # restores nothing; the host owns the machine state (assumption 5).
+    player.stop()
+    mfp = lambda a: player.uc.mem_read(a, 1)[0]
+    if mfp(0xFFFFFA19) & 0x0F or mfp(0xFFFFFA1D) & 0x0F:
+        return 'effects: stop left a timer running'
+    if mfp(0xFFFFFA07) & 0x20 or mfp(0xFFFFFA13) & 0x20 \
+            or mfp(0xFFFFFA09) & 0x10 or mfp(0xFFFFFA15) & 0x10:
+        return 'effects: stop left its claim enabled'
+    for voice in range(3):
+        if gate(voice) != 2:
+            return f'effects: stop left voice {voice} muted'
+
+    # The monitor's color protocol, unchanged from v1: every frame paints
+    # the yellow timer bar, then its own red, then puts the original back;
+    # every tick paints its timer's color and restores.
     if perf:
         seen = player.palette
         if set(seen) != {0x770, 0x700, 0x070, 0x007, 0}:
@@ -592,38 +620,22 @@ def run_effects(super_host: bool = False, perf: bool = False) -> str:
             return 'effects: the monitor did not restore the background'
     elif player.palette:
         return 'effects: the monitor painted in a build without it'
-
-    # The library's stop contract: it quiesces its claim - timers stopped,
-    # their interrupt bits disabled and masked - and restores nothing; the
-    # host owns the machine state (YX6.S assumption 5).
-    player.stop()
-    mfp = lambda a: player.uc.mem_read(a, 1)[0]
-    if mfp(0xFFFFFA19) & 0x0F or mfp(0xFFFFFA1D) & 0x0F:
-        return 'effects: stop left a timer running'
-    if mfp(0xFFFFFA07) & 0x20 or mfp(0xFFFFFA13) & 0x20 \
-            or mfp(0xFFFFFA09) & 0x10 or mfp(0xFFFFFA15) & 0x10:
-        return 'effects: stop left its claim enabled'
     return ''
 
 
-def drum_ticks(player, code, flags) -> str:
-    """Plays frame 31's retriggered drum out: two sample nibbles, then the
-    marker - which parks the volume, stops Timer D, drops voice C's flag and
-    reopens the voice's burst gate. Sample 0 is 0x80, 0x40 -> nibbles 8, 4."""
-    if player.uc.mem_read(flags, 1)[0] != 4:
-        return 'effects: voice C should be flagged at frame 35'
+def drum_ticks(player, code, register, ctrl, eoi_reg, eoi_value) -> str:
+    """Plays a patched drum out by direct invocation: two sample nibbles,
+    then the marker - which parks the volume and stops the timer, nothing
+    more: the script owns every frame-side consequence. Sample 0 is
+    0x80, 0x40 -> nibbles 8, 4."""
     for tick, value in enumerate((8, 4)):
         pairs = invoke_isr(player, code)
-        if pairs != [(10, value)]:
+        if pairs != [(register, value)]:
             return f'effects: drum tick {tick} wrote {pairs}'
-    if player.uc.mem_read(flags, 1)[0] != 4:
-        return 'effects: the drum ended early'
     pairs = invoke_isr(player, code)                # the marker tick
-    if pairs != [(10, 0x80), (10, 0x0D)]:
+    if pairs != [(register, 0x80), (register, 0x0D)]:
         return f'effects: the marker tick wrote {pairs}'
-    if player.uc.mem_read(flags, 1)[0] != 0:
-        return 'effects: the marker did not drop the flag'
-    if player.mfp[-2:] != [(TCDCR, 0), (0xFFFFFA11, 0xEF)]:
+    if player.mfp[-2:] != [(ctrl, 0), (eoi_reg, eoi_value)]:
         return f'effects: the marker tick programmed {player.mfp[-2:]}'
     return ''
 
@@ -819,7 +831,7 @@ def main() -> int:
         (600, 240, 24, 'small ring 240/24', 0, 1),
         (600, 48, 24, 'two-group ring 48/24', 128, 1),
         (600, 960, 64, 'long calls 960/64', 401, 1),
-        (600, 36, 18, 'tightest legal 36/18', 13, 1),
+        (608, 38, 19, 'tightest legal 38/19', 13, 1),
         (37, 960, 24, 'shorter than a ring', 5, 3),
         (40, 960, 24, 'loop shorter than a group', 35, 4),
         (24, 960, 24, 'exactly one group', 0, 2),

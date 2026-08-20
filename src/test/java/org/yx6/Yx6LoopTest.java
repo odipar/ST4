@@ -21,6 +21,18 @@ final class Yx6LoopTest {
         return Ym6Reader.read(Ym6TestData.file(registers, FRAMES, true, "YM6!", 50, 0, loopFrame));
     }
 
+    /** The same tune with its effect codes silenced: the register-section
+     * properties below are about the split itself, and a held effect
+     * crossing the wrap would rotate it. */
+    private static Ym6Reader.Song quiet(int loopFrame) {
+        byte[][] registers = Ym6TestData.registers(FRAMES);
+        for (int frame = 0; frame < FRAMES; frame++) {
+            registers[1][frame] &= ~0x30;       // no slot-1 code
+            registers[3][frame] &= ~0x30;       // no slot-2 voice bits
+        }
+        return Ym6Reader.read(Ym6TestData.file(registers, FRAMES, true, "YM6!", 50, 0, loopFrame));
+    }
+
     private static int word(byte[] file, int at) {
         return ((file[at] & 0xFF) << 8) | (file[at + 1] & 0xFF);
     }
@@ -52,16 +64,21 @@ final class Yx6LoopTest {
 
     @Test
     void eachSectionUnpacksToItsOwnSliceOfTheRegister() {
-        int split = 397;                            // not a multiple of the chunk
-        Ym6Reader.Song source = song(split);
-        Yx6Encoder.Result result = Yx6Encoder.encode(source, 960, 24, split, false);
+        int loop = 397;                             // not a multiple of the chunk
+        Ym6Reader.Song source = song(loop);
+        Yx6Encoder.Result result = Yx6Encoder.encode(source, 960, 24, loop, false);
         byte[] file = result.file();
 
+        // This tune holds an effect across the wrap, so the split rotates
+        // until both arrivals agree; the header carries the played shape.
+        int split = result.script().split();
         assertEquals(Yx6Format.FLAG_LOOPS, word(file, Yx6Format.OFFSET_FLAGS));
         assertEquals(split, longAt(file, Yx6Format.OFFSET_LOOP_FRAME));
+        assertEquals(result.script().frames(), longAt(file, Yx6Format.OFFSET_FRAMES));
 
+        byte[][] expected = Yx6EncoderTest.expectedVectors(source, loop, 1);
         for (int register = 0; register < Yx6Format.STREAMS; register++) {
-            byte[] whole = Yx6EncoderTest.expectedVector(source, register);
+            byte[] whole = expected[register];
             assertArrayEquals(Arrays.copyOfRange(whole, 0, split),
                     stream(file, Yx6Format.OFFSET_INTRO_TABLE, register,
                             packedSize(result, register, false)),
@@ -75,7 +92,7 @@ final class Yx6LoopTest {
 
     @Test
     void loopingFromTheStartPacksNoIntro() {
-        Yx6Encoder.Result result = Yx6Encoder.encode(song(0), 960, 24, 0, false);
+        Yx6Encoder.Result result = Yx6Encoder.encode(quiet(0), 960, 24, 0, false);
         byte[] file = result.file();
 
         assertEquals(0, longAt(file, Yx6Format.OFFSET_LOOP_FRAME));
@@ -85,6 +102,22 @@ final class Yx6LoopTest {
             assertTrue(longAt(file, Yx6Format.OFFSET_LOOP_TABLE + 4 * register) > 0);
         }
         assertEquals(Yx6Format.STREAMS, result.streams().size());
+    }
+
+    @Test
+    void aHeldEffectAcrossTheWrapRotatesTheSplit() {
+        // The effectful tune holds a SID from frame 0: the first arrival at
+        // the loop head (pristine) and the wrap arrival (running) disagree,
+        // so the split rotates past the start and a short intro appears -
+        // the frames it absorbs exist twice, compiled differently.
+        Yx6Encoder.Result result = Yx6Encoder.encode(song(0), 960, 24, 0, false);
+        int split = result.script().split();
+        assertTrue(split > 0, "the wrap state cannot match the pristine start");
+        assertEquals(FRAMES + split, result.script().frames());
+        byte[] file = result.file();
+        assertEquals(split, longAt(file, Yx6Format.OFFSET_LOOP_FRAME));
+        assertTrue(longAt(file, Yx6Format.OFFSET_INTRO_TABLE) > 0,
+                "the rotation gives the loop-from-zero tune an intro");
     }
 
     @Test
@@ -104,9 +137,9 @@ final class Yx6LoopTest {
 
     @Test
     void theSplitCostsRatioButLoopingFromZeroDoesNot() {
-        int whole = Yx6Encoder.encode(song(0), 960, 24, -1, false).packedSize();
-        int fromStart = Yx6Encoder.encode(song(0), 960, 24, 0, false).packedSize();
-        int fromMiddle = Yx6Encoder.encode(song(450), 960, 24, 450, false).packedSize();
+        int whole = Yx6Encoder.encode(quiet(0), 960, 24, -1, false).packedSize();
+        int fromStart = Yx6Encoder.encode(quiet(0), 960, 24, 0, false).packedSize();
+        int fromMiddle = Yx6Encoder.encode(quiet(450), 960, 24, 450, false).packedSize();
 
         assertEquals(whole, fromStart, "one section either way, so the same bytes");
         assertTrue(fromMiddle > whole, "splitting a register costs some ratio");

@@ -61,13 +61,42 @@ final class Yx6EncoderTest {
         assertTrue(file.length - expected < 4, "nothing after the last section but padding");
     }
 
-    /** What stream {@code index} should decode to: a masked register, or one
-     * of the four effect vectors. */
-    static byte[] expectedVector(Ym6Reader.Song source, int index) {
-        if (index < Yx6Format.REGISTER_STREAMS) {
-            return Ym2149.mask(index, source.registers()[index]);
+    /** All nineteen vectors as the encoder should build them: registers
+     * source-mapped through the split rotation with R7 carrying the baked
+     * mixer force, then the compiled script streams with their unread
+     * bytes repeating. The same assembly the encoder performs - which is
+     * the point: the file must decode back to exactly this. */
+    static byte[][] expectedVectors(Ym6Reader.Song source, int loopFrame, int unit) {
+        YmEffects.Extraction effects = YmEffects.extract(source);
+        EffectScript.Result script = EffectScript.compile(source, effects, loopFrame, unit);
+        byte[][] vectors = new byte[Yx6Format.STREAMS][];
+        for (int register = 0; register < Yx6Format.REGISTER_STREAMS; register++) {
+            byte[] masked = Ym2149.mask(register, source.registers()[register]);
+            byte[] played = new byte[script.frames()];
+            for (int p = 0; p < played.length; p++) {
+                played[p] = masked[script.source()[p]];
+            }
+            if (register == 7) {
+                for (int p = 0; p < played.length; p++) {
+                    played[p] |= script.r7force()[p];
+                }
+            }
+            vectors[register] = played;
         }
-        return YmEffects.extract(source).streams()[index - Yx6Format.REGISTER_STREAMS];
+        vectors[Yx6Format.STREAM_M] = script.m();
+        vectors[Yx6Format.STREAM_A1] = Yx6Encoder.carry(script.a1(), script.m(),
+                EffectScript.M_SLOT1, null);
+        vectors[Yx6Format.STREAM_P1] = Yx6Encoder.carry(script.p1(), script.m(),
+                EffectScript.M_SLOT1, script.a1());
+        vectors[Yx6Format.STREAM_A2] = Yx6Encoder.carry(script.a2(), script.m(),
+                EffectScript.M_SLOT2, null);
+        vectors[Yx6Format.STREAM_P2] = Yx6Encoder.carry(script.p2(), script.m(),
+                EffectScript.M_SLOT2, script.a2());
+        return vectors;
+    }
+
+    static byte[] expectedVector(Ym6Reader.Song source, int index) {
+        return expectedVectors(source, -1, 1)[index];
     }
 
     @Test
@@ -178,12 +207,13 @@ final class Yx6EncoderTest {
         Ym6Reader.Song source = song(true);
         Yx6Encoder.Result result = Yx6Encoder.encode(source, 960, 24, -1, false, 2);
         byte[] file = result.file();
+        byte[][] expected = expectedVectors(source, -1, 2);
         for (int register = 0; register < Yx6Format.STREAMS; register++) {
             int from = longAt(file, Yx6Format.OFFSET_INTRO_TABLE + 4 * register);
             St4Format.Container section = St4Format.read(Arrays.copyOfRange(
                     file, from, from + result.streams().get(register).packedSize()));
             assertEquals(2, section.unit(), "section " + register);
-            assertArrayEquals(expectedVector(source, register),
+            assertArrayEquals(expected[register],
                     unpack(file, from, result.streams().get(register).packedSize(), 480),
                     "section " + register + " at unit 2");
         }

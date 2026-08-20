@@ -8,6 +8,29 @@ github.com/arnaud-carre/StSound @ d1876bc), the 68000 practice against gwEm's
 shipping maxYMiser replayer, Hatari's MFP/PSG models, EmuTOS and the ST
 hardware register docs, and the numbers against a survey of 516 real YM files.
 
+## 0. Where v2 moved the machinery
+
+Format v5 replaced the E/T streams and the player's interpreting effect
+stage with the **compiled effect script**: `EffectScript.java` replays every
+rule in this document over the whole timeline at pack time and emits five
+streams of prepared actions — M (what acts this frame; zero almost always),
+A1/P1 and A2/P2 (each slot's action byte and timer count). The player's
+handlers copy prepared values into the timers and the tick handlers'
+operands and compare nothing; the mixer forcing of section 4 arrives baked
+into the R7 stream, the ring is never edited (the borrow/restore of section
+4 has no v2 counterpart), and a drum's gate reopens at the frame boundary
+after its computed end instead of mid-frame at the marker. A loop whose
+wrap state differs from its first arrival has its split rotated until the
+two agree, so action streams replay correctly every time round.
+
+Sections 1–4 remain the semantic truth — they are now the specification of
+the pack-time simulator rather than of a run-time interpreter — and their
+frame contract is what `EffectScriptTest`, the rig's directed effect test
+and the corpus sweep's independent Python model all assert. Section 5's
+implementation notes describe the v1 interpreter where they touch the frame
+side; the tick handlers, the timer programming order, the burst-gate
+mechanism and the budgets still read true.
+
 ## 1. The stream concept
 
 A YM6 frame can start up to two effects. Each slot is three fields smeared

@@ -27,24 +27,27 @@
 ; a different one is rejected, not garbled.
 ;
 ; -----------------------------------------------------------------------------
-; THE DESIGN, in one paragraph. A tune is O frames long. Each of the eighteen
+; THE DESIGN, in one paragraph. A tune is O frames long. Each of the nineteen
 ; streams gets its own ring of N bytes and its own saved decoder state, and
 ; is decoded C values at a time (C = 24 by default). On every VBL the player
-; uses one value from each of the eighteen rings and refills exactly one
+; uses one value from each of the nineteen rings and refills exactly one
 ; stream - stream k on the VBL where the frame number modulo C is k. With
-; C >= 18 every stream is refilled once per C frames, one refill per VBL, so
-; the work per frame is flat: the effect stage, fourteen register writes and
-; one ST4_resume of C bytes. Since C divides N and a call never reaches the
-; ring end, ST4_wrap.S is the decoder that fits: the player counts the calls
-; itself and wraps the write pointer when it lands on the ring end.
+; C >= 19 every stream is refilled once per C frames, one refill per VBL, so
+; the work per frame is flat: the effect script, fourteen register writes
+; and one ST4_resume of C bytes. Since C divides N and a call never reaches
+; the ring end, ST4_wrap.S is the decoder that fits: the player counts the
+; calls itself and wraps the write pointer when it lands on the ring end.
 ;
-; EFFECTS. The last four rings carry each slot's effect code and timer count,
-; one value per frame like everything else. Before the burst the effect stage
-; pops them and programs Timers A and D, whose tick handlers - digidrum, SID
-; square, sync-buzzer - write the sound chip between frames. A drum start
-; also edits this frame's ring bytes (the sample number, the mixer); every
-; such edit is logged and undone right after the burst, because a ring is
-; decode history that later matches copy from.
+; EFFECTS. The last five rings carry the COMPILED EFFECT SCRIPT: the packer
+; replayed the reference player's whole decision logic over the timeline -
+; held or new, retune or restart, who stops whose timer, when a drum's gate
+; reopens - and wrote the outcomes as prepared actions. Ring M says what
+; acts this frame (almost always: nothing, one test); A1/P1 and A2/P2 carry
+; each slot's action byte and timer count. The handlers copy prepared
+; values into Timers A and D and this blob's tick handlers - digidrum, SID
+; square, sync-buzzer - and compare NOTHING at run time. The drummed
+; voice's mixer forcing arrives baked into the R7 stream, and no ring byte
+; is ever edited: what v1 discovered per frame, the file simply says.
 ;
 ; LOOPING. A packed stream can only be restarted from its beginning, so the packer
 ; splits every register at the loop frame L: an intro stream for frames [0, L)
@@ -54,6 +57,11 @@
 ; the read side never learns that anything happened. Nothing requires L to fall
 ; on a group boundary: a refill that straddles the split simply decodes two
 ; pieces. A tune that loops from frame 0 has no intro streams at all.
+; The script adds one twist: when the effect state arriving from the intro
+; differs from the state arriving from the wrap, the packer ROTATES the
+; split forward to a frame where the two agree - the file then carries a
+; few frames twice, compiled differently, and O and L in the header count
+; this played timeline. The player never knows; the rotation is inaudible.
 ;
 ; -----------------------------------------------------------------------------
 ; USING IT
@@ -70,12 +78,12 @@
 ;       lea     workspace,a0
 ;       bsr     YX6_stop                ; chip quiet, timers stopped
 ;
-; The workspace holds the player's own fields, the eighteen decoder states and
-; the eighteen rings, so its size depends on the ring size in the file:
+; The workspace holds the player's own fields, the nineteen decoder states
+; and the nineteen rings, so its size depends on the ring size in the file:
 ;
-;   YX6_SIZE = YX6_FIXED + 18 * N       ; 1222 + 18 * N bytes
+;   YX6_SIZE = YX6_FIXED + 19 * N       ; 1266 + 19 * N bytes
 ;
-; For the default 960-byte rings that is 18502 bytes. A program that knows N
+; For the default 960-byte rings that is 19506 bytes. A program that knows N
 ; at build time can reserve it with
 ;
 ;       ds.b    YX6_FIXED+(YX6_STREAMS*960)
@@ -85,7 +93,7 @@
 ; CALLS AND REGISTERS
 ;
 ;   YX6_init   in   a0 = .yx6 file, at an even address, a1 = workspace
-;              out  d0 = 0 accepted, -1 not a v4 yx6 file with 18 streams
+;              out  d0 = 0 accepted, -1 not a v5 yx6 file with 19 streams
 ;                        packed at this build's unit size
 ;              Claims MFP Timers A and D for the effect slots: stops them,
 ;              parks their vectors, drops stale pendings, enables and
@@ -110,17 +118,18 @@
 ; cycles and TOS's own handlers use the chip too. Its effect stage programs
 ; the two timers YX6_init claimed, vectors included. Beyond the chip, those
 ; timers and the workspace, the player writes only ITSELF: it is
-; self-modifying code. The slot descriptors and the tick handlers' operands
-; live in this blob, init patches the burst's ring displacements and the
-; run-time addresses into it, and the effect stage keeps patching as
-; effects come and go. Two consequences: the player must run from RAM, and
+; self-modifying code. The slot descriptors, the prepared tables and the
+; tick handlers' operands live in this blob, init patches the burst's ring
+; displacements and the run-time addresses into it, and the script's
+; handlers keep patching as effects come and go. Two consequences: the
+; player must run from RAM, and
 ; one loaded copy is one player - two workspaces cannot share it. Every
 ; self-reference is pc-relative or patched at run time, so the blob loads
 ; at any even address.
 ;
 ; ASSUMPTIONS (unchecked beyond the magic, version and stream count):
 ;
-;   1. the file comes from the yx6 packer, which enforces C >= 18, N mod C = 0,
+;   1. the file comes from the yx6 packer, which enforces C >= 19, N mod C = 0,
 ;      N >= 2C, N <= 2520 - the burst reads each register's ring through an
 ;      assembled-in 16-bit displacement of k*N - offsets that stay inside the
 ;      ring, and - at ST4_UNIT above 1 - a tune length, loop frame and C that
@@ -179,10 +188,10 @@ PERF_SYNC       equ     8000            ; the sync loop's ceiling: a whole
                                         ; frame's worth of turns, so a host
                                         ; that calls from anywhere still runs
 
-YX6_STREAMS     equ     18              ; R0..R13, then E1 T1 E2 T2: the two
-                                        ; effect slots' control and timer-count
-                                        ; streams, decoded like any register
-YX6_REGISTERS   equ     14              ; the streams the burst writes
+YX6_STREAMS     equ     19              ; R0..R13, then the compiled effect
+                                        ; script: M, then each slot's action
+                                        ; and count bytes - decoded like any
+                                        ; register
 YX6_STATE_SIZE  equ     64              ; per stream, so the index is a shift
                                         ; both ways: *64 in, /16 back to *4
 
@@ -202,36 +211,19 @@ YX6_C           equ     38              ; word  values per call C
 YX6_SLOT        equ     40              ; word  refill slot, 0..C-1
 YX6_INDEX       equ     42              ; word  stream index, during init only
 YX6_LOOPS       equ     44              ; word  nonzero when the tune loops
-YX6_EFXOFF      equ     46              ; long  14*N: the cursor's ring to E1's
-YX6_R7OFF       equ     50              ; long  7*N: the cursor's ring to R7's
-; The sanitize log. The effect stage edits ring bytes so the burst plays a
-; sanitized frame - but the ring is decode history, and a later match may
-; copy from any byte of it. So every edit is recorded here and undone right
-; after the burst: the chip sees the edit, the ring never keeps it.
-YX6_PATCHES     equ     54              ; byte  how many edits this frame, 0..3
-YX6_PATCH_VAL   equ     55              ; 3 bytes: the originals
-YX6_PATCH_ADDR  equ     58              ; 3 longs: where they go back
-YX6_STATE       equ     70              ; 18 decoder states, from an even base
+YX6_EFXOFF      equ     46              ; long  14*N: the cursor's ring to M's
+YX6_STATE       equ     50              ; 19 decoder states, from an even base
 
-; Each effect slot's own state - its code and count from last frame, its
-; parameter ring offset, its timer and its handlers - lives in a descriptor
-; in the code blob (yx6_desc1/2 below), so ONE slot machine serves both
-; slots. The hardware addresses are words: movea.w sign-extends $FAxx to
-; $FFFFFAxx. The two run-time pointers are filled in by YX6_init.
-SD_ELAST        equ     0               ; byte  the slot's code last frame
-SD_TLAST        equ     1               ; byte  the count its timer last got:
-                                        ; a held effect reloads its data
-                                        ; register only when the count CHANGES,
-                                        ; because a write that lands while the
-                                        ; counter passes 01 loads an
-                                        ; indeterminate value - pitch glitches
-SD_CTRL         equ     2               ; word  timer control register
-SD_DATA         equ     4               ; word  timer data register
-SD_VEC          equ     6               ; word  timer vector
-SD_PARM         equ     8               ; long  (8+voice)*N: the cursor's ring
-                                        ;       to the slot's parameter byte
-SD_ISR          equ     12              ; long  the slot's tick handlers
-SD_OTHER        equ     16              ; long  the other slot's descriptor
+; Each effect slot's descriptor holds only what tells the two slots apart:
+; its timer's registers, its vector, its partner's control register (the
+; DRUM_ARB action stops that timer first), and its tick-handler block. No
+; remembered state - the script compiled every comparison at pack time. The
+; hardware addresses are words: movea.w sign-extends $FAxx to $FFFFFAxx.
+SD_CTRL         equ     0               ; word  timer control register
+SD_DATA         equ     2               ; word  timer data register
+SD_VEC          equ     4               ; word  timer vector
+SD_OTHER_CTRL   equ     6               ; word  the partner slot's control
+SD_ISR          equ     8               ; long  the slot's tick handlers
 ; rmac evaluates left to right, so the parentheses here are load-bearing:
 ; without them this reads as (YX6_STATE+YX6_STREAMS)*YX6_STATE_SIZE.
 YX6_FIXED       equ     YX6_STATE+(YX6_STREAMS*YX6_STATE_SIZE)
@@ -267,11 +259,11 @@ YH_LOOP         equ     20
 YH_CLOCK        equ     24
 YH_DRUMS        equ     28              ; long: the drum table, 0 when none
 YH_DRUMCOUNT    equ     32              ; word
-YH_INTRO_TABLE  equ     34              ; 18 offsets: the frames before the loop
-YH_LOOP_TABLE   equ     106             ; 18 offsets: the frames from L on
+YH_INTRO_TABLE  equ     34              ; 19 offsets: the frames before the loop
+YH_LOOP_TABLE   equ     YH_INTRO_TABLE+(YX6_STREAMS*4)
 
 YX6_MAGIC       equ     $59583621       ; 'YX6!'
-YX6_VERSION     equ     4               ; 4: effect streams and the drum table
+YX6_VERSION     equ     5               ; 5: the compiled effect script
 YX6_FLAG_LOOPS  equ     1               ; header flag: the tune loops
 YX6_PSG         equ     $FFFF8800       ; select/read at +0, write at +2
 YX6_NO_ENV      equ     $FF             ; R13 value meaning "leave it alone"
@@ -422,12 +414,42 @@ YX6_init:
         cmp.w   #YX6_STREAMS,YX6_INDEX(a3)
         bne     .stream
 
-; The cursor reaches the effect and mixer rings by fixed hops, computed once.
+; The cursor reaches the script rings by fixed hops: 14*N to M, computed
+; once, and the three parameter offsets (8+voice)*N the handlers read the
+; SID volume, buzzer shape and drum number through.
         move.w  YX6_N(a3),d0
-        mulu.w  #7,d0
-        move.l  d0,YX6_R7OFF(a3)
-        add.l   d0,d0                   ; and 14*N, from the same mulu
+        mulu.w  #14,d0
         move.l  d0,YX6_EFXOFF(a3)
+        moveq   #0,d0
+        move.w  YX6_N(a3),d0
+        move.l  d0,d1
+        lsl.l   #3,d1                   ; 8*N
+        lea     yx6_parmoff(pc),a1
+        move.l  d1,(a1)+                ; voice A
+        add.l   d0,d1
+        move.l  d1,(a1)+                ; voice B
+        add.l   d0,d1
+        move.l  d1,(a1)                 ; voice C
+
+; The drum table becomes a table of absolute sample addresses, so a trigger
+; is one indexed load instead of an entry walk: the DRUM action's byte is
+; the sample number, pre-scaled to index these longs.
+        movea.l YX6_FILE(a3),a0
+        move.l  YH_DRUMS(a0),d1
+        beq.s   .no_drums
+        movea.l a0,a2
+        adda.l  d1,a2                   ; the entries: offset.l, length.w
+        lea     yx6_samples(pc),a1
+        move.w  YH_DRUMCOUNT(a0),d0
+        subq.w  #1,d0
+        bmi.s   .no_drums
+.drum_addr:
+        move.l  (a2),d1
+        add.l   a0,d1                   ; file base + entry offset
+        move.l  d1,(a1)+
+        addq.l  #6,a2
+        dbra    d0,.drum_addr
+.no_drums:
 
 ; The burst reads register k's ring byte through an assembled-in k*N
 ; displacement - patch all fourteen now that N is known. The packer keeps
@@ -454,10 +476,7 @@ YX6_init:
         dbra    d0,.wpatchB
         lea     yx6_w13+2(pc),a0
         move.w  d1,(a0)
-        clr.b   YX6_PATCHES(a3)
-        lea     yx6_drums(pc),a0
-        clr.b   (a0)
-        bsr     yx6_link                ; descriptors: pointers and last codes
+        bsr     yx6_link                ; gates open, handlers linked
 
 ; Claim Timers A and D: park our handlers on the vectors and leave both
 ; timers stopped but enabled and unmasked. Nothing is saved - the machine
@@ -640,51 +659,38 @@ YX6_play:
         move.w  #$700,$FFFF8240.w       ; ...then this frame's work, red
         .endif
 
-; The effect stage, inlined: it runs BEFORE the burst so it may rewrite this
-; frame's ring bytes. Each slot is gated on E | E-last: a slot that has, and
-; had, nothing to do costs one test - the common frame. A slot machine call
-; therefore always means something changed, holds, or just ended; yx6_slot's
-; held path leans on that (E is never 0 there).
+; The effect stage: replay the compiled script. One master byte says what
+; acts this frame - almost always nothing, and the whole stage is one test.
+; The action bytes were decided at pack time; the handlers copy prepared
+; values to prepared places and compare nothing.
         movea.l YX6_CURSOR(a3),a0
-        adda.l  YX6_EFXOFF(a3),a0       ; ring E1, at this frame's offset
-        lea     yx6_desc1(pc),a5
-        move.b  (a0),d0                 ; E1 | its last code: zero is idle
-        or.b    (a5),d0
-        beq.s   .slot1_idle
-        move.b  (a0),d0                 ; the real E1
-        adda.l  d3,a0
-        move.b  (a0),d1                 ; T1
-        adda.l  d3,a0
-        move.l  a0,-(sp)                ; ring E2's byte, for after slot 1
-        bsr     yx6_slot
-        movea.l (sp)+,a0
-        bra.s   .slot2
-.slot1_idle:
-        adda.l  d3,a0
-        adda.l  d3,a0
-.slot2:
-        lea     yx6_desc2(pc),a5
-        move.b  (a0),d0                 ; E2, the same gate
-        or.b    (a5),d0
-        beq.s   .effects_done
+        adda.l  YX6_EFXOFF(a3),a0       ; ring M, at this frame's offset
         move.b  (a0),d0
-        adda.l  d3,a0
-        move.b  (a0),d1                 ; T2
-        bsr     yx6_slot
+        beq.s   .effects_done           ; the common frame ends here
+        lsr.b   #1,d0                   ; bit 0: slot 1 acts
+        bcc.s   .slot2
+        lea     yx6_desc1(pc),a5
+        movea.l a0,a4
+        adda.l  d3,a4                   ; ring A1 = M + N
+        move.w  d0,-(sp)
+        bsr     yx6_act
+        move.w  (sp)+,d0
+.slot2:
+        lsr.b   #1,d0                   ; bit 1: slot 2 acts
+        bcc.s   .gates
+        lea     yx6_desc2(pc),a5
+        movea.l a0,a4
+        adda.l  d3,a4
+        adda.l  d3,a4
+        adda.l  d3,a4                   ; ring A2 = M + 3N
+        move.w  d0,-(sp)
+        bsr     yx6_act
+        move.w  (sp)+,d0
+.gates:
+        lsr.b   #1,d0                   ; bit 2: the gate mask changed;
+        bcc.s   .effects_done           ; bits 5-3 carried the new state
+        bsr     yx6_gates
 .effects_done:
-
-; While a drum runs its voice leaves the mixer, as the original replay
-; routines had it: force the tone and noise bits in this frame's R7.
-        move.b  yx6_drums(pc),d0
-        beq.s   .mixer_ok
-        move.b  d0,d1
-        lsl.b   #3,d1
-        or.b    d0,d1                   ; the voice's tone and noise disables
-        movea.l YX6_CURSOR(a3),a0
-        adda.l  YX6_R7OFF(a3),a0
-        bsr     yx6_borrow              ; the ring gets this byte back
-        or.b    d1,(a0)
-.mixer_ok:
         movea.l YX6_CURSOR(a3),a1       ; the cursor: every register's ring
         lea     YX6_PSG,a2              ; byte is a patched k*N above it
 
@@ -726,21 +732,7 @@ yx6_w13:
 .envelope_held:
         move.w  (sp)+,sr
 
-; Undo this frame's ring edits: the chip has heard the sanitized frame, and
-; the ring must stay exact decode history for every match yet to come.
-        move.b  YX6_PATCHES(a3),d0
-        beq.s   .pristine
-        clr.b   YX6_PATCHES(a3)         ; cleared only when it was used
-        lea     YX6_PATCH_ADDR(a3),a0
-        lea     YX6_PATCH_VAL(a3),a1
-.restore:
-        movea.l (a0)+,a2
-        move.b  (a1)+,(a2)
-        subq.b  #1,d0
-        bne.s   .restore
-.pristine:
-
-; Refill the stream whose turn it is. Slots 18..C-1 exist when C is larger
+; Refill the stream whose turn it is. Slots 19..C-1 exist when C is larger
 ; than the stream count; they simply have nothing to do.
         move.w  YX6_SLOT(a3),d0
         cmp.w   #YX6_STREAMS,d0
@@ -816,14 +808,8 @@ YX6_stop:
         bclr    #4,$FFFFFA15.w
         bclr    #5,$FFFFFA0B.w          ; and no pending ticks of ours
         bclr    #4,$FFFFFA0D.w
-        lea     yx6_drums(pc),a0
-        clr.b   (a0)
-        moveq   #2,d2                   ; every burst gate open again
-.gates: move.w  d2,-(sp)
-        moveq   #2,d4
-        bsr     yx6_burst_gate
-        move.w  (sp)+,d2
-        dbra    d2,.gates
+        moveq   #0,d0                   ; every burst gate open again
+        bsr     yx6_gates
 ; The silence stays inside the mask: selecting a register and writing it are
 ; two bus cycles, and a polite host's system interrupts - about to get their
 ; state back - use the chip too.
@@ -850,15 +836,21 @@ YX6_stop:
 ; Timer A writes the same values a clear would.
         even
 yx6_desc1:
-        dc.b    0,0                     ; E last, T last
         dc.w    $FA19,$FA1F,$0134       ; control, data, vector
-        dc.l    0                       ; PARM, set per effect
-        dc.l    0,0                     ; ISR block, other slot: yx6_link
+        dc.w    $FA1D                   ; the partner's control register
+        dc.l    0                       ; ISR block: yx6_link
 yx6_desc2:
-        dc.b    0,0
         dc.w    $FA1D,$FA25,$0110
+        dc.w    $FA19
         dc.l    0
-        dc.l    0,0
+
+; The two prepared tables the script indexes into: the drums' absolute
+; sample addresses (YX6_init resolves the file's table once, so a trigger
+; is one indexed load) and the three parameter-ring offsets (8+voice)*N.
+yx6_samples:
+        ds.l    32
+yx6_parmoff:
+        ds.l    3
 
 ; -----------------------------------------------------------------------------
 ; The tick handlers, in maxYMiser's shipping forms: the PSG select and write
@@ -870,10 +862,10 @@ yx6_desc2:
 ; anywhere - which also means it must run from RAM, where a demo lives.
 ;
 ; The two slots' handlers are the same text twice, and MUST stay
-; byte-congruent: the slot machine and yx6_drum_start reach every patched
-; operand through ISR_ offsets measured on the A block. The rig checks the
-; congruence from the symbol table. The park entries - where YX6_init aims
-; the vectors while no effect runs - are the handlers' own tails.
+; byte-congruent: the action handlers reach every patched operand through
+; ISR_ offsets measured on the A block. The rig checks the congruence from
+; the symbol table. The park entries - where YX6_init aims the vectors
+; while no effect runs - are the handlers' own tails.
 ;
 ; The timers STACK: each handler drops the IPL to 5 as soon as its PSG
 ; select/data pair is complete, so the MFP's higher-priority channel -
@@ -888,8 +880,7 @@ yx6_desc2:
 ;
 ; The patch offsets are load-bearing (all fixed ones shift by PERF_PAD when
 ; the raster monitor's color prologue sits at each block's top):
-;   drum:  select immediate at +3, sample address at +8, flag mask at
-;          _clear+3, the burst gate's address at _gate+4
+;   drum:  select immediate at +3, sample address at +8
 ;   sid:   select at +2 and volume at +4 inside the imm long; the partner's
 ;          whole vector at +14, past the IPL drop, patched by yx6_link
 ;   buzz:  the shape at +4
@@ -922,20 +913,12 @@ yx6_drumA:
         rte
 .ended:
         move.b  #$D,$FFFF8802.w         ; middle volume: no click
-        andi.b  #$F0,$FFFFFA19.w        ; the sample ran out: stop Timer A
-        move.w  #$2500,sr
-        move.l  a0,-(sp)
-        lea     yx6_drums(pc),a0
-yx6_drumA_clear:
-        andi.b  #$FF,(a0)               ; SMC +3: drop the voice's drum flag
-yx6_drumA_gate:
-        move.w  #2,$12345678            ; SMC +4: the voice's burst write
-        .if YX6_PERF
-        lea     yx6_perf_acc(pc),a0
+        andi.b  #$F0,$FFFFFA19.w        ; the sample ran out: stop Timer A -
+        .if YX6_PERF                    ; the script already knew this frame
+        move.l  a0,-(sp)                ; was coming: gate and mixer follow
+        lea     yx6_perf_acc(pc),a0     ; at the next frame boundary
         add.w   #23,(a0)
-        .endif
-        movea.l (sp)+,a0                ; comes back
-        .if YX6_PERF
+        movea.l (sp)+,a0
         move.w  (sp)+,$FFFF8240.w
         .endif
 yx6_parkA:
@@ -1035,27 +1018,11 @@ yx6_drumD:
 .ended:
         move.b  #$D,$FFFF8802.w
         andi.b  #$F0,$FFFFFA1D.w
-        move.w  #$2500,sr
-        .if YX6_SUPER_HOST
-        move    a0,usp
-        .else
-        move.l  a0,-(sp)
-        .endif
-        lea     yx6_drums(pc),a0
-yx6_drumD_clear:
-        andi.b  #$FF,(a0)
-yx6_drumD_gate:
-        move.w  #2,$12345678
         .if YX6_PERF
+        move.l  a0,-(sp)
         lea     yx6_perf_acc(pc),a0
         add.w   #23,(a0)
-        .endif
-        .if YX6_SUPER_HOST
-        move    usp,a0
-        .else
         movea.l (sp)+,a0
-        .endif
-        .if YX6_PERF
         move.w  (sp)+,$FFFF8240.w
         .endif
 yx6_parkD:
@@ -1114,9 +1081,6 @@ yx6_buzzD:
         move.b  #$EF,$FFFFFA11.w
         rte
 
-yx6_drums:
-        dc.b    0                       ; voice bits 0-2: a drum is running
-        even
         .if YX6_PERF
 yx6_perf_acc:
         dc.w    0                       ; the ticks' estimated cost since the
@@ -1124,11 +1088,8 @@ yx6_perf_acc:
 
 ; Where the patched operands sit, measured on the A block; the D block is
 ; byte-congruent, so the same offsets serve both through SD_ISR.
-; rmac evaluates left to right: the parentheses are load-bearing.
 ISR_DRUM_SEL    equ     PERF_PAD+3
 ISR_DRUM_PTR    equ     PERF_PAD+8
-ISR_CLEAR       equ     (yx6_drumA_clear-yx6_drumA)+3
-ISR_GATE        equ     (yx6_drumA_gate-yx6_drumA)+4
 ISR_SIDON       equ     yx6_sidA_on-yx6_drumA
 ISR_SIDON_SEL   equ     ISR_SIDON+PERF_PAD+2
 ISR_SID_VOL     equ     ISR_SIDON+PERF_PAD+4
@@ -1141,29 +1102,21 @@ ISR_BUZZ_SHAPE  equ     ISR_BUZZ+PERF_PAD+4
 
 ; -----------------------------------------------------------------------------
 ; yx6_link, from YX6_init: the run-time addresses only a loaded player knows.
-; Each descriptor gets its ISR block and its partner, both slots' last code
-; and count are cleared, and the SID halves get each other's address low
-; word - the vector's high word never changes, and neither do these, so
-; they are patched once here rather than on every SID start.
+; Every burst gate opens (a previous session's mute must not leak), each
+; descriptor gets its ISR block, and the SID halves get each other's whole
+; vector - it never changes, so it is patched once here rather than on
+; every SID start.
 ; -----------------------------------------------------------------------------
 yx6_link:
-        moveq   #2,d2                   ; every burst gate open: a previous
-.gates: move.w  d2,-(sp)                ; session's mute must not leak
-        moveq   #2,d4
-        bsr     yx6_burst_gate
-        move.w  (sp)+,d2
-        dbra    d2,.gates
+        moveq   #0,d0
+        bsr     yx6_gates
         lea     yx6_desc1(pc),a0
-        lea     yx6_desc2(pc),a1
-        move.l  a1,SD_OTHER(a0)
-        move.l  a0,SD_OTHER(a1)
-        clr.w   (a0)                    ; E and T last, both slots
-        clr.w   (a1)
         lea     yx6_drumA(pc),a2
         move.l  a2,SD_ISR(a0)
         bsr.s   .partners
+        lea     yx6_desc2(pc),a0
         lea     yx6_drumD(pc),a2
-        move.l  a2,SD_ISR(a1)
+        move.l  a2,SD_ISR(a0)
 .partners:
         lea     ISR_SIDOFF(a2),a0       ; each half installs the other,
         move.l  a0,ISR_SIDON_NEXT(a2)   ; as a whole vector
@@ -1172,303 +1125,170 @@ yx6_link:
         rts
 
 ; -----------------------------------------------------------------------------
-; yx6_slot: one slot of the effect stage - both slots, through a5.
-; A changed code reprograms the slot's timer from scratch, a held one
-; updates only the count (a running MFP timer loads it at its next reload),
-; a dropped one stops the timer - unless the slot ran a drum, which
-; finishes by itself. A held DRUM code is a trigger on EVERY frame it is
-; present, as the reference player starts one on each coded frame: real
-; dumps carry back-to-back codes whose ring bytes name different samples -
-; an attack, then a body - and only a full restart plays the second one.
+; The action handlers: the script's verbs, one straight line each. The
+; packer decided everything - which slot acts, which voice, restart or
+; retune, who stops whose timer - so a handler only moves prepared bytes
+; into prepared places and programs its timer in the contract's order.
 ;
-; in: d0.b = E (never 0 with E-last also 0: the caller's gate), d1.b = T,
+; in: a4 = the slot's action ring byte (its count byte is one ring above),
 ;     a5 = the slot's descriptor, a3 = workspace, d3.l = N.
-; preserves d3/a3/a5; clobbers d0-d2/d4-d5, a0-a2/a4.
+; preserves d3/a3/a0; clobbers d0-d2/d4-d5, a1-a2/a4-a5.
 ; -----------------------------------------------------------------------------
-yx6_slot:
-        cmp.b   (a5),d0
-        beq.w   .held
-        move.b  (a5),d4                 ; what the slot was doing before
-        move.b  d0,(a5)
-        tst.b   d0
-        beq.w   .released
-; A new code: find the parameter register's ring - r8+voice carries the SID
-; volume, the drum number or the buzzer shape - then let the type arm its
-; handler; every type then (re)programs the timer the same way. The voice
-; stays live in d5, the parameter byte in a1, for whoever needs them.
-        move.b  d0,d5
-        lsr.b   #4,d5
-        and.w   #3,d5
-        subq.w  #1,d5                   ; the voice, 0..2
-        move.w  d5,d2
-        addq.w  #8,d2
-        mulu.w  YX6_N(a3),d2
-        move.l  d2,SD_PARM(a5)
+yx6_act:
+        move.b  (a4),d0                 ; verb 7-5, voice 4-3, low bits 2-0
+        move.w  d0,d1
+        and.w   #$E0,d1
+        lsr.w   #4,d1                   ; verb * 2
+        move.w  yx6_verbs(pc,d1.w),d1
+        jmp     yx6_verbs(pc,d1.w)
+yx6_verbs:
+        dc.w    0                       ; verb 0 never packs
+        dc.w    yx6_held-yx6_verbs
+        dc.w    yx6_halt-yx6_verbs
+        dc.w    yx6_sid_start-yx6_verbs
+        dc.w    yx6_sid_retune-yx6_verbs
+        dc.w    yx6_buzz_start-yx6_verbs
+        dc.w    yx6_drum-yx6_verbs
+        dc.w    yx6_drum_arb-yx6_verbs
+
+; The voice's parameter ring byte - the SID volume, the buzzer shape or the
+; drum number ride the voice's own register stream, marked by the script.
+; in: d0 = the action byte; out: a1 = the byte, d5 = voice*4.
+yx6_voice:
+        move.w  d0,d5
+        lsr.w   #1,d5
+        and.w   #$0C,d5                 ; voice * 4
+        lea     yx6_parmoff(pc),a1
+        move.l  0(a1,d5.w),d1
         movea.l YX6_CURSOR(a3),a1
-        adda.l  d2,a1                   ; a1 = the slot's parameter byte
-        move.b  d0,d2                   ; (d4 still holds the OLD code, for
-        and.b   #$C0,d2                 ; the retune test below)
-        beq.s   .sid
-        cmp.b   #$40,d2
-        beq.s   .drum
-        move.b  (a1),d4                 ; $C0, the buzzer ($80 never packs):
-        and.b   #15,d4                  ; the shape rides the tick's immediate
-        movea.l SD_ISR(a5),a0
-        move.b  d4,ISR_BUZZ_SHAPE(a0)
-        lea     ISR_BUZZ(a0),a0
-        bra.s   .armed
-.sid:
-; While a drum owns this voice, its volume register is the drum's alone: the
-; SID stays un-armed and the cleared last-code makes every following frame
-; retry, so it comes back by itself the frame after the drum ends. That is
-; the reference player's priority, where the drum overrides the volume.
-        moveq   #1,d2                   ; (d4 still holds the OLD code)
-        lsl.b   d5,d2
-        and.b   yx6_drums(pc),d2
-        beq.s   .sid_free
-        clr.b   (a5)
-        bsr     yx6_burst_open_old      ; a replaced SID's gate must not leak
+        adda.l  d1,a1                   ; this frame's byte
         rts
-.sid_free:
-; A code that differs from the old one ONLY in its prescaler is the same
-; SID sliding across a prescaler boundary - real tunes wobble across one
-; many times a second. The reference player free-runs the square's phase
-; through frequency changes, so keep the installed half: retune the timer
-; without touching the vector. A full restart here would reset the phase
-; to the loud half every flip - an audible ticking.
-        move.b  d0,d2
-        eor.b   d4,d2
-        and.b   #$F0,d2                 ; type and voice unchanged?
-        beq.s   .sid_retune
-        bsr     yx6_burst_open_old      ; a replaced SID's voice write resumes
-        move.w  d5,d2                   ; ...and the new voice's is muted:
-        moveq   #0,d4                   ; the square owns it now
-        bsr     yx6_burst_gate
-        move.w  d5,d4                   ; a fresh SID: the voice's volume
-        addq.w  #8,d4                   ; register into both halves' selects
-        movea.l SD_ISR(a5),a0
-        move.b  d4,ISR_SIDON_SEL(a0)
-        move.b  d4,ISR_SIDOFF_SEL(a0)
-        move.b  (a1),d4
-        and.b   #15,d4
-        move.b  d4,ISR_SID_VOL(a0)      ; the loud half's volume
-        lea     ISR_SIDON(a0),a0
-        bra.s   .armed
-.sid_retune:
-        move.b  (a1),d4                 ; the volume still tracks the ring
-        and.b   #15,d4
-        movea.l SD_ISR(a5),a0
-        move.b  d4,ISR_SID_VOL(a0)
-        movea.w SD_VEC(a5),a0           ; keep whichever half is installed:
-        movea.l (a0),a0                 ; .armed writes the same value back
-        bra.s   .armed
-.drum:
-        bsr     yx6_drum_start
-.armed:
-        move.b  d1,SD_TLAST(a5)
+
+yx6_halt:                               ; STOP: the level dropped. RMW, so
+        movea.w SD_CTRL(a5),a1          ; Timer C's nibble survives on D
+        andi.b  #$F0,(a1)
+        rts
+
+yx6_held:                               ; flags: 1 = reload the count, 2 =
+        btst    #0,d0                   ; track the SID volume, 4 = track
+        beq.s   .tracks                 ; the buzzer shape - only on frames
+        movea.l a4,a1                   ; where the value changed
+        adda.l  d3,a1
+        move.b  (a1),d1
+        movea.w SD_DATA(a5),a2
+        move.b  d1,(a2)                 ; a running timer loads a changed
+.tracks:                                ; count at its next reload
+        moveq   #6,d1
+        and.b   d0,d1
+        beq.s   .done
+        bsr.s   yx6_voice
+        move.b  (a1),d1
+        and.w   #15,d1
+        movea.l SD_ISR(a5),a2
+        btst    #2,d0
+        bne.s   .shape
+        move.b  d1,ISR_SID_VOL(a2)
+        rts
+.shape:
+        move.b  d1,ISR_BUZZ_SHAPE(a2)
+.done:
+        rts
+
+yx6_sid_start:                          ; a fresh square starts on the loud
+        bsr.s   yx6_voice               ; half; retunes never come here
+        movea.l SD_ISR(a5),a2
+        move.w  d5,d1
+        lsr.w   #2,d1
+        addq.w  #8,d1                   ; the voice's volume register
+        move.b  d1,ISR_SIDON_SEL(a2)
+        move.b  d1,ISR_SIDOFF_SEL(a2)
+        move.b  (a1),d1
+        and.w   #15,d1
+        move.b  d1,ISR_SID_VOL(a2)
+        lea     ISR_SIDON(a2),a1
+        move.l  a1,d4
+        bra.s   yx6_program
+
+yx6_sid_retune:                         ; the vector is NEVER touched: the
+        bsr.s   yx6_voice               ; square's phase lives through every
+        move.b  (a1),d1                 ; retune, and through a resume after
+        and.w   #15,d1                  ; a drum borrowed the voice
+        movea.l SD_ISR(a5),a2
+        move.b  d1,ISR_SID_VOL(a2)
+        moveq   #0,d4
+        bra.s   yx6_program
+
+yx6_buzz_start:
+        bsr     yx6_voice
+        move.b  (a1),d1
+        and.w   #15,d1
+        movea.l SD_ISR(a5),a2
+        move.b  d1,ISR_BUZZ_SHAPE(a2)
+        lea     ISR_BUZZ(a2),a1
+        move.l  a1,d4
+        bra.s   yx6_program
+
+yx6_drum_arb:                           ; arbitration, compiled: the loser's
+        movea.w SD_OTHER_CTRL(a5),a1    ; timer stops FIRST, then the drum
+        andi.b  #$F0,(a1)               ; arms its own - the reference order
+yx6_drum:
+        bsr     yx6_voice
+        moveq   #0,d1
+        move.b  (a1),d1                 ; the sample number, 0..31
+        lsl.w   #2,d1
+        lea     yx6_samples(pc),a2
+        move.l  0(a2,d1.w),d2           ; its absolute address, from init
+        movea.l SD_ISR(a5),a2
+        move.l  d2,ISR_DRUM_PTR(a2)
+        move.w  d5,d1
+        lsr.w   #2,d1
+        addq.w  #8,d1
+        move.b  d1,ISR_DRUM_SEL(a2)
+        move.l  a2,d4                   ; the tick handler is the block base
+        ; falls through: a trigger and a retrigger program alike
+
+; The timer program, in the order the reference demands: stop, vector,
+; count, run - under the mask, since a tick between the stop and the run
+; would fire into a half-programmed timer. A retune passes no vector.
+; in: d0 = the action byte (prescaler in bits 2-0), d4 = the vector or 0,
+;     a4 = the action ring byte (the count is one ring above).
+yx6_program:
+        movea.l a4,a1
+        adda.l  d3,a1
+        move.b  (a1),d2                 ; the count
         movea.w SD_CTRL(a5),a1
-        movea.w SD_VEC(a5),a2
         move.w  sr,-(sp)
         ori.w   #$0700,sr
-        andi.b  #$F0,(a1)               ; stop, then vector, count, prescaler
-        move.l  a0,(a2)
+        andi.b  #$F0,(a1)               ; stop
+        tst.l   d4
+        beq.s   .keep
+        movea.w SD_VEC(a5),a2
+        move.l  d4,(a2)                 ; the vector; a retune keeps it
+.keep:
         movea.w SD_DATA(a5),a2
-        move.b  d1,(a2)
-        move.b  d0,d5
-        and.b   #7,d5
-        or.b    d5,(a1)
+        move.b  d2,(a2)                 ; count
+        and.b   #7,d0
+        or.b    d0,(a1)                 ; run
         move.w  (sp)+,sr
         rts
-.released:
-        move.b  d4,d2                   ; the level dropped: stop the timer -
-        and.b   #$C0,d2                 ; unless a drum is finishing by itself
-        cmp.b   #$40,d2
-        beq.s   .out
-        movea.w SD_CTRL(a5),a1
-        andi.b  #$F0,(a1)
-        tst.b   d2                      ; an ended SID: the burst writes its
-        bne.s   .out                    ; voice's volume again
-        bsr     yx6_burst_open_old
-.out:
-        rts
-.held:                                  ; E != 0 here: the caller's gate
-        move.b  d0,d5
-        and.b   #$C0,d5
-        cmp.b   #$40,d5
-        bne.s   .not_drum
-        move.b  d0,d4                   ; a held drum code triggers again;
-        bra.s   .drum                   ; old = new, nothing to clean up
-.not_drum:
-        cmp.b   SD_TLAST(a5),d1         ; reload only a CHANGED count: a write
-        beq.s   .track                  ; meeting the counter at 01 is
-        move.b  d1,SD_TLAST(a5)         ; indeterminate, so do not roll dice
-        movea.w SD_DATA(a5),a2          ; fifty times a second
-        move.b  d1,(a2)
-.track:
-; The level-held effects track their parameter every frame: the SID volume
-; and the buzzer shape follow the voice's ring byte, as the reference player
-; re-reads them.
-        movea.l YX6_CURSOR(a3),a0
-        adda.l  SD_PARM(a5),a0
-        move.b  (a0),d4
-        and.b   #15,d4
-        movea.l SD_ISR(a5),a0
-        tst.b   d5                      ; $00 SID, $C0 buzzer
-        beq.s   .vol
-        move.b  d4,ISR_BUZZ_SHAPE(a0)
-        rts
-.vol:
-        move.b  d4,ISR_SID_VOL(a0)
-        rts
-
-; Opens the burst gate of the voice the OLD code (d4) named, when that code
-; was a SID; anything else leaves the gates alone. Clobbers d2/a0, keeps d4.
-yx6_burst_open_old:
-        move.b  d4,d2
-        and.b   #$C0,d2
-        bne.s   .not_sid
-        tst.b   d4
-        beq.s   .not_sid
-        move.b  d4,d2
-        lsr.b   #4,d2
-        and.w   #3,d2
-        subq.w  #1,d2
-        move.w  d4,-(sp)
-        moveq   #2,d4
-        bsr     yx6_burst_gate
-        move.w  (sp)+,d4
-.not_sid:
-        rts
 
 ; -----------------------------------------------------------------------------
-; yx6_drum_start: read the sample number from the drummed voice's ring byte
-; and silence that byte - it is a number, not a volume - flag the voice for
-; the mixer pass, then arm the drum routine: its select register, its sample
-; address, and the flag-clearing mask, all patched into its own operands.
-; If the other slot holds a SID on this same voice, the drum takes the
-; volume register for itself, as the reference player's drum override does:
-; stop that SID's timer and clear its last code, so the slot retries every
-; frame - suppressed while the flag is up - and restarts the SID by itself
-; the frame after the drum ends.
-; Called from the new-code path AND the held retrigger, which has neither
-; the voice nor the parameter pointer at hand - so it derives its own.
-; in: d0.b = E, a5 = the descriptor, SD_PARM set; out: a0 = the handler;
-; keeps d0/d1/d3/a5.
+; yx6_gates: apply an absolute burst-gate state. Bit v of d0 mutes voice v:
+; the volume write's destination displacement flips to 0, so it lands on
+; the select register, where the very next select overrides it - no branch
+; ever enters the burst. The script computed every edge at pack time.
+; in: d0 bits 2-0 = the state, voices A/B/C; clobbers d0-d2/a1.
 ; -----------------------------------------------------------------------------
-yx6_drum_start:
-; The slot may be replacing something. An old SID's burst gate reopens (its
-; timer is about to be re-aimed). An old drum on ANOTHER voice was cut off
-; mid-sample: the marker that would have dropped its flag and reopened its
-; gate will never run, so do both here.
-        cmp.b   d0,d4
-        beq.s   .no_old
-        tst.b   d4
-        beq.s   .no_old
-        move.b  d4,d2
-        and.b   #$C0,d2
-        beq.s   .old_sid
-        cmp.b   #$40,d2
-        bne.s   .no_old                 ; a buzzer holds no register
-        move.b  d4,d2                   ; an old drum: same voice keeps its
-        eor.b   d0,d2                   ; flag and gate, another voice was
-        and.b   #$30,d2                 ; orphaned
-        beq.s   .no_old
-        move.b  d4,d2
-        lsr.b   #4,d2
-        and.w   #3,d2
-        subq.w  #1,d2
-        moveq   #1,d4                   ; (the old code is spent now)
-        lsl.b   d2,d4
-        not.b   d4
-        lea     yx6_drums(pc),a0
-        and.b   d4,(a0)                 ; the orphan's flag drops
-        moveq   #2,d4
-        bsr     yx6_burst_gate          ; and its burst write returns
-        bra.s   .no_old
-.old_sid:
-        bsr     yx6_burst_open_old
-.no_old:
-        movea.l YX6_CURSOR(a3),a0
-        adda.l  SD_PARM(a5),a0
-        bsr     yx6_borrow              ; the ring gets this byte back
-        moveq   #0,d4
-        move.b  (a0),d4                 ; the sample number, validated at pack
-        clr.b   (a0)                    ; sanitize: silence, not a number
-        move.b  d0,d5
-        lsr.b   #4,d5
-        and.w   #3,d5
-        subq.w  #1,d5                   ; the voice, for flag and select
-        moveq   #1,d2
-        lsl.b   d5,d2
-        lea     yx6_drums(pc),a0
-        or.b    d2,(a0)                 ; the mixer pass forces this voice off
-        not.b   d2
-        movea.l SD_ISR(a5),a1
-        move.b  d2,ISR_CLEAR(a1)        ; the end tick drops the same flag
-        movea.l SD_OTHER(a5),a4         ; a SID on this voice in the other
-        move.b  (a4),d2                 ; slot: the drum takes the register
-        and.b   #$C0,d2
-        bne.s   .keep
-        move.b  (a4),d2
-        eor.b   d0,d2
-        and.b   #$30,d2
-        bne.s   .keep
-        movea.w SD_CTRL(a4),a0
-        andi.b  #$F0,(a0)               ; stop the other slot's SID
-        clr.b   (a4)                    ; and let it retry every frame
-.keep:
-        move.w  d5,d2
-        addq.w  #8,d2                   ; the voice's volume register
-        move.b  d2,ISR_DRUM_SEL(a1)     ; the tick's select immediate
-        add.w   d4,d4                   ; a drum table entry is six bytes:
-        move.w  d4,d2                   ; 6n = 2n + 4n
-        add.w   d4,d4
-        add.w   d2,d4
-        movea.l YX6_FILE(a3),a2
-        movea.l a2,a0
-        adda.l  YH_DRUMS(a0),a0
-        move.l  0(a0,d4.w),d2           ; the sample's offset in the file
-        add.l   a2,d2
-        move.l  d2,ISR_DRUM_PTR(a1)     ; the tick reads through its operand
-; The drum owns the voice's volume register now, like a SID does: the burst
-; write is gated off, and the END tick gives it back - the marker's reopen
-; instruction gets the gate word's address patched in here.
-        move.w  d5,d2
-        moveq   #0,d4
-        bsr     yx6_burst_gate
-        move.w  d5,d2
-        mulu.w  #10,d2
-        lea     yx6_wB+8(pc),a0
-        adda.w  d2,a0
-        move.l  a0,ISR_GATE(a1)
-        movea.l a1,a0                   ; the handler is the block base
-        rts
-
-; -----------------------------------------------------------------------------
-; yx6_burst_gate: while a SID owns a voice, the burst must NOT write that
-; voice's volume register - the write lands mid-phase and forces the loud
-; half back for up to half a square period, an audible tick at bass rates.
-; Both references agree: ST-Sound's per-sample SID overrides the register
-; write, maxYMiser's frame code skips SID channels outright. The gate is
-; one SMC word: the volume write's destination displacement, 2 for the PSG
-; data register, 0 to land harmlessly on the select register instead - the
-; next macro's select overrides it before anything is written.
-; in: d2.w = the voice 0..2, d4.w = 2 to open or 0 to mute; clobbers d2/a0.
-; -----------------------------------------------------------------------------
-yx6_burst_gate:
-        mulu.w  #10,d2                  ; a YX6_WRITE is ten bytes; R8's
-        lea     yx6_wB+8(pc),a0         ; destination word sits at +8
-        move.w  d4,0(a0,d2.w)
-        rts
-
-; Records a ring byte about to be edited, for the restore after the burst.
-; in: a0 = the byte; clobbers d2.
-yx6_borrow:
-        moveq   #0,d2
-        move.b  YX6_PATCHES(a3),d2
-        addq.b  #1,YX6_PATCHES(a3)
-        move.b  (a0),YX6_PATCH_VAL(a3,d2.w)
-        add.w   d2,d2
-        add.w   d2,d2
-        move.l  a0,YX6_PATCH_ADDR(a3,d2.w)
+yx6_gates:
+        lea     yx6_wB+8(pc),a1         ; a YX6_WRITE is ten bytes; R8's
+        moveq   #3-1,d1                 ; destination word sits at +8
+.gate:
+        moveq   #2,d2                   ; open: the write reaches the data
+        lsr.b   #1,d0                   ; register
+        bcc.s   .set
+        moveq   #0,d2                   ; muted
+.set:
+        move.w  d2,(a1)
+        lea     10(a1),a1
+        dbra    d1,.gate
         rts

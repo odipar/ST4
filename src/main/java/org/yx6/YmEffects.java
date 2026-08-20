@@ -52,7 +52,7 @@ public final class YmEffects {
 
     /** The MFP timer clock and its prescaler table; index 0 stops the timer. */
     public static final int MFP_CLOCK = 2457600;
-    private static final int[] PREDIV = {0, 4, 10, 16, 50, 64, 100, 200};
+    static final int[] PREDIV = {0, 4, 10, 16, 50, 64, 100, 200};
 
     /** The four streams, the converted drums, what was dropped, and one
      *  note per downsampled drum. */

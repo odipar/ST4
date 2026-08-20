@@ -38,6 +38,12 @@ public record Yx6Header(int ring, int chunk, int unit, int hz, int flags, int fr
                 || word(file, Yx6Format.OFFSET_MAGIC + 2) != (Yx6Format.MAGIC & 0xFFFF)) {
             throw new IOException(path + " is not a .yx6 file");
         }
+        int version = word(file, Yx6Format.OFFSET_VERSION);
+        if (version != Yx6Format.VERSION) {
+            throw new IOException(path + " is format version " + version
+                    + ", this build reads " + Yx6Format.VERSION
+                    + " - repack the tune from its .ym source");
+        }
         int section = (int) longAt(file, Yx6Format.OFFSET_INTRO_TABLE);
         if (section == 0) {
             section = (int) longAt(file, Yx6Format.OFFSET_LOOP_TABLE);

@@ -32,7 +32,32 @@ public final class Yx6 {
             System.out.println(song.playerHz());
             return;
         }
-        System.out.println("YX6: YM chiptune packer v1.0 by Robbert van Dalen, "
+        // -script: the compiled effect script, one line per acting frame -
+        // the debugging window into what the v2 streams will carry.
+        if (args.length == 2 && args[0].equals("-script")) {
+            Ym6Reader.Song song;
+            try {
+                song = Ym6Reader.read(Files.readAllBytes(Path.of(args[1])));
+            } catch (IOException | Ym6Reader.FormatException e) {
+                throw error(args[1] + ": " + e.getMessage());
+            }
+            int loop = (int) Math.min(song.loopFrame(), Integer.MAX_VALUE);
+            EffectScript.Result script = EffectScript.compile(song,
+                    YmEffects.extract(song), loop < song.frames() ? loop : 0, 1);
+            System.out.printf("%d frames, split %d%n", script.frames(), script.split());
+            for (int f = 0; f < script.frames(); f++) {
+                if (script.m()[f] == 0 && script.r7force()[f] == 0) {
+                    continue;
+                }
+                System.out.printf("%6d  M=%02X A1=%02X P1=%3d A2=%02X P2=%3d R7|=%02X%n",
+                        f, script.m()[f] & 0xFF, script.a1()[f] & 0xFF,
+                        script.p1()[f] & 0xFF, script.a2()[f] & 0xFF,
+                        script.p2()[f] & 0xFF, script.r7force()[f] & 0xFF);
+            }
+            script.notes().forEach(n -> System.out.println("note: " + n));
+            return;
+        }
+        System.out.println("YX6: YM chiptune packer v2.0 by Robbert van Dalen, "
                 + "streaming ST4");
 
         int ringSize = Yx6Format.DEFAULT_RING_SIZE;
@@ -391,7 +416,7 @@ public final class Yx6 {
                         : "Plays frames 0-" + (result.loopFrame() - 1)
                                 + ", then loops from frame " + result.loopFrame()
                 : "Plays once, then stops");
-        String[] effectNames = {"E1", "T1", "E2", "T2"};
+        String[] effectNames = {"M ", "A1", "P1", "A2", "P2"};
         for (Yx6Encoder.Stream stream : result.streams()) {
             String name = stream.register() < Yx6Format.REGISTER_STREAMS
                     ? String.format("R%-2d", stream.register())
@@ -404,6 +429,9 @@ public final class Yx6 {
                 raw, result.packedSize(), 100.0 * result.packedSize() / raw, result.file().length);
         System.out.printf("Player needs %d bytes of ring plus its state%n",
                 Yx6Format.STREAMS * result.ringSize());
+        for (String note : result.script().notes()) {
+            System.out.println(note);
+        }
 
         if (result.longestOp() > 65535) {
             // A literal run, the one operation ZX1 cannot split. Only a tune

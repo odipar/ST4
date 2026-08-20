@@ -1,6 +1,6 @@
 # YX6 — streaming YM chiptunes on a plain 68000
 
-YX6 is a MinYMiser-style player, now ST4-native: a YM tune packed as eighteen ST4
+YX6 is a MinYMiser-style player, now ST4-native: a YM tune packed as nineteen ST4
 streams — one per sound register, plus four effect streams — each decoded
 through its own small ring by [ST4_wrap.S](../68k/ST4_wrap.S). The music never
 exists in memory as a whole — only rings of a few hundred bytes, refilled one
@@ -17,7 +17,7 @@ other player including the format author's.
 | Piece | What it is |
 |---|---|
 | [`org.yx6.Yx6`](../src/main/java/org/yx6/Yx6.java) | the packer: YM5!/YM6! in, `.yx6` out - one tune or a whole set |
-| [YX6.S](YX6.S) | the player library, 2,264 bytes plus ST4_wrap's 292 |
+| [YX6.S](YX6.S) | the player library, 2,002 bytes plus ST4_wrap's 292 |
 | [YX6_sndh.S](YX6_sndh.S) + [`MkSndh`](../src/main/java/org/yx6/MkSndh.java) | the canonical container: an SNDH v2.2 file, subtunes included |
 | [`YmSndh`](../src/main/java/org/yx6/YmSndh.java) | `.ym` dumps straight to one SNDH, packer flags and all |
 | [YX6_player.S](YX6_player.S) + [`MkPrg`](../src/main/java/org/yx6/MkPrg.java) | a thin TOS shell around those same SNDH bytes |
@@ -148,7 +148,7 @@ yx6 [-f] [-o] [-nN] [-cC] [-kK] [-lF] input.ym [output.yx6]
         faster timer is downsampled to fit, with a warning
 ```
 
-`N` decides how much RAM the player needs (`18 × N` plus about 1.2 KB of
+`N` decides how much RAM the player needs (`19 × N` plus about 1.2 KB of
 fixed state) and how far back the packer may reference, so it trades memory
 for compression; it stops at 2520, because the player reads register `k`'s
 ring through an assembled-in displacement of `k*N`. `C` must be at least
@@ -158,7 +158,7 @@ enforces both, packs every stream with `-mN` so no back-reference reaches
 outside the ring, and with `-l65535` so no operation outruns the 68000
 decoder's word counters.
 
-On a synthetic 1500-frame tune, the eighteen streams pack from 27000 bytes to
+On a synthetic 1500-frame tune, the nineteen streams pack from 27000 bytes to
 about 3600 — the streams for registers that barely change cost a few bytes each.
 On a real one they do far better: Wings of Death's level 6, digidrums and all,
 packs 188784 register bytes into 5064 (2.7%).
@@ -167,7 +167,7 @@ packs 188784 register bytes into 5064 (2.7%).
 
 ```
         lea     song,a0                 ; the .yx6 file, loaded anywhere
-        lea     workspace,a1            ; even address, YX6_FIXED+(18*N) bytes
+        lea     workspace,a1            ; even address, YX6_FIXED+(19*N) bytes
         bsr     YX6_init                ; d0 = 0 when the file was accepted
    vbl:                                 ; once per frame, in supervisor mode
         lea     workspace,a0
@@ -191,7 +191,7 @@ first.
 
 A tune is `O` frames long. Each stream owns a ring of `N` bytes and a saved
 decoder state. On every VBL the player reads one value from each of the
-eighteen rings and refills exactly one stream — stream `k` on the frame
+nineteen rings and refills exactly one stream — stream `k` on the frame
 where `frame mod C` is `k`:
 
 ```text
@@ -285,11 +285,11 @@ Big-endian, fixed header, then the packed streams in register order:
 | offset | size | field |
 |---:|---:|---|
 | 0 | 4 | `'YX6!'` |
-| 4 | 2 | format version (4) |
+| 4 | 2 | format version (5) |
 | 6 | 2 | flags: bit 0 set when the tune loops |
 | 8 | 4 | `O`, the frame count |
 | 12 | 2 | player frequency in Hz |
-| 14 | 2 | `S`, the stream count (18: R0..R13, then E1 T1 E2 T2) |
+| 14 | 2 | `S`, the stream count (19: R0..R13, then M A1 P1 A2 P2) |
 | 16 | 2 | `N`, the ring size |
 | 18 | 2 | `C`, values per call |
 | 20 | 4 | `L`, the loop frame; equal to `O` when the tune plays once |
@@ -297,14 +297,21 @@ Big-endian, fixed header, then the packed streams in register order:
 | 28 | 4 | byte offset of the drum table; zero when there are no drums |
 | 32 | 2 | drum count |
 | 34 | 4·S | byte offset of each intro stream, covering frames `[0, L)` |
-| 106 | 4·S | byte offset of each loop stream, covering frames `[L, O)` |
-| 178 | … | the packed streams, then the drum table |
+| 110 | 4·S | byte offset of each loop stream, covering frames `[L, O)` |
+| 186 | … | the packed streams, then the drum table |
 
 Packed sizes are not stored: ST4 counts output units, not input bytes, so the
-player never needs them. An effect stream's E byte is the YM6 code nibble over
-the MFP prescaler (zero = idle) and its T byte the timer count, normalized
-from either YM dialect; the drum table is `{offset, length}` entries pointing
-at PSG-ready volume bytes, each sample closed by a byte with bit 7 set.
+player never needs them. Streams 14–18 carry the compiled effect script —
+the packer replays the reference player's decisions over the whole timeline
+and writes the outcomes: M says what acts each frame (bit 0/1 = a slot,
+bit 2 + bits 5–3 = the burst-gate state), A names the slot's action (verb,
+voice, prescaler — start, retune, stop, drum, drum-with-arbitration, or a
+held reload/track), P carries the timer count. `O` and `L` count PLAYED
+frames: when the effect state at the wrap differs from its first arrival,
+the split rotates forward until the two agree, and the file carries those
+frames twice, compiled differently. The drum table is `{offset, length}`
+entries pointing at PSG-ready volume bytes, each sample closed by a byte
+with bit 7 set.
 
 ## Tests
 
@@ -348,20 +355,22 @@ and reports the cost:
 ```text
 SUM=OK wraps=1 sum=2941391492
 CALIB 12 241
-T 1700 96
+T 1700 93
 ```
 
-96 ticks of the 200 Hz clock for 1700 frames, with the calibration loop's
-7,864,630 cycles measured at 241 ticks, works out at about **1,850 cycles per
-frame** — roughly 1.2% of a 50 Hz frame on an 8 MHz ST, including the harness's
-own loop, the sound chip's bus wait states and the effect stage finding both
-slots idle (the harness tune's effect codes are deliberately inert, so the
-checksum stays deterministic). Measure your own tune before budgeting: the
+93 ticks of the 200 Hz clock for 1700 frames, with the calibration loop's
+7,864,630 cycles measured at 241 ticks, works out at about **1,790 cycles per
+frame** — roughly 1.1% of a 50 Hz frame on an 8 MHz ST, including the
+harness's own loop, the sound chip's bus wait states and the script finding
+nothing to do (the harness tune's effect codes are deliberately inert, so
+the checksum stays deterministic — and it is the same checksum the v1
+interpreter produced, which is the point). The v1 player measured 96 ticks
+on the same tune: replaying compiled decisions is cheaper than making them. Measure your own tune before budgeting: the
 byte limit is not a time limit, and how hard a chunk is to decode depends on
 the data.
 
 Most of what is left is the decoder itself: at `C=24` a refill decodes 24 bytes
-on eighteen frames out of every twenty-four. Raising `C` amortises the per-call
+on nineteen frames out of every twenty-four. Raising `C` amortises the per-call
 cost over more bytes at the price of a refill frame that costs proportionally
 more, which is the wrong trade if your frame budget is tight.
 
