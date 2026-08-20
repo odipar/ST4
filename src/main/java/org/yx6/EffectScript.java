@@ -16,6 +16,16 @@ import java.util.List;
  * time, and emits five streams of prepared actions the player executes
  * without comparing anything against remembered state.
  *
+ * <p>Names here are the YM format's, because the codes being compiled are:
+ * a SID voice, a digidrum, a sync-buzzer, two effect slots. In the model
+ * {@code doc/terminology.md} describes, all of these are TICK STREAMS -
+ * values written to one register between frames, at a rate a timer sets -
+ * and what this class decides for each is exactly a stream's lifecycle:
+ * start, hold, retune (a new rate, the same place in the cycle), release,
+ * resume, and which stream preempts which when two want one register. The
+ * five streams it emits are script data, not register streams: their bytes
+ * never reach the chip.
+ *
  * <h2>The stream ABI (frozen: packer, player and rigs all cite this)</h2>
  *
  * <pre>

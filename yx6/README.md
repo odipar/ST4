@@ -1,16 +1,17 @@
 # YX6 — streaming YM chiptunes on a plain 68000
 
 YX6 is a MinYMiser-style player, now ST4-native: a YM tune packed as nineteen ST4
-streams — one per sound register, plus four effect streams — each decoded
-through its own small ring by [ST4_wrap.S](../68k/ST4_wrap.S). The music never
+streams — fourteen carrying the sound registers, five carrying the compiled
+effect script — each decoded through its own small ring by
+[ST4_wrap.S](../68k/ST4_wrap.S). The music never
 exists in memory as a whole — only rings of a few hundred bytes, refilled one
 stream per frame.
 
 It grew inside the ST1 project and moved here with it; it plays the fourteen
 standard YM2149 registers, loops, and plays the YM6 special effects: SID
 voice, digidrum and sync-buzzer run on MFP Timers A and D exactly as the
-original replay routines ran them, from effect streams the packer normalizes
-out of either YM dialect. [EFFECTS.md](EFFECTS.md) is the design; sinus-SID
+original replay routines ran them, compiled at pack time out of either YM
+dialect. [EFFECTS.md](EFFECTS.md) is the design; sinus-SID
 is the one effect deliberately left unplayed, in the good company of every
 other player including the format author's.
 
@@ -132,7 +133,7 @@ The file is raw and position independent; pack it with ICE 2.4 for the
 archive if you like, players unpack that themselves.
 
 One honest limitation, in the file's own header comment: a native host
-that dispatches PLAY from its Timer C hook delays slot 2's timer (lower
+that dispatches PLAY from its Timer C hook delays tick channel B's timer (lower
 MFP priority) by up to the length of the call - pending, never lost. VBL
 and emulator hosts have no such window.
 
@@ -206,10 +207,12 @@ VBL  0: use value  0 from every stream; refill R0
 VBL  1: use value  1 from every stream; refill R1
 ...
 VBL 13: use value 13 from every stream; refill R13
-VBL 14: use value 14 from every stream; refill E1
-...
-VBL 17: use value 17 from every stream; refill T2
-VBL 18: use value 18 from every stream; no refill
+VBL 14: use value 14 from every stream; refill M
+VBL 15: use value 15 from every stream; refill A1
+VBL 16: use value 16 from every stream; refill P1
+VBL 17: use value 17 from every stream; refill A2
+VBL 18: use value 18 from every stream; refill P2
+VBL 19: use value 19 from every stream; no refill
 ...
 VBL 23: use value 23 from every stream; no refill
 ```
@@ -273,7 +276,8 @@ cycles more than a RAM one (32 vs 27 ticks for 56000 stores, against 12 for the
 bare loop), so the compare that would save a write costs about as much as the
 write.
 
-The burst runs with interrupts masked. Selecting a register and writing it are
+That burst of writes is what [doc/terminology.md](../doc/terminology.md)
+calls the **frame write**, and it runs with interrupts masked. Selecting a register and writing it are
 two bus cycles, and TOS's own handlers use the sound chip in between — its
 floppy motor timeout writes port A. Without the mask a write can land on
 whatever register the interrupt selected. It costs about 24 cycles a frame.
@@ -289,7 +293,12 @@ whatever register the interrupt selected. It costs about 24 cycles a frame.
 
 ## The `.yx6` container
 
-Big-endian, fixed header, then the packed streams in register order:
+Big-endian, fixed header, then the packed streams in register order. The
+words below follow [doc/terminology.md](../doc/terminology.md): a
+**stream** is a series of values arriving at one register, the fourteen
+register streams are **frame streams** (one value per player call), and
+what the YM format calls an "effect" is a **tick stream**, driven by an
+MFP timer rather than by the frame.
 
 | offset | size | field |
 |---:|---:|---|
@@ -297,8 +306,8 @@ Big-endian, fixed header, then the packed streams in register order:
 | 4 | 2 | format version (5) |
 | 6 | 2 | flags: bit 0 set when the tune loops |
 | 8 | 4 | `O`, the frame count |
-| 12 | 2 | player frequency in Hz |
-| 14 | 2 | `S`, the stream count (19: R0..R13, then M A1 P1 A2 P2) |
+| 12 | 2 | frame rate in Hz: how often the player is called |
+| 14 | 2 | `S`, the stream count: 19, being fourteen frame streams R0..R13 and five of script data, M A1 P1 A2 P2 |
 | 16 | 2 | `N`, the ring size |
 | 18 | 2 | `C`, values per call |
 | 20 | 4 | `L`, the loop frame; equal to `O` when the tune plays once |
@@ -310,17 +319,28 @@ Big-endian, fixed header, then the packed streams in register order:
 | 186 | … | the packed streams, then the drum table |
 
 Packed sizes are not stored: ST4 counts output units, not input bytes, so the
-player never needs them. Streams 14–18 carry the compiled effect script —
-the packer replays the reference player's decisions over the whole timeline
-and writes the outcomes: M says what acts each frame (bit 0/1 = a slot,
-bit 2 + bits 5–3 = the burst-gate state), A names the slot's action (verb,
-voice, prescaler — start, retune, stop, drum, drum-with-arbitration, or a
-held reload/track), P carries the timer count. `O` and `L` count PLAYED
-frames: when the effect state at the wrap differs from its first arrival,
-the split rotates forward until the two agree, and the file carries those
-frames twice, compiled differently. The drum table is `{offset, length}`
-entries pointing at PSG-ready volume bytes, each sample closed by a byte
-with bit 7 set.
+player never needs them.
+
+Streams 14–18 are **script data** rather than frame streams: they are
+packed the same way, but their bytes never reach a chip register. They
+carry the compiled effect script — the packer replays the reference
+player's decisions over the whole timeline and writes down the outcomes.
+**M** says what acts this frame (bit 0/1 = a tick channel, bit 2 +
+bits 5–3 = the burst-gate state, which registers the frame write must
+leave alone). **A** names the channel's action: a verb, a voice and a
+prescaler, the verbs being start, retune, stop, a **PCM stream** start,
+a PCM start that preempts a **toggle stream** on the same voice, or a
+hold that reloads or tracks. **P** carries the timer count, the other
+half of the **rate**.
+
+`O` and `L` count PLAYED frames: when the effect state at the wrap
+differs from its first arrival, the split rotates forward until the two
+agree, and the file carries those frames twice, compiled differently.
+
+The drum table holds the sample tables a PCM stream plays out: `{offset,
+length}` entries pointing at PSG-ready volume bytes, each sample closed
+by a byte with bit 7 set. YM calls these digidrums, and their numbering
+is the YM file's.
 
 ## Tests
 

@@ -8,6 +8,61 @@ github.com/arnaud-carre/StSound @ d1876bc), the 68000 practice against gwEm's
 shipping maxYMiser replayer, Hatari's MFP/PSG models, EmuTOS and the ST
 hardware register docs, and the numbers against a survey of 516 real YM files.
 
+## The model these four share
+
+Read `doc/terminology.md` for the full vocabulary and a two-way mapping to
+the YM names; this is the short of it, because the rest of this document
+reads better once the four effects stop looking like four unrelated
+tricks.
+
+Everything the player does is one operation: **write a value to a
+register**. Only the rate changes, and that gives three clocks — the
+**frame clock**, one call to the player, usually 50 a second; the two
+**tick clocks**, one MFP timer interrupt each, 48 to 25,600 a second; and
+the YM2149's own 2 MHz, which software never reaches. A series of values
+arriving at one register is a **stream**: the fourteen register streams
+are **frame streams**, and an effect is a **tick stream**.
+
+Three of the four effects are the same thing. **A volume stream sends a
+series of volume values to one voice, one per tick** — which is all a
+DigiDrum is, all a SID-Voice is, and all a Sinus-SID would be. They
+differ in the series, in whether it repeats, and in whether the voice's
+own generators are left running underneath:
+
+| YM6 | series | repeats | the voice | rate |
+|---|---|---|---|---|
+| DigiDrum | a stored sample, any length | no, plays once and ends | disconnected (section 4's mixer forcing) so only the values are heard | **independent** — the sample's playback pitch |
+| SID-Voice | two values, loud and off | yes, until stopped | left connected, so the values chop the tone | **derived** from the note playing |
+| Sinus-SID | a smooth curve | yes, until stopped | left connected, so the values shape the tone | **derived** from the note playing |
+
+So a SID-Voice is a DigiDrum whose sample is two values long and repeats,
+and the format keeps them apart for two reasons, neither of them about
+sound. The first is cost: a general sample stream holds a pointer, reads,
+steps and tests for the end on every tick, while a two-value stream flips
+between two numbers it already holds — at 25 kHz on an 8 MHz 68000 that
+gap is most of the machine, and it is why the tick handlers of section 5
+are written as separate blocks rather than one. The second is that a
+drum's rate answers to nothing (there is no note; the voice is
+disconnected) while a SID's rate is derived from the note it chops, so
+the two must stay in ratio. That ratio is why **retune** exists in
+section 4: a melody moves, a derived rate moves with it, and restarting
+the square on every note would be audible.
+
+Sync-Buzzer is the odd one. It writes the envelope shape register, the
+same shape every tick, and the values say nothing — what matters is the
+side effect, since writing that register sends the envelope generator
+back to the start of its shape. It also reaches a voice indirectly: there
+is one envelope generator, and a voice takes its loudness from it only
+while following the envelope, so a buzzer is the one effect not tied to a
+single voice.
+
+Two more terms this document uses without naming: a stream's **phase** is
+its place in its own cycle, and its **phase policy** is what becomes of
+that place across a gap — free-running, or restarting from zero. Which
+policy a pack uses is the packer's `-sidresume` flag, and the reasoning
+behind both is in `doc/experiments/2026-08-20-sid-phase-semantics.md`
+and its companion case study.
+
 ## 0. Where v2 moved the machinery
 
 Format v5 replaced the E/T streams and the player's interpreting effect
@@ -32,6 +87,15 @@ side; the tick handlers, the timer programming order, the burst-gate
 mechanism and the budgets still read true.
 
 ## 1. The stream concept
+
+> Sections 1 to 6 describe the **v4** shape, where each slot had a control
+> stream and a timer-count stream, E1/T1 and E2/T2. They stay because the
+> rules are still the specification the pack-time simulator implements.
+> The **v5** file replaced those four streams with five of script data,
+> M A1 P1 A2 P2, as section 0 says and as the container table in
+> [README.md](README.md) lays out. Where these sections say "the player
+> decides", read "the packer decided, and wrote the answer down".
+
 
 A YM6 frame can start up to two effects. Each slot is three fields smeared
 across the frame's spare register bits, plus a parameter hidden in a volume
@@ -107,7 +171,7 @@ Survey of 516 local YM files plus the research corpus:
   TP=TC=0 (all must be no-ops, per ST-Sound's `if (prediv*count)` guard),
   and files exist with effect codes set but zero drums in the file.
 
-## 3. The file: yx6 format v4
+## 3. The file: yx6 format v4 (superseded by v5)
 
 ```
 header as v3 through the master clock, then:

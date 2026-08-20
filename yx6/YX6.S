@@ -1,18 +1,22 @@
 ; -----------------------------------------------------------------------------
 ; YX6.S - streaming YM chiptune player for the plain 68000 (Atari ST)
 ;
-; By Robbert van Dalen. Plays a .yx6 file: eighteen streams - the fourteen
-; YM2149 registers plus each effect slot's control byte and timer count -
-; every one packed as its own embedded ST4 container and decoded through its
-; own small ring by ST4_wrap.S. Written by Claude (Anthropic's Claude Code)
-; under Robbert's direction, based on ZX1 v1.5 by Einar Saukas and inspired
-; by Steve Clarets' MinYMiser. Use it freely, including commercially, as long
-; as your documentation says you used ZX1 through ST4 (see LICENSE).
+; By Robbert van Dalen. Plays a .yx6 file: nineteen streams - fourteen frame
+; streams, one per sound register, and five carrying the compiled effect
+; script - every one packed as its own embedded ST4 container and decoded
+; through its own small ring by ST4_wrap.S. Written by Claude (Anthropic's
+; Claude Code) under Robbert's direction, based on ZX1 v1.5 by Einar Saukas
+; and inspired by Steve Clarets' MinYMiser. Use it freely, including
+; commercially, as long as your documentation says you used ZX1 through
+; ST4 (see LICENSE).
 ;
-; It plays the fourteen standard sound registers, loops, and plays the YM
-; special effects - digidrums, SID voices, the sync-buzzer - on MFP Timers
-; A and D. Sinus-SID, which no player has ever implemented, is dropped at
-; pack time. EFFECTS.md, next to this file, holds the design.
+; It plays the fourteen standard sound registers, loops, and plays what the
+; YM format calls its special effects - digidrums, SID voices, the
+; sync-buzzer - on MFP Timers A and D. In this player's own words those are
+; TICK STREAMS: series of values written to one register between frames,
+; timer-driven, as against the FRAME STREAMS that carry the music itself.
+; Sinus-SID, which no player has ever implemented, is dropped at pack time.
+; EFFECTS.md holds the design and doc/terminology.md the vocabulary.
 ;
 ; REQUIRES ST4_wrap.S, built for the SAME unit size the tune was packed with
 ; (yx6 -kK; byte units unless the packer was told otherwise). Include both, in
@@ -34,22 +38,25 @@
 ; stream - stream k on the VBL where the frame number modulo C is k. With
 ; C >= 19 every stream is refilled once per C frames, one refill per VBL, so
 ; the work per frame is flat, and ordered for the chip's benefit: the burst
-; gates, then the fourteen register writes - leaving the VBL at a FIXED
-; offset, whatever the frame's effects cost - then the effect script's
-; actions, then one ST4_resume of C bytes. Since C divides N and a call never reaches
-; the ring end, ST4_wrap.S is the decoder that fits: the player counts the
-; calls itself and wraps the write pointer when it lands on the ring end.
+; gates, then the fourteen register writes - the FRAME WRITE, leaving the
+; VBL at a FIXED offset whatever the frame's tick streams cost - then the
+; script's actions, then one ST4_resume of C bytes. Since C divides N and a
+; call never reaches the ring end, ST4_wrap.S is the decoder that fits: the
+; player counts the calls itself and wraps the write pointer when it lands
+; on the ring end.
 ;
-; EFFECTS. The last five rings carry the COMPILED EFFECT SCRIPT: the packer
-; replayed the reference player's whole decision logic over the timeline -
-; held or new, retune or restart, who stops whose timer, when a drum's gate
-; reopens - and wrote the outcomes as prepared actions. Ring M says what
-; acts this frame (almost always: nothing, one test); A1/P1 and A2/P2 carry
-; each slot's action byte and timer count. The handlers copy prepared
-; values into Timers A and D and this blob's tick handlers - digidrum, SID
-; square, sync-buzzer - and compare NOTHING at run time. The drummed
-; voice's mixer forcing arrives baked into the R7 stream, and no ring byte
-; is ever edited: what v1 discovered per frame, the file simply says.
+; THE SCRIPT. The last five rings are not frame streams: their bytes never
+; reach a register. They carry the COMPILED EFFECT SCRIPT, in which the
+; packer replayed the reference player's whole decision logic over the
+; timeline - held or new, retune or restart, who stops whose timer, when a
+; drum's gate reopens - and wrote the outcomes down as prepared actions.
+; Ring M says what acts this frame (almost always: nothing, one test);
+; A1/P1 and A2/P2 carry each tick channel's action byte and timer count.
+; The handlers copy prepared values into Timers A and D and this blob's
+; tick handlers - digidrum, SID square, sync-buzzer - and compare NOTHING
+; at run time. The drummed voice is DISCONNECTED by routing baked into the
+; R7 stream, so its sample is heard alone, and no ring byte is ever edited:
+; what v1 discovered per frame, the file simply says.
 ;
 ; LOOPING. A packed stream can only be restarted from its beginning, so the packer
 ; splits every register at the loop frame L: an intro stream for frames [0, L)

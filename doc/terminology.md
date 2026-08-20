@@ -375,23 +375,35 @@ frame stream nobody named.
 
 ## The rest of the mapping
 
+Names the YM format itself uses:
+
 | YM5/YM6 | YX6 |
 |---|---|
 | R0-R5, R6, R7 | **tone period**, **noise period**, **routing** streams |
 | R8-R10, R11-R12, R13 | **volume**, **envelope period**, **envelope shape** streams |
 | effect; effect slot 1 and 2 | **tick stream**; **tick channel** A and B (a third is allowed) |
-| prescaler x timer count | **rate** |
+| TP and TC, the prescaler and timer count fields | the two halves of a **rate** |
 | vmax | the **toggle stream**'s loud value |
-| VBL, "50 Hz replay", TC50 / TC200 | the **frame clock** |
-| MFP timer A and D | the clocks behind **tick channels** A and B |
-| mixer forcing | **disconnecting** a voice |
-| the burst | the **frame write** |
+| drum number, drum table | which stored sample a **PCM stream** plays, and where the samples live |
+| player frequency | the **frame clock** |
 
-Two more names are not YM's. **M, A1, P1, A2, P2** are YX6's own
-letters for its per-frame instruction data, called control, command and
-parameter data here. The **ym2149-rs** and **maxYMiser** gap models are
-two other players' names for zero-restart and free-running phase
-policy.
+Names from the hardware, which belong to neither format:
+
+| Atari ST | YX6 |
+|---|---|
+| VBL, the vertical blank | the usual source of the **frame clock** |
+| MFP timer A and D | the clocks behind **tick channels** A and B |
+| the MFP's prescaler and data register | **prescaler** and **timer count** |
+
+Names YX6 itself used before this file, and one from elsewhere:
+
+| where it comes from | YX6 |
+|---|---|
+| the burst (the player's own word, still its label in `YX6.S`) | the **frame write** |
+| mixer forcing (this repo's earlier phrase) | **disconnecting** a voice |
+| M, A1, P1, A2, P2 (YX6's stream letters) | control, command and parameter **script data** |
+| the ym2149-rs and maxYMiser gap models | **zero-restart** and **free-running** **phase policy** |
+| SNDH's TC50 and TC200 tags | the **frame clock** a tune asks for |
 
 ## If you know these ideas from elsewhere
 
