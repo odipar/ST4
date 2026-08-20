@@ -53,10 +53,10 @@ public final class YmEffects {
     /** The four effect types, as they sit in code bits 7-6. In the
      *  engine's words: SID is a toggle stream, DRUM a PCM stream, BUZZER a
      *  retrigger stream, SINUS a curve stream (never implemented). */
-    public static final int TYPE_SID = 0x00;
-    public static final int TYPE_DRUM = 0x40;
-    public static final int TYPE_SINUS = 0x80;
-    public static final int TYPE_BUZZER = 0xC0;
+    public static final int KIND_TOGGLE = 0x00;
+    public static final int KIND_PCM = 0x40;
+    public static final int KIND_CURVE = 0x80;
+    public static final int KIND_RETRIGGER = 0xC0;
 
     /** The fastest tick rate a real player programs: SIDs and buzzers
      * above it are dropped, drums resampled under it. The CLI's -drumhz
@@ -136,9 +136,9 @@ public final class YmEffects {
                 // YM5: R1 bits 4-5 are a SID voice, R3 bits 4-5 a drum voice
                 // (the version byte is load-bearing: the same bits mean other
                 // things in YM6), and a YM5 drum's prescaler always sits in R8.
-                slot1 = effects.validate(TYPE_SID | ((effects.register(1, frame) & 0x30)),
+                slot1 = effects.validate(KIND_TOGGLE | ((effects.register(1, frame) & 0x30)),
                         effects.register(6, frame) >> 5, effects.register(14, frame), frame);
-                slot2 = effects.validate(TYPE_DRUM | ((effects.register(3, frame) & 0x30)),
+                slot2 = effects.validate(KIND_PCM | ((effects.register(3, frame) & 0x30)),
                         effects.register(8, frame) >> 5, effects.register(15, frame), frame);
             }
             e1[frame] = (byte) (slot1 >> 8);
@@ -165,7 +165,7 @@ public final class YmEffects {
                     register(6, frame) >> 5, register(14, frame), frame);
             surveyDrum(ym6 ? register(3, frame) & 0xF0
                             : (register(3, frame) & 0x30) != 0
-                                    ? TYPE_DRUM | (register(3, frame) & 0x30) : 0,
+                                    ? KIND_PCM | (register(3, frame) & 0x30) : 0,
                     register(8, frame) >> 5, register(15, frame), frame);
         }
         for (int i = 0; i < drums.length; i++) {
@@ -208,7 +208,7 @@ public final class YmEffects {
     }
 
     private void surveyDrum(int code, int prescaler, int count, int frame) {
-        if ((code & 0xC0) != TYPE_DRUM || (code & 0x30) == 0) {
+        if ((code & 0xC0) != KIND_PCM || (code & 0x30) == 0) {
             return;
         }
         prescaler &= 7;
@@ -333,7 +333,7 @@ public final class YmEffects {
             return 0;                           // the slot is idle this frame
         }
         int type = code & 0xC0;
-        if (type == TYPE_SINUS) {
+        if (type == KIND_CURVE) {
             sinus++;
             return 0;
         }
@@ -343,7 +343,7 @@ public final class YmEffects {
             inert++;                            // the reference player's no-op
             return 0;
         }
-        if (type == TYPE_DRUM) {
+        if (type == KIND_PCM) {
             int voice = (voiceBits >> 4) - 1;
             int number = register(8 + voice, frame) & 31;
             if (number >= drums.length) {
@@ -367,7 +367,7 @@ public final class YmEffects {
             }
         }
         int hz = MFP_CLOCK / (PREDIV[prescaler] * count);
-        if (hz > (type == TYPE_DRUM ? drumHz : MAX_TIMER_HZ)) {
+        if (hz > (type == KIND_PCM ? drumHz : MAX_TIMER_HZ)) {
             tooFast++;                  // drums use their own ceiling, so
             return 0;                   // -drumhz above 25600 works too
         }
@@ -379,7 +379,7 @@ public final class YmEffects {
      * end markers - those belong to the file layout, not the sound.
      */
     private static byte[][] convertDrums(Ym6Reader.Song song) {
-        int count = Math.min(song.digidrums(), Yx6Format.MAX_DRUMS);
+        int count = Math.min(song.digidrums(), Yx6Format.MAX_SAMPLES);
         byte[][] converted = new byte[count][];
         boolean fourBit = (song.attributes() & Ym6Reader.Song.A_DRUM4BITS) != 0;
         for (int i = 0; i < count; i++) {

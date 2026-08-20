@@ -227,7 +227,7 @@ YX6_STATE       equ     50              ; 19 decoder states, from an even base
 
 ; Each effect slot's descriptor holds only what tells the two slots apart:
 ; its timer's registers, its vector, its partner's control register (the
-; DRUM_ARB action stops that timer first), and its tick-handler block. No
+; START_PCM_PREEMPT action stops that timer first), and its tick-handler block. No
 ; remembered state - the script compiled every comparison at pack time. The
 ; hardware addresses are words: movea.w sign-extends $FAxx to $FFFFFAxx.
 SD_CTRL         equ     0               ; word  timer control register
@@ -273,8 +273,8 @@ YH_RING         equ     16
 YH_CHUNK        equ     18
 YH_LOOP         equ     20
 YH_CLOCK        equ     24
-YH_DRUMS        equ     28              ; long: the drum table, 0 when none
-YH_DRUMCOUNT    equ     32              ; word
+YH_SAMPLES        equ     28              ; long: the drum table, 0 when none
+YH_SAMPLECOUNT    equ     32              ; word
 YH_INTRO_TABLE  equ     34              ; 19 offsets: the frames before the loop
 YH_LOOP_TABLE   equ     YH_INTRO_TABLE+(YX6_STREAMS*4)
 
@@ -451,12 +451,12 @@ YX6_init:
 ; is one indexed load instead of an entry walk: the DRUM action's byte is
 ; the sample number, pre-scaled to index these longs.
         movea.l YX6_FILE(a3),a0
-        move.l  YH_DRUMS(a0),d1
+        move.l  YH_SAMPLES(a0),d1
         beq.s   .no_drums
         movea.l a0,a2
         adda.l  d1,a2                   ; the entries: offset.l, length.w
         lea     yx6_samples(pc),a1
-        move.w  YH_DRUMCOUNT(a0),d0
+        move.w  YH_SAMPLECOUNT(a0),d0
         subq.w  #1,d0
         bmi.s   .no_drums
 .drum_addr:
@@ -922,7 +922,7 @@ yx6_parmoff:
 ; One drum tick: the sample byte goes straight to the voice's volume register.
 ; The byte after the last has bit 7 set, so the same move answers "done": park
 ; the volume mid-scale against the click, stop the timer, drop the flag.
-yx6_drumA:
+yx6_pcmA:
         .if YX6_PERF
         move.w  $FFFF8240.w,-(sp)       ; Timer A works in green
         move.w  #$070,$FFFF8240.w
@@ -932,7 +932,7 @@ yx6_drumA:
         bmi.s   .ended
         move.w  #$2500,sr               ; pair done: the other timer may stack
         move.l  a0,-(sp)                ; the stack, never the USP: this side
-        lea     yx6_drumA+8+PERF_PAD(pc),a0 ; nests into parked windows
+        lea     yx6_pcmA+8+PERF_PAD(pc),a0 ; nests into parked windows
         addq.l  #1,(a0)                 ; step the operand itself
         .if YX6_PERF
         lea     yx6_perf_acc(pc),a0
@@ -962,7 +962,7 @@ yx6_parkA:
 ; silence - and installs the other half as the next tick, one word into the
 ; vector. Select and data land in one move.l: the immediate's bytes hit
 ; $8800 (select) and $8802 (data) by bus layout.
-yx6_sidA_on:
+yx6_toggleA_on:
         .if YX6_PERF
         move.w  $FFFF8240.w,-(sp)
         move.w  #$070,$FFFF8240.w
@@ -979,7 +979,7 @@ yx6_sidA_on:
         .endif
         move.b  #$DF,$FFFFFA0F.w
         rte
-yx6_sidA_off:
+yx6_toggleA_off:
         .if YX6_PERF
         move.w  $FFFF8240.w,-(sp)
         move.w  #$070,$FFFF8240.w
@@ -999,7 +999,7 @@ yx6_sidA_off:
 
 ; The sync-buzzer tick: writing the shape to R13 restarts the envelope, and
 ; that restart at the timer's rate is the whole effect.
-yx6_buzzA:
+yx6_retriggerA:
         .if YX6_PERF
         move.w  $FFFF8240.w,-(sp)
         move.w  #$070,$FFFF8240.w
@@ -1018,7 +1018,7 @@ yx6_buzzA:
 
 ; Slot 2's instances: Timer D's stop, vector and in-service bit, otherwise
 ; the A block byte for byte.
-yx6_drumD:
+yx6_pcmD:
         .if YX6_PERF
         move.w  $FFFF8240.w,-(sp)       ; Timer D works in blue
         move.w  #$007,$FFFF8240.w
@@ -1032,7 +1032,7 @@ yx6_drumD:
         .else
         move.l  a0,-(sp)
         .endif
-        lea     yx6_drumD+8+PERF_PAD(pc),a0
+        lea     yx6_pcmD+8+PERF_PAD(pc),a0
         addq.l  #1,(a0)
         .if YX6_PERF
         lea     yx6_perf_acc(pc),a0
@@ -1062,7 +1062,7 @@ yx6_parkD:
         move.b  #$EF,$FFFFFA11.w
         rte
 
-yx6_sidD_on:
+yx6_toggleD_on:
         .if YX6_PERF
         move.w  $FFFF8240.w,-(sp)
         move.w  #$007,$FFFF8240.w
@@ -1079,7 +1079,7 @@ yx6_sidD_on:
         .endif
         move.b  #$EF,$FFFFFA11.w
         rte
-yx6_sidD_off:
+yx6_toggleD_off:
         .if YX6_PERF
         move.w  $FFFF8240.w,-(sp)
         move.w  #$007,$FFFF8240.w
@@ -1097,7 +1097,7 @@ yx6_sidD_off:
         move.b  #$EF,$FFFFFA11.w
         rte
 
-yx6_buzzD:
+yx6_retriggerD:
         .if YX6_PERF
         move.w  $FFFF8240.w,-(sp)
         move.w  #$007,$FFFF8240.w
@@ -1121,17 +1121,17 @@ yx6_perf_acc:
 
 ; Where the patched operands sit, measured on the A block; the D block is
 ; byte-congruent, so the same offsets serve both through SD_ISR.
-ISR_DRUM_SEL    equ     PERF_PAD+3
-ISR_DRUM_PTR    equ     PERF_PAD+8
-ISR_SIDON       equ     yx6_sidA_on-yx6_drumA
-ISR_SIDON_SEL   equ     ISR_SIDON+PERF_PAD+2
-ISR_SID_VOL     equ     ISR_SIDON+PERF_PAD+4
-ISR_SIDON_NEXT  equ     ISR_SIDON+PERF_PAD+14
-ISR_SIDOFF      equ     yx6_sidA_off-yx6_drumA
-ISR_SIDOFF_SEL  equ     ISR_SIDOFF+PERF_PAD+2
-ISR_SIDOFF_NEXT equ     ISR_SIDOFF+PERF_PAD+14
-ISR_BUZZ        equ     yx6_buzzA-yx6_drumA
-ISR_BUZZ_SHAPE  equ     ISR_BUZZ+PERF_PAD+4
+ISR_PCM_SEL    equ     PERF_PAD+3
+ISR_PCM_PTR    equ     PERF_PAD+8
+ISR_TOGGLE_ON       equ     yx6_toggleA_on-yx6_pcmA
+ISR_TOGGLE_ON_SEL   equ     ISR_TOGGLE_ON+PERF_PAD+2
+ISR_TOGGLE_VOL     equ     ISR_TOGGLE_ON+PERF_PAD+4
+ISR_TOGGLE_ON_NEXT  equ     ISR_TOGGLE_ON+PERF_PAD+14
+ISR_TOGGLE_OFF      equ     yx6_toggleA_off-yx6_pcmA
+ISR_TOGGLE_OFF_SEL  equ     ISR_TOGGLE_OFF+PERF_PAD+2
+ISR_TOGGLE_OFF_NEXT equ     ISR_TOGGLE_OFF+PERF_PAD+14
+ISR_RETRIGGER        equ     yx6_retriggerA-yx6_pcmA
+ISR_RETRIGGER_SHAPE  equ     ISR_RETRIGGER+PERF_PAD+4
 
 ; -----------------------------------------------------------------------------
 ; yx6_link, from YX6_init: the run-time addresses only a loaded player knows.
@@ -1144,17 +1144,17 @@ yx6_link:
         moveq   #0,d0
         bsr     yx6_gates
         lea     yx6_desc1(pc),a0
-        lea     yx6_drumA(pc),a2
+        lea     yx6_pcmA(pc),a2
         move.l  a2,SD_ISR(a0)
         bsr.s   .partners
         lea     yx6_desc2(pc),a0
-        lea     yx6_drumD(pc),a2
+        lea     yx6_pcmD(pc),a2
         move.l  a2,SD_ISR(a0)
 .partners:
-        lea     ISR_SIDOFF(a2),a0       ; each half installs the other,
-        move.l  a0,ISR_SIDON_NEXT(a2)   ; as a whole vector
-        lea     ISR_SIDON(a2),a0
-        move.l  a0,ISR_SIDOFF_NEXT(a2)
+        lea     ISR_TOGGLE_OFF(a2),a0       ; each half installs the other,
+        move.l  a0,ISR_TOGGLE_ON_NEXT(a2)   ; as a whole vector
+        lea     ISR_TOGGLE_ON(a2),a0
+        move.l  a0,ISR_TOGGLE_OFF_NEXT(a2)
         rts
 
 ; -----------------------------------------------------------------------------
@@ -1176,13 +1176,13 @@ yx6_act:
         jmp     yx6_verbs(pc,d1.w)
 yx6_verbs:
         dc.w    yx6_resume-yx6_verbs    ; verb 0: the masked SID comes back
-        dc.w    yx6_held-yx6_verbs
-        dc.w    yx6_halt-yx6_verbs
-        dc.w    yx6_sid_start-yx6_verbs
-        dc.w    yx6_sid_retune-yx6_verbs
-        dc.w    yx6_buzz_start-yx6_verbs
-        dc.w    yx6_drum-yx6_verbs
-        dc.w    yx6_drum_arb-yx6_verbs
+        dc.w    yx6_hold-yx6_verbs
+        dc.w    yx6_release-yx6_verbs
+        dc.w    yx6_toggle_start-yx6_verbs
+        dc.w    yx6_retune-yx6_verbs
+        dc.w    yx6_retrigger_start-yx6_verbs
+        dc.w    yx6_pcm-yx6_verbs
+        dc.w    yx6_pcm_preempt-yx6_verbs
 
 ; The voice's parameter ring byte - the SID volume, the buzzer shape or the
 ; drum number ride the voice's own register stream, marked by the script.
@@ -1197,7 +1197,7 @@ yx6_voice:
         adda.l  d1,a1                   ; this frame's byte
         rts
 
-yx6_halt:                               ; STOP: low bit clear = stop the
+yx6_release:                               ; STOP: low bit clear = stop the
         btst    #0,d0                   ; timer (a buzzer release); set =
         bne.s   .mask                   ; MASK only - a SID release: the
         movea.w SD_CTRL(a5),a1          ; counter keeps counting and the
@@ -1224,14 +1224,14 @@ yx6_resume:                             ; unmask; reload the count if it
         move.b  (a1),d1
         and.w   #15,d1
         movea.l SD_ISR(a5),a2
-        move.b  d1,ISR_SID_VOL(a2)
+        move.b  d1,ISR_TOGGLE_VOL(a2)
 .same:
         movea.w SD_IER(a5),a1
         move.w  SD_IERBIT(a5),d1
         bset    d1,(a1)
         rts
 
-yx6_held:                               ; flags: 1 = reload the count, 2 =
+yx6_hold:                               ; flags: 1 = reload the count, 2 =
         btst    #0,d0                   ; track the SID volume, 4 = track
         beq.s   .tracks                 ; the buzzer shape - only on frames
         movea.l a4,a1                   ; where the value changed
@@ -1249,21 +1249,21 @@ yx6_held:                               ; flags: 1 = reload the count, 2 =
         movea.l SD_ISR(a5),a2
         btst    #2,d0
         bne.s   .shape
-        move.b  d1,ISR_SID_VOL(a2)
+        move.b  d1,ISR_TOGGLE_VOL(a2)
         rts
 .shape:
-        move.b  d1,ISR_BUZZ_SHAPE(a2)
+        move.b  d1,ISR_RETRIGGER_SHAPE(a2)
 .done:
         rts
 
-yx6_sid_start:                          ; a fresh square restarts at phase
+yx6_toggle_start:                          ; a fresh square restarts at phase
         bsr     yx6_voice               ; zero: the voice goes silent NOW,
         movea.l SD_ISR(a5),a2           ; and the first tick - one timer
         move.w  d5,d1                   ; period out - plays the loud half.
         lsr.w   #2,d1                   ; Retunes and resumes never come
         addq.w  #8,d1                   ; here: a held or masked square's
-        move.b  d1,ISR_SIDON_SEL(a2)    ; phase free-runs
-        move.b  d1,ISR_SIDOFF_SEL(a2)
+        move.b  d1,ISR_TOGGLE_ON_SEL(a2)    ; phase free-runs
+        move.b  d1,ISR_TOGGLE_OFF_SEL(a2)
         lea     YX6_PSG,a1
         move.w  sr,-(sp)                ; select and write are two bus
         ori.w   #$0700,sr               ; cycles: no tick in between
@@ -1273,34 +1273,34 @@ yx6_sid_start:                          ; a fresh square restarts at phase
         bsr     yx6_voice
         move.b  (a1),d1
         and.w   #15,d1
-        move.b  d1,ISR_SID_VOL(a2)
-        lea     ISR_SIDON(a2),a1
+        move.b  d1,ISR_TOGGLE_VOL(a2)
+        lea     ISR_TOGGLE_ON(a2),a1
         move.l  a1,d4
         bra.s   yx6_program
 
-yx6_sid_retune:                         ; the vector is NEVER touched: the
+yx6_retune:                         ; the vector is NEVER touched: the
         bsr     yx6_voice               ; square's phase lives through every
         move.b  (a1),d1                 ; retune, and through a resume after
         and.w   #15,d1                  ; a drum borrowed the voice
         movea.l SD_ISR(a5),a2
-        move.b  d1,ISR_SID_VOL(a2)
+        move.b  d1,ISR_TOGGLE_VOL(a2)
         moveq   #0,d4
         bra.s   yx6_program
 
-yx6_buzz_start:
+yx6_retrigger_start:
         bsr     yx6_voice
         move.b  (a1),d1
         and.w   #15,d1
         movea.l SD_ISR(a5),a2
-        move.b  d1,ISR_BUZZ_SHAPE(a2)
-        lea     ISR_BUZZ(a2),a1
+        move.b  d1,ISR_RETRIGGER_SHAPE(a2)
+        lea     ISR_RETRIGGER(a2),a1
         move.l  a1,d4
         bra.s   yx6_program
 
-yx6_drum_arb:                           ; arbitration, compiled: the loser's
+yx6_pcm_preempt:                           ; arbitration, compiled: the loser's
         movea.w SD_OTHER_CTRL(a5),a1    ; timer stops FIRST, then the drum
         andi.b  #$F0,(a1)               ; arms its own - the reference order
-yx6_drum:
+yx6_pcm:
         bsr     yx6_voice
         moveq   #0,d1
         move.b  (a1),d1                 ; the sample number, 0..31
@@ -1308,11 +1308,11 @@ yx6_drum:
         lea     yx6_samples(pc),a2
         move.l  0(a2,d1.w),d2           ; its absolute address, from init
         movea.l SD_ISR(a5),a2
-        move.l  d2,ISR_DRUM_PTR(a2)
+        move.l  d2,ISR_PCM_PTR(a2)
         move.w  d5,d1
         lsr.w   #2,d1
         addq.w  #8,d1
-        move.b  d1,ISR_DRUM_SEL(a2)
+        move.b  d1,ISR_PCM_SEL(a2)
         move.l  a2,d4                   ; the tick handler is the block base
         ; falls through: a trigger and a retrigger program alike
 

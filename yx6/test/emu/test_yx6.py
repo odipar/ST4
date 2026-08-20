@@ -385,7 +385,7 @@ def run_effects(super_host: bool = False, perf: bool = False) -> str:
         values[14][frame] = 200
     # The arbitration scene: a SID runs on voice B from slot 2, and at frame
     # 48 a drum fires on the SAME voice from slot 1. The script compiled the
-    # whole exchange: DRUM_ARB stops the SID's timer first, the suppressed
+    # whole exchange: START_PCM_PREEMPT stops the SID's timer first, the suppressed
     # SID costs nothing at all, and it resumes BY RETUNE - phase intact - at
     # the frame after the drum's computed end.
     for frame in range(45, 53):
@@ -408,16 +408,16 @@ def run_effects(super_host: bool = False, perf: bool = False) -> str:
     # handlers reach every patched operand through offsets measured on the
     # A block.
     sym = player.symbols
-    for a, d in (('yx6_sidA_on', 'yx6_sidD_on'),
-                 ('yx6_sidA_off', 'yx6_sidD_off'),
-                 ('yx6_buzzA', 'yx6_buzzD'),
+    for a, d in (('yx6_toggleA_on', 'yx6_toggleD_on'),
+                 ('yx6_toggleA_off', 'yx6_toggleD_off'),
+                 ('yx6_retriggerA', 'yx6_retriggerD'),
                  ('yx6_parkA', 'yx6_parkD')):
-        if sym[a] - sym['yx6_drumA'] != sym[d] - sym['yx6_drumD']:
+        if sym[a] - sym['yx6_pcmA'] != sym[d] - sym['yx6_pcmD']:
             return f'effects: {a}/{d} broke the ISR block congruence'
 
-    drum_d = CODE + sym['yx6_drumD']
-    sid_on = CODE + sym['yx6_sidA_on']
-    sid_off = CODE + sym['yx6_sidA_off']
+    drum_d = CODE + sym['yx6_pcmD']
+    sid_on = CODE + sym['yx6_toggleA_on']
+    sid_off = CODE + sym['yx6_toggleA_off']
 
     def gate(voice):
         """The voice's burst-gate displacement word: 2 open, 0 muted."""
@@ -447,7 +447,7 @@ def run_effects(super_host: bool = False, perf: bool = False) -> str:
                 return f'effects: frame {frame} wrote the SID voice volume'
             want = 10 - (frame - 4) // 2 if frame <= 14 else 10
             vol = player.uc.mem_read(
-                CODE + sym['yx6_drumA'] + sym['ISR_SID_VOL'], 1)[0]
+                CODE + sym['yx6_pcmA'] + sym['ISR_TOGGLE_VOL'], 1)[0]
             if vol != want:
                 return (f'effects: frame {frame} tick volume {vol}, '
                         f'the slide says {want}')
@@ -496,7 +496,7 @@ def run_effects(super_host: bool = False, perf: bool = False) -> str:
             if registers.get(7) != 0x38 | 0xC0 | 0x24:  # baked, not forced
                 return f'effects: frame 30 mixer {registers.get(7):#x}'
             position = int.from_bytes(player.uc.mem_read(
-                drum_d + player.symbols['ISR_DRUM_PTR'], 4), 'big')
+                drum_d + player.symbols['ISR_PCM_PTR'], 4), 'big')
             drum = int.from_bytes(player.uc.mem_read(
                 player.file + Yx6_DRUM_TABLE(player) + 6, 4), 'big')
             if position != player.file + drum:
@@ -506,7 +506,7 @@ def run_effects(super_host: bool = False, perf: bool = False) -> str:
                        (0xFFFFFA09, 0x10)]:
                 return f'effects: frame 31 programmed {mfp}'
             position = int.from_bytes(player.uc.mem_read(
-                drum_d + player.symbols['ISR_DRUM_PTR'], 4), 'big')
+                drum_d + player.symbols['ISR_PCM_PTR'], 4), 'big')
             drum = int.from_bytes(player.uc.mem_read(
                 player.file + Yx6_DRUM_TABLE(player), 4), 'big')
             if position != player.file + drum:
@@ -535,7 +535,7 @@ def run_effects(super_host: bool = False, perf: bool = False) -> str:
         elif frame in (46, 47):                     # held: its volume is gated
             if 9 in registers:
                 return f'effects: frame {frame} wrote the gated volume'
-        elif frame == 48:                           # DRUM_ARB: the SID's
+        elif frame == 48:                           # START_PCM_PREEMPT: the SID's
             want = [(TCDCR, 0),                     # timer stops FIRST,
                     (TACR, 0), (TADR, 60), (TACR, 1),   # then the drum arms
                     (0xFFFFFA07, 0x20)]
@@ -577,7 +577,7 @@ def run_effects(super_host: bool = False, perf: bool = False) -> str:
     problem = drum_ticks(player, drum_d, 10, TCDCR, 0xFFFFFA11, 0xEF)
     if problem:
         return problem
-    problem = drum_ticks(player, CODE + sym['yx6_drumA'], 9, TACR, 0xFFFFFA0F, 0xDF)
+    problem = drum_ticks(player, CODE + sym['yx6_pcmA'], 9, TACR, 0xFFFFFA0F, 0xDF)
     if problem:
         return problem
     if perf and acc() != 2 * (21 + 21 + 23):    # both drums' playouts
@@ -595,7 +595,7 @@ def run_effects(super_host: bool = False, perf: bool = False) -> str:
         return f'effects: the quiet half wrote {pairs}, vector {vector:#x}'
 
     # And the buzzer from frame 40: every tick rewrites the shape to R13.
-    pairs = invoke_isr(player, CODE + sym['yx6_buzzA'])
+    pairs = invoke_isr(player, CODE + sym['yx6_retriggerA'])
     if pairs != [(13, 11)]:
         return f'effects: the buzzer tick wrote {pairs}'
     if perf and acc() != 130 + 15 + 15 + 12:

@@ -12,7 +12,7 @@ import java.util.List;
  * functions of the tune: is this code new or held, does the count need
  * reloading, which slot's timer must stop for whose drum. This class replays
  * exactly that decision logic - the branch structure of {@code yx6_slot} and
- * {@code yx6_drum_start}, transcribed - over the whole timeline at pack
+ * {@code yx6_pcm_start}, transcribed - over the whole timeline at pack
  * time, and emits five streams of prepared actions the player executes
  * without comparing anything against remembered state.
  *
@@ -56,7 +56,7 @@ import java.util.List;
  * 5 BUZZ_START  shape, vector := the buzzer tick, full program
  * 6 DRUM        a trigger (fresh or the held-code retrigger): sample
  *               table lookup, select, vector, full program
- * 7 DRUM_ARB    as DRUM, but first stop the partner slot's timer - the
+ * 7 START_PCM_PREEMPT    as DRUM, but first stop the partner slot's timer - the
  *               contract's stop-the-victim-first order, straight-line
  * </pre>
  *
@@ -108,22 +108,22 @@ public final class EffectScript {
     // release only MASKS the timer interrupt (the counter keeps counting,
     // the square's half stays frozen), and coming back is an unmask plus a
     // reload of whatever changed; the phase runs on through the gap.
-    public static final int VERB_SID_RESUME = 0;
+    public static final int VERB_RESUME = 0;
     public static final int RESUME_RELOAD = 1;
     public static final int RESUME_VOLUME = 2;
-    public static final int VERB_HELD = 1 << 5;
-    public static final int VERB_STOP = 2 << 5;
+    public static final int VERB_HOLD = 1 << 5;
+    public static final int VERB_RELEASE = 2 << 5;
     /** STOP flag bit 0: mask instead of stopping - a SID release. A buzzer
      * release hard-stops its timer. */
-    public static final int STOP_MASK = 1;
-    public static final int VERB_SID_START = 3 << 5;
-    public static final int VERB_SID_RETUNE = 4 << 5;
-    public static final int VERB_BUZZ_START = 5 << 5;
-    public static final int VERB_DRUM = 6 << 5;
-    public static final int VERB_DRUM_ARB = 7 << 5;
-    public static final int HELD_RELOAD = 1;
-    public static final int HELD_VOLUME = 2;
-    public static final int HELD_SHAPE = 4;
+    public static final int RELEASE_MASK = 1;
+    public static final int VERB_START_TOGGLE = 3 << 5;
+    public static final int VERB_RETUNE = 4 << 5;
+    public static final int VERB_START_RETRIGGER = 5 << 5;
+    public static final int VERB_START_PCM = 6 << 5;
+    public static final int VERB_START_PCM_PREEMPT = 7 << 5;
+    public static final int HOLD_RELOAD = 1;
+    public static final int HOLD_VOLUME = 2;
+    public static final int HOLD_SHAPE = 4;
 
     // The master byte.
     public static final int M_SLOT1 = 1;
@@ -157,9 +157,9 @@ public final class EffectScript {
      * replicated for differential exactness). */
     private static final int STUCK = Integer.MAX_VALUE;
 
-    private static final int TYPE_SID = YmEffects.TYPE_SID;
-    private static final int TYPE_DRUM = YmEffects.TYPE_DRUM;
-    private static final int TYPE_BUZZ = YmEffects.TYPE_BUZZER;
+    private static final int KIND_TOGGLE = YmEffects.KIND_TOGGLE;
+    private static final int KIND_PCM = YmEffects.KIND_PCM;
+    private static final int KIND_RETRIGGER = YmEffects.KIND_RETRIGGER;
 
     /** One slot's remembered state - the v1 descriptor, field for field,
      * minus the machine addresses. */
@@ -392,9 +392,9 @@ public final class EffectScript {
         }
         int voice = ((code >> 4) & 3) - 1;
         int type = code & 0xC0;
-        if (type == TYPE_SID) {         // .sid
+        if (type == KIND_TOGGLE) {         // .sid
             sid(p, f, index, slot, code, count, voice, old);
-        } else if (type == TYPE_DRUM) { // .drum
+        } else if (type == KIND_PCM) { // .drum
             drum(p, f, index, slot, code, count, voice, old);
         } else {                        // the buzzer arm
             buzz(p, f, index, slot, code, count, voice);
@@ -406,27 +406,27 @@ public final class EffectScript {
     private void held(int p, int f, int index, Slot slot, int code, int count) {
         int type = code & 0xC0;
         int voice = ((code >> 4) & 3) - 1;
-        if (type == TYPE_DRUM) {        // a held drum code retriggers every
+        if (type == KIND_PCM) {        // a held drum code retriggers every
             drum(p, f, index, slot, code, count, voice, code);
             return;                     // frame, with THAT frame's number
         }
         int flags = 0;
         if (count != slot.tlast) {      // cmp.b SD_TLAST(a5),d1
             slot.tlast = count;
-            flags |= HELD_RELOAD;
+            flags |= HOLD_RELOAD;
         }
         int value = parameter(f, voice);
-        if (type == TYPE_SID) {         // .track: v1 repatched blindly
+        if (type == KIND_TOGGLE) {         // .track: v1 repatched blindly
             if (value != slot.vol) {
                 slot.vol = value;
-                flags |= HELD_VOLUME;
+                flags |= HOLD_VOLUME;
             }
         } else if (value != slot.shape) {
             slot.shape = value;
-            flags |= HELD_SHAPE;
+            flags |= HOLD_SHAPE;
         }
         if (flags != 0) {
-            emit(p, index, action(VERB_HELD, voice, flags), count);
+            emit(p, index, action(VERB_HOLD, voice, flags), count);
         }
     }
 
@@ -438,19 +438,19 @@ public final class EffectScript {
      * the next arrival through RESUME. A drum finishes itself. */
     private void released(int p, int index, Slot slot, int old) {
         int type = old & 0xC0;
-        if (type == TYPE_DRUM) {
+        if (type == KIND_PCM) {
             return;                     // timer left running: the marker ends it
         }
         cut(p, index, -1);
-        if (type == TYPE_SID) {
+        if (type == KIND_TOGGLE) {
             openOld(old);               // bsr yx6_burst_open_old
             if (sidResume) {
                 slot.masked = true;
-                emit(p, index, action(VERB_STOP, 0, STOP_MASK), 0);
+                emit(p, index, action(VERB_RELEASE, 0, RELEASE_MASK), 0);
                 return;
             }
         }
-        emit(p, index, action(VERB_STOP, 0, 0), 0);
+        emit(p, index, action(VERB_RELEASE, 0, 0), 0);
     }
 
     private void sid(int p, int f, int index, Slot slot, int code, int count,
@@ -471,7 +471,7 @@ public final class EffectScript {
         // default model - is a full START: phase zero, one silent timer
         // period, then the loud half. The gate bit is set on every path:
         // M carries the gates.
-        boolean sameSid = slot.vec == TYPE_SID && slot.vecVoice == voice
+        boolean sameSid = slot.vec == KIND_TOGGLE && slot.vecVoice == voice
                 && slot.sel == voice;
         boolean resume = slot.masked && sameSid && slot.prescaler == (code & 7);
         boolean retune = old != 0 && ((code ^ old) & 0xF0) == 0
@@ -490,28 +490,28 @@ public final class EffectScript {
                 slot.vol = value;
                 low |= RESUME_VOLUME;
             }
-            emit(p, index, action(VERB_SID_RESUME, voice, low), count);
+            emit(p, index, action(VERB_RESUME, voice, low), count);
             return;
         }
         slot.tlast = count;
         slot.vol = value;
         slot.prescaler = code & 7;
         if (retune) {
-            emit(p, index, action(VERB_SID_RETUNE, voice, code & 7), count);
+            emit(p, index, action(VERB_RETUNE, voice, code & 7), count);
             return;
         }
         slot.sel = voice;
-        slot.vec = TYPE_SID;
+        slot.vec = KIND_TOGGLE;
         slot.vecVoice = voice;
-        emit(p, index, action(VERB_SID_START, voice, code & 7), count);
+        emit(p, index, action(VERB_START_TOGGLE, voice, code & 7), count);
     }
 
     private void drum(int p, int f, int index, Slot slot, int code, int count,
                       int voice, int old) {
         if (old != code) {              // the old-effect cleanup; a
-            if ((old & 0xC0) == TYPE_SID && old != 0) {
+            if ((old & 0xC0) == KIND_TOGGLE && old != 0) {
                 openOld(old);           // retrigger short-circuits it all
-            } else if ((old & 0xC0) == TYPE_DRUM && old != 0
+            } else if ((old & 0xC0) == KIND_PCM && old != 0
                     && ((old ^ code) & 0x30) != 0) {
                 int orphan = ((old >> 4) & 3) - 1;
                 if (drumOwner[orphan] == index) {
@@ -522,19 +522,19 @@ public final class EffectScript {
             }
         }
         // Arbitration: the partner holds a SID on this voice - its timer
-        // stops FIRST (inside the DRUM_ARB handler), and it retries.
+        // stops FIRST (inside the START_PCM_PREEMPT handler), and it retries.
         Slot other = slots[1 - index];
-        int verb = VERB_DRUM;
-        if ((other.elast & 0xC0) == TYPE_SID && other.elast != 0
+        int verb = VERB_START_PCM;
+        if ((other.elast & 0xC0) == KIND_TOGGLE && other.elast != 0
                 && ((other.elast >> 4) & 3) - 1 == voice) {
             other.elast = 0;
-            verb = VERB_DRUM_ARB;
+            verb = VERB_START_PCM_PREEMPT;
         }
         cut(p, index, voice);           // the retrigger's own voice gets a
         slot.tlast = count;             // fresh window, not a stuck flag
         slot.masked = false;
         slot.prescaler = code & 7;
-        slot.vec = TYPE_DRUM;
+        slot.vec = KIND_PCM;
         slot.vecVoice = voice;
         gates |= 1 << voice;
         drumOwner[voice] = index;
@@ -549,14 +549,14 @@ public final class EffectScript {
         slot.masked = false;
         slot.prescaler = code & 7;
         slot.shape = parameter(f, voice);
-        slot.vec = TYPE_BUZZ;
+        slot.vec = KIND_RETRIGGER;
         slot.vecVoice = voice;
-        emit(p, index, action(VERB_BUZZ_START, voice, code & 7), count);
+        emit(p, index, action(VERB_START_RETRIGGER, voice, code & 7), count);
     }
 
     /** yx6_burst_open_old: only an old SID's voice gate reopens. */
     private void openOld(int old) {
-        if (old != 0 && (old & 0xC0) == TYPE_SID) {
+        if (old != 0 && (old & 0xC0) == KIND_TOGGLE) {
             gates &= ~(1 << (((old >> 4) & 3) - 1));
         }
     }

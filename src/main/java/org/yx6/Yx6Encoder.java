@@ -215,10 +215,10 @@ public final class Yx6Encoder {
             boolean read = (master[p] & bit) != 0;
             if (read && actions != null) {
                 int verb = actions[p] & 0xE0;
-                read = verb >= EffectScript.VERB_SID_START
-                        || verb == EffectScript.VERB_HELD
-                                && (actions[p] & EffectScript.HELD_RELOAD) != 0
-                        || verb == EffectScript.VERB_SID_RESUME
+                read = verb >= EffectScript.VERB_START_TOGGLE
+                        || verb == EffectScript.VERB_HOLD
+                                && (actions[p] & EffectScript.HOLD_RELOAD) != 0
+                        || verb == EffectScript.VERB_RESUME
                                 && (actions[p] & EffectScript.RESUME_RELOAD) != 0;
             }
             if (read) {
@@ -264,7 +264,7 @@ public final class Yx6Encoder {
         }
         int drumTable = drums.length == 0 ? 0 : align(total);
         if (drums.length > 0) {
-            total = drumTable + Yx6Format.DRUM_ENTRY_SIZE * drums.length;
+            total = drumTable + Yx6Format.SAMPLE_ENTRY_SIZE * drums.length;
             for (byte[] drum : drums) {
                 total += drum.length + 1;               // the end marker byte
             }
@@ -281,8 +281,8 @@ public final class Yx6Encoder {
         putWord(file, Yx6Format.OFFSET_CHUNK, chunk);
         putLong(file, Yx6Format.OFFSET_LOOP_FRAME, split);
         putLong(file, Yx6Format.OFFSET_MASTER_CLOCK, song.masterClock());
-        putLong(file, Yx6Format.OFFSET_DRUM_TABLE, drumTable);
-        putWord(file, Yx6Format.OFFSET_DRUM_COUNT, drums.length);
+        putLong(file, Yx6Format.OFFSET_SAMPLE_TABLE, drumTable);
+        putWord(file, Yx6Format.OFFSET_SAMPLE_COUNT, drums.length);
 
         int at = Yx6Format.HEADER_SIZE;
         at = place(file, Yx6Format.OFFSET_INTRO_TABLE, intro, at);
@@ -291,14 +291,14 @@ public final class Yx6Encoder {
         // The drum table: entries first, then the samples, each closed by the
         // end marker the drum interrupt routine stops on.
         if (drums.length > 0) {
-            int sample = drumTable + Yx6Format.DRUM_ENTRY_SIZE * drums.length;
+            int sample = drumTable + Yx6Format.SAMPLE_ENTRY_SIZE * drums.length;
             for (int i = 0; i < drums.length; i++) {
-                putLong(file, drumTable + Yx6Format.DRUM_ENTRY_SIZE * i, sample);
-                putWord(file, drumTable + Yx6Format.DRUM_ENTRY_SIZE * i + 4,
+                putLong(file, drumTable + Yx6Format.SAMPLE_ENTRY_SIZE * i, sample);
+                putWord(file, drumTable + Yx6Format.SAMPLE_ENTRY_SIZE * i + 4,
                         drums[i].length);
                 System.arraycopy(drums[i], 0, file, sample, drums[i].length);
                 sample += drums[i].length;
-                file[sample++] = (byte) Yx6Format.DRUM_END_MARK;
+                file[sample++] = (byte) Yx6Format.SAMPLE_END_MARK;
             }
         }
         return file;
