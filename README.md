@@ -253,5 +253,15 @@ ST1_wrap.S, which OpenAI Codex wrote for ST1. The YM reader's `-lh5-`
 depacker is ported from Arnaud Carré's ST-Sound library, itself based on
 LZH code by Haruhiko Okumura and Kerwin F. Medina; see [LICENSE](LICENSE).
 
+The YM player's effect semantics stand on the shoulders of the players that
+came before it: Arnaud Carré's ST-Sound defined the de-facto meaning of the
+YM format's effects; gwEm's [maxYMiser](http://www.preromanbritain.com/maxymiser/)
+replay source showed how the original hardware drivers treat SID timers,
+and its mask-and-resume gap model ships as the `-sidresume` option; and
+[ym2149-rs](https://ym2149-rs.org/) is the reference whose SID phase
+semantics — deterministic phase-zero restarts — YX6 plays by default. The
+survey that reconciled them is in
+[doc/experiments/2026-08-20-sid-phase-semantics.md](doc/experiments/2026-08-20-sid-phase-semantics.md).
+
 Special thanks to Sandor Drieënhuizen and Wietze Spijkerman for their support,
 proofreading, and ideas.

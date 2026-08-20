@@ -90,9 +90,18 @@ import java.util.List;
  */
 public final class EffectScript {
 
-    // The action ABI.
+    // The action ABI. Verb 0 is the SID resume - the maxYMiser model: a
+    // release only MASKS the timer interrupt (the counter keeps counting,
+    // the square's half stays frozen), and coming back is an unmask plus a
+    // reload of whatever changed; the phase runs on through the gap.
+    public static final int VERB_SID_RESUME = 0;
+    public static final int RESUME_RELOAD = 1;
+    public static final int RESUME_VOLUME = 2;
     public static final int VERB_HELD = 1 << 5;
     public static final int VERB_STOP = 2 << 5;
+    /** STOP flag bit 0: mask instead of stopping - a SID release. A buzzer
+     * release hard-stops its timer. */
+    public static final int STOP_MASK = 1;
     public static final int VERB_SID_START = 3 << 5;
     public static final int VERB_SID_RETUNE = 4 << 5;
     public static final int VERB_BUZZ_START = 5 << 5;
@@ -148,9 +157,13 @@ public final class EffectScript {
         int sel = -1;                   // the ISR's patched select voice
         int vol = -1;                   // the ISR's patched SID volume
         int shape = -1;                 // the ISR's patched buzzer shape
+        boolean masked;                 // a released SID: interrupt masked,
+                                        // the timer still counting
+        int prescaler = -1;             // what the control register runs at
 
         int[] snapshot() {
-            return new int[] {elast, tlast, vec, vecVoice, sel, vol, shape};
+            return new int[] {elast, tlast, vec, vecVoice, sel, vol, shape,
+                    masked ? 1 : 0, prescaler};
         }
     }
 
@@ -163,6 +176,7 @@ public final class EffectScript {
     private int gates;                            // bit v = muted
     private final List<int[]> reopens = new ArrayList<>();
     private final List<String> notes = new ArrayList<>();
+    private boolean sidResume;          // the maxYMiser gap model
 
     // The emission arrays, over the full simulated horizon; cut at the end.
     private final byte[] m;
@@ -197,7 +211,23 @@ public final class EffectScript {
      */
     public static Result compile(Ym6Reader.Song song, YmEffects.Extraction fx,
                                  int loopFrame, int unit) {
-        return new EffectScript(song, fx, loopFrame).run(unit);
+        return compile(song, fx, loopFrame, unit, false);
+    }
+
+    /**
+     * As above, choosing the SID gap model: {@code false} (the default) is
+     * the ym2149-rs model - a release stops the timer and every re-arrival
+     * restarts the square at phase zero; {@code true} is the maxYMiser
+     * model - a release only masks the interrupt and a re-arrival resumes
+     * the free-running phase. Both are verbs the player always carries;
+     * the model is purely which bytes this simulator emits, so it could
+     * even change mid-song if anything ever knew where to switch.
+     */
+    public static Result compile(Ym6Reader.Song song, YmEffects.Extraction fx,
+                                 int loopFrame, int unit, boolean sidResume) {
+        EffectScript script = new EffectScript(song, fx, loopFrame);
+        script.sidResume = sidResume;
+        return script.run(unit);
     }
 
     private Result run(int unit) {
@@ -386,16 +416,26 @@ public final class EffectScript {
         }
     }
 
-    /** .released: a SID or buzzer level dropped; a drum finishes itself. */
+    /** .released: a buzzer level dropping stops its timer. A SID release
+     * is where the two gap models fork: the default (ym2149-rs) stops the
+     * timer too, so the next arrival restarts at phase zero; the resume
+     * model (maxYMiser) only masks the interrupt - the counter keeps
+     * counting, the square's half stays frozen, and {@code masked} routes
+     * the next arrival through RESUME. A drum finishes itself. */
     private void released(int p, int index, Slot slot, int old) {
         int type = old & 0xC0;
         if (type == TYPE_DRUM) {
             return;                     // timer left running: the marker ends it
         }
+        cut(p, index, -1);
         if (type == TYPE_SID) {
             openOld(old);               // bsr yx6_burst_open_old
+            if (sidResume) {
+                slot.masked = true;
+                emit(p, index, action(VERB_STOP, 0, STOP_MASK), 0);
+                return;
+            }
         }
-        cut(p, index, -1);
         emit(p, index, action(VERB_STOP, 0, 0), 0);
     }
 
@@ -407,20 +447,41 @@ public final class EffectScript {
             return;                     // nothing armed, nothing emitted
         }
         int value = parameter(f, voice);
-        // The ym2149-rs model (the reference the owner trusts by ear; see
-        // doc/experiments/2026-08-20-sid-phase-semantics.md): the phase
-        // free-runs only while the code is HELD - a retune keeps the
-        // installed half - and any arrival after a gap RESTARTS the square
-        // deterministically at phase zero: one silent timer period (the
-        // player writes the voice silent at start), then the loud half.
-        // The gate bit is set on every path: the handlers never touch
-        // gates, M carries them.
-        boolean retune = old != 0 && ((code ^ old) & 0xF0) == 0;
+        // The gap models fork on {@code masked}, which only a resume-mode
+        // release sets (doc/experiments/2026-08-20-sid-phase-semantics.md):
+        // a re-arrival on a slot whose masked timer still runs this SID's
+        // square at the same prescaler RESUMES - unmask, reload only what
+        // changed, the phase ran on through the gap. A prescaler change
+        // across a masked gap needs the hardware's stop/load/start
+        // (RETUNE, half kept). Everything else - and everything in the
+        // default model - is a full START: phase zero, one silent timer
+        // period, then the loud half. The gate bit is set on every path:
+        // M carries the gates.
+        boolean sameSid = slot.vec == TYPE_SID && slot.vecVoice == voice
+                && slot.sel == voice;
+        boolean resume = slot.masked && sameSid && slot.prescaler == (code & 7);
+        boolean retune = old != 0 && ((code ^ old) & 0xF0) == 0
+                || slot.masked && sameSid && slot.prescaler != (code & 7);
         cut(p, index, -1);
         openOld(old);
         gates |= 1 << voice;
+        slot.masked = false;
+        if (resume) {
+            int low = 0;
+            if (count != slot.tlast) {
+                slot.tlast = count;
+                low |= RESUME_RELOAD;
+            }
+            if (value != slot.vol) {
+                slot.vol = value;
+                low |= RESUME_VOLUME;
+            }
+            emit(p, index, action(VERB_SID_RESUME, voice, low), count);
+            return;
+        }
         slot.tlast = count;
         slot.vol = value;
+        slot.prescaler = code & 7;
         if (retune) {
             emit(p, index, action(VERB_SID_RETUNE, voice, code & 7), count);
             return;
@@ -457,6 +518,8 @@ public final class EffectScript {
         }
         cut(p, index, voice);           // the retrigger's own voice gets a
         slot.tlast = count;             // fresh window, not a stuck flag
+        slot.masked = false;
+        slot.prescaler = code & 7;
         slot.vec = TYPE_DRUM;
         slot.vecVoice = voice;
         gates |= 1 << voice;
@@ -469,6 +532,8 @@ public final class EffectScript {
                       int voice) {
         cut(p, index, -1);
         slot.tlast = count;
+        slot.masked = false;
+        slot.prescaler = code & 7;
         slot.shape = parameter(f, voice);
         slot.vec = TYPE_BUZZ;
         slot.vecVoice = voice;

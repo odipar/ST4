@@ -223,7 +223,12 @@ SD_CTRL         equ     0               ; word  timer control register
 SD_DATA         equ     2               ; word  timer data register
 SD_VEC          equ     4               ; word  timer vector
 SD_OTHER_CTRL   equ     6               ; word  the partner slot's control
-SD_ISR          equ     8               ; long  the slot's tick handlers
+SD_IER          equ     8               ; word  the timer's enable register
+SD_IERBIT       equ     10              ; word  and its bit: a SID release
+                                        ; only MASKS the interrupt, so the
+                                        ; counter keeps counting and a
+                                        ; resume is phase-continuous
+SD_ISR          equ     12              ; long  the slot's tick handlers
 ; rmac evaluates left to right, so the parentheses here are load-bearing:
 ; without them this reads as (YX6_STATE+YX6_STREAMS)*YX6_STATE_SIZE.
 YX6_FIXED       equ     YX6_STATE+(YX6_STREAMS*YX6_STATE_SIZE)
@@ -838,10 +843,12 @@ YX6_stop:
 yx6_desc1:
         dc.w    $FA19,$FA1F,$0134       ; control, data, vector
         dc.w    $FA1D                   ; the partner's control register
+        dc.w    $FA07,5                 ; the enable register and its bit
         dc.l    0                       ; ISR block: yx6_link
 yx6_desc2:
         dc.w    $FA1D,$FA25,$0110
         dc.w    $FA19
+        dc.w    $FA09,4
         dc.l    0
 
 ; The two prepared tables the script indexes into: the drums' absolute
@@ -1142,7 +1149,7 @@ yx6_act:
         move.w  yx6_verbs(pc,d1.w),d1
         jmp     yx6_verbs(pc,d1.w)
 yx6_verbs:
-        dc.w    0                       ; verb 0 never packs
+        dc.w    yx6_resume-yx6_verbs    ; verb 0: the masked SID comes back
         dc.w    yx6_held-yx6_verbs
         dc.w    yx6_halt-yx6_verbs
         dc.w    yx6_sid_start-yx6_verbs
@@ -1164,9 +1171,38 @@ yx6_voice:
         adda.l  d1,a1                   ; this frame's byte
         rts
 
-yx6_halt:                               ; STOP: the level dropped. RMW, so
-        movea.w SD_CTRL(a5),a1          ; Timer C's nibble survives on D
-        andi.b  #$F0,(a1)
+yx6_halt:                               ; STOP: low bit clear = stop the
+        btst    #0,d0                   ; timer (a buzzer release); set =
+        bne.s   .mask                   ; MASK only - a SID release: the
+        movea.w SD_CTRL(a5),a1          ; counter keeps counting and the
+        andi.b  #$F0,(a1)               ; square's half stays frozen. RMW
+        rts                             ; forms throughout: Timer C's nibble
+.mask:                                  ; and the other enable bits belong
+        movea.w SD_IER(a5),a1           ; to the machine
+        move.w  SD_IERBIT(a5),d1
+        bclr    d1,(a1)                 ; disabling drops any pending too
+        rts
+
+yx6_resume:                             ; unmask; reload the count if it
+        btst    #0,d0                   ; moved, retrack the volume if it
+        beq.s   .kept                   ; moved - the phase ran on through
+        movea.l a4,a1                   ; the gap, exactly as a masked
+        adda.l  d3,a1                   ; hardware timer does
+        move.b  (a1),d1
+        movea.w SD_DATA(a5),a2
+        move.b  d1,(a2)                 ; a running timer loads a changed
+.kept:                                  ; count at its next reload
+        btst    #1,d0
+        beq.s   .same
+        bsr     yx6_voice
+        move.b  (a1),d1
+        and.w   #15,d1
+        movea.l SD_ISR(a5),a2
+        move.b  d1,ISR_SID_VOL(a2)
+.same:
+        movea.w SD_IER(a5),a1
+        move.w  SD_IERBIT(a5),d1
+        bset    d1,(a1)
         rts
 
 yx6_held:                               ; flags: 1 = reload the count, 2 =
@@ -1198,9 +1234,9 @@ yx6_sid_start:                          ; a fresh square restarts at phase
         bsr     yx6_voice               ; zero: the voice goes silent NOW,
         movea.l SD_ISR(a5),a2           ; and the first tick - one timer
         move.w  d5,d1                   ; period out - plays the loud half.
-        lsr.w   #2,d1                   ; Retunes never come here: a held
-        addq.w  #8,d1                   ; square's phase free-runs
-        move.b  d1,ISR_SIDON_SEL(a2)
+        lsr.w   #2,d1                   ; Retunes and resumes never come
+        addq.w  #8,d1                   ; here: a held or masked square's
+        move.b  d1,ISR_SIDON_SEL(a2)    ; phase free-runs
         move.b  d1,ISR_SIDOFF_SEL(a2)
         lea     YX6_PSG,a1
         move.w  sr,-(sp)                ; select and write are two bus
@@ -1277,6 +1313,9 @@ yx6_program:
         and.b   #7,d0
         or.b    d0,(a1)                 ; run
         move.w  (sp)+,sr
+        movea.w SD_IER(a5),a1           ; and enabled, whatever a mask
+        move.w  SD_IERBIT(a5),d1        ; left: every program ends live
+        bset    d1,(a1)
         rts
 
 ; -----------------------------------------------------------------------------

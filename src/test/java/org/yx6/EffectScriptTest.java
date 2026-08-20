@@ -4,6 +4,9 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.yx6.EffectScript.HELD_RELOAD;
+import static org.yx6.EffectScript.RESUME_RELOAD;
+import static org.yx6.EffectScript.STOP_MASK;
+import static org.yx6.EffectScript.VERB_SID_RESUME;
 import static org.yx6.EffectScript.HELD_VOLUME;
 import static org.yx6.EffectScript.M_GATES;
 import static org.yx6.EffectScript.M_GATE_SHIFT;
@@ -41,6 +44,10 @@ final class EffectScriptTest {
 
     private static EffectScript.Result compile(Ym6Reader.Song song, int loop) {
         return EffectScript.compile(song, YmEffects.extract(song), loop, 1);
+    }
+
+    private static EffectScript.Result compileResume(Ym6Reader.Song song, int loop) {
+        return EffectScript.compile(song, YmEffects.extract(song), loop, 1, true);
     }
 
     /** The rig's scene, exactly: SID with a reload, a retune pair, drum
@@ -134,8 +141,8 @@ final class EffectScriptTest {
         }
         expect(r, 21, M_SLOT1 | M_GATES, action(VERB_STOP, 0, 0), 0, 0, 0);
 
-        // A re-start after a release is a FULL start - the loud-half phase
-        // reset is part of the sound, exactly as v1 played it.
+        // The default (ym2149-rs) gap model: a re-arrival is a full START -
+        // phase zero, one silent period, then the loud half.
         expect(r, 22, M_SLOT1 | M_GATES | (1 << M_GATE_SHIFT),
                 action(VERB_SID_START, 0, 1), 90, 0, 0);
         expect(r, 23, 0, 0, 0, 0, 0);
@@ -173,6 +180,23 @@ final class EffectScriptTest {
         expect(r, 51, 0, 0, 0, 0, 0);
         expect(r, 52, 0, 0, 0, 0, 0);
         expect(r, 53, M_SLOT2 | M_GATES, 0, 0, action(VERB_STOP, 0, 0), 0);
+    }
+
+    /** The -sidresume gap model on the same scene: releases mask, the
+     * re-arrival resumes with just the changed count, and the takeover
+     * whose timer was seized still full-starts. */
+    @Test
+    void theResumeModelMasksAndResumes() {
+        EffectScript.Result r = compileResume(rigScene(), -1);
+        expect(r, 21, M_SLOT1 | M_GATES, action(VERB_STOP, 0, STOP_MASK),
+                0, 0, 0);
+        expect(r, 22, M_SLOT1 | M_GATES | (1 << M_GATE_SHIFT),
+                action(VERB_SID_RESUME, 0, RESUME_RELOAD), 90, 0, 0);
+        expect(r, 27, M_SLOT1 | M_GATES, action(VERB_STOP, 0, STOP_MASK),
+                0, 0, 0);
+        expect(r, 50, M_SLOT2, 0, 0, action(VERB_SID_START, 1, 1), 90);
+        expect(r, 53, M_SLOT2 | M_GATES, 0, 0,
+                action(VERB_STOP, 0, STOP_MASK), 0);
     }
 
     /** A SID held across the wrap: state converges immediately, c = 0. */

@@ -118,24 +118,28 @@ def symbol_table(listing: Path) -> dict:
     return symbols
 
 
-def pack(tune: bytes, ring: int, chunk: int, loop, unit: int = 1) -> bytes:
+def pack(tune: bytes, ring: int, chunk: int, loop, unit: int = 1,
+         extra: tuple = ()) -> bytes:
     """Runs the real packer, cached on the tune and the packing options.
 
     loop is the frame to loop from, or None to pack a tune that plays once.
+    NOTE: the cache keys on the tune bytes and options, NOT on the packer's
+    code - after changing the packer or the simulator, rm -rf the scratch.
     """
     if not CLASSES.exists():
         raise SystemExit('target/classes is missing; run `mvn compile` first')
     SCRATCH.mkdir(exist_ok=True)
     option = '-o' if loop is None else f'-l{loop}'
     key = hashlib.sha1(tune).hexdigest()[:12]
-    cached = SCRATCH / f'{key}-n{ring}-c{chunk}-k{unit}{option}.yx6'
+    tag = ''.join(extra)
+    cached = SCRATCH / f'{key}-n{ring}-c{chunk}-k{unit}{option}{tag}.yx6'
     if not cached.exists():
         with tempfile.TemporaryDirectory() as directory:
             source = Path(directory) / 'tune.ym'
             source.write_bytes(tune)
             subprocess.run(['java', '-ea', '-cp', str(CLASSES), 'org.yx6.Yx6', '-f',
                             f'-n{ring}', f'-c{chunk}', f'-k{unit}', option,
-                            str(source), str(cached)],
+                            *extra, str(source), str(cached)],
                            check=True, capture_output=True)
     return cached.read_bytes()
 
@@ -430,8 +434,9 @@ def run_effects(super_host: bool = False, perf: bool = False) -> str:
         _, writes = player.frame()                  # below must preserve it
         mfp = player.mfp
         registers = dict(writes)
-        if frame == 5:                              # SID start: stop, count, run
-            if mfp != [(TACR, 0), (TADR, 100), (TACR, 1)]:
+        if frame == 5:                              # SID start: stop, count,
+            if mfp != [(TACR, 0), (TADR, 100), (TACR, 1),   # run, enabled
+                       (0xFFFFFA07, 0x20)]:
                 return f'effects: frame 5 programmed {mfp}'
             if gate(0) != 0:
                 return 'effects: frame 5 left the SID voice open'
@@ -455,18 +460,23 @@ def run_effects(super_host: bool = False, perf: bool = False) -> str:
             if 8 not in registers:
                 return 'effects: frame 21 kept the SID volume gate shut'
         elif frame == 22:                           # a re-start is a FULL
-            if mfp != [(TACR, 0), (TADR, 90), (TACR, 1)]:   # start: the loud
-                return f'effects: frame 22 programmed {mfp}'    # half's phase
+            if mfp != [(TACR, 0), (TADR, 90), (TACR, 1),    # start at phase
+                       (0xFFFFFA07, 0x20)]:                 # zero...
+                return f'effects: frame 22 programmed {mfp}'
+            if registers.get(8) != 0:               # ...the voice silenced
+                return ('effects: frame 22 volume '     # for its first
+                        f'{registers.get(8)}, not silent')  # period
             vector = int.from_bytes(player.uc.mem_read(0x134, 4), 'big')
-            if vector != sid_on:                    # reset is part of the
+            if vector != sid_on:
                 return ('effects: the start did not install the loud half: '
-                        f'{vector:#x}')             # sound, as v1 played it
+                        f'{vector:#x}')
         elif frame in (23, 24):
             if mfp:
                 return f'effects: frame {frame} wrote {mfp}'
         elif frame == 25:                           # prescaler-only change:
-            if mfp != [(TACR, 0), (TADR, 90), (TACR, 2)]:   # full timer
-                return f'effects: frame 25 programmed {mfp}'    # reprogram...
+            if mfp != [(TACR, 0), (TADR, 90), (TACR, 2),    # full timer
+                       (0xFFFFFA07, 0x20)]:                 # reprogram...
+                return f'effects: frame 25 programmed {mfp}'
             vector = int.from_bytes(player.uc.mem_read(0x134, 4), 'big')
             if vector != sid_off:                   # ...but the phase lives:
                 return ('effects: the retune reset the square to '
@@ -478,7 +488,8 @@ def run_effects(super_host: bool = False, perf: bool = False) -> str:
             if mfp != [(TACR, 0)]:
                 return f'effects: frame 27 wrote {mfp}'
         elif frame == 30:                           # the drum start, slot 2
-            if mfp != [(TCDCR, 0), (TDDR, 122), (TCDCR, 1)]:
+            if mfp != [(TCDCR, 0), (TDDR, 122), (TCDCR, 1),
+                       (0xFFFFFA09, 0x10)]:
                 return f'effects: frame 30 programmed {mfp}'
             if 10 in registers:                     # the drum owns R10 now
                 return 'effects: frame 30 wrote the drummed volume'
@@ -491,7 +502,8 @@ def run_effects(super_host: bool = False, perf: bool = False) -> str:
             if position != player.file + drum:
                 return 'effects: the trigger points at the wrong sample'
         elif frame == 31:                           # the same code again: a
-            if mfp != [(TCDCR, 0), (TDDR, 122), (TCDCR, 1)]:    # fresh DRUM
+            if mfp != [(TCDCR, 0), (TDDR, 122), (TCDCR, 1),     # fresh DRUM
+                       (0xFFFFFA09, 0x10)]:
                 return f'effects: frame 31 programmed {mfp}'
             position = int.from_bytes(player.uc.mem_read(
                 drum_d + player.symbols['ISR_DRUM_PTR'], 4), 'big')
@@ -514,7 +526,8 @@ def run_effects(super_host: bool = False, perf: bool = False) -> str:
             if 10 not in registers:
                 return 'effects: frame 33 kept the drum gate shut'
         elif frame == 40:                           # buzzer start on slot 1
-            if mfp != [(TACR, 0), (TADR, 200), (TACR, 6)]:
+            if mfp != [(TACR, 0), (TADR, 200), (TACR, 6),
+                       (0xFFFFFA07, 0x20)]:
                 return f'effects: frame 40 programmed {mfp}'
         elif frame in (41, 42):                     # held, nothing changed
             if mfp:
@@ -523,14 +536,16 @@ def run_effects(super_host: bool = False, perf: bool = False) -> str:
             if mfp != [(TACR, 0)]:
                 return f'effects: frame 43 wrote {mfp}'
         elif frame == 45:                           # the scene's SID, slot 2
-            if mfp != [(TCDCR, 0), (TDDR, 90), (TCDCR, 1)]:
+            if mfp != [(TCDCR, 0), (TDDR, 90), (TCDCR, 1),
+                       (0xFFFFFA09, 0x10)]:
                 return f'effects: frame 45 programmed {mfp}'
         elif frame in (46, 47):                     # held: its volume is gated
             if 9 in registers:
                 return f'effects: frame {frame} wrote the gated volume'
         elif frame == 48:                           # DRUM_ARB: the SID's
             want = [(TCDCR, 0),                     # timer stops FIRST,
-                    (TACR, 0), (TADR, 60), (TACR, 1)]   # then the drum arms
+                    (TACR, 0), (TADR, 60), (TACR, 1),   # then the drum arms
+                    (0xFFFFFA07, 0x20)]
             if mfp != want:
                 return f'effects: frame 48 programmed {mfp}'
             if 9 in registers:
@@ -541,19 +556,20 @@ def run_effects(super_host: bool = False, perf: bool = False) -> str:
             if mfp:                                 # nothing at all - v1 spun
                 return f'effects: frame 49 wrote {mfp}'     # ~560 cycles here
         elif frame == 50:                           # the computed end: the
-            want = [(TCDCR, 0), (TDDR, 90), (TCDCR, 1)]     # SID re-STARTS -
-            if mfp != want:                         # deterministic, phase 0
+            want = [(TCDCR, 0), (TDDR, 90), (TCDCR, 1),     # SID re-STARTS -
+                    (0xFFFFFA09, 0x10)]             # deterministic, phase 0
+            if mfp != want:
                 return f'effects: frame 50 programmed {mfp}'
-            if registers.get(9) != 0:               # the start's own silence:
-                return ('effects: frame 50 volume '     # one quiet period,
+            if registers.get(9) != 0:               # the start's own silence
+                return ('effects: frame 50 volume '
                         f'{registers.get(9)}, not the silent first half')
             if registers.get(7) != 0x38 | 0xC0:
                 return f'effects: frame 50 mixer {registers.get(7):#x}'
         elif frame in (51, 52):
             if mfp:
                 return f'effects: frame {frame} wrote {mfp}'
-        elif frame == 53:                           # the resumed SID releases
-            if mfp != [(TCDCR, 0)]:
+        elif frame == 53:                           # the restarted SID
+            if mfp != [(TCDCR, 0)]:                 # releases
                 return f'effects: frame 53 wrote {mfp}'
             if 9 not in registers:
                 return 'effects: frame 53 kept the voice gate shut'
@@ -614,6 +630,35 @@ def run_effects(super_host: bool = False, perf: bool = False) -> str:
     for voice in range(3):
         if gate(voice) != 2:
             return f'effects: stop left voice {voice} muted'
+
+    # The -sidresume gap model, on the same tune: a fresh player walks to
+    # the release and resume and must see the mask, the counting-on timer,
+    # and the reload-only comeback - the player's resume verbs, live.
+    resumed = Player(pack(gen_ym.ym6_file(frames, values, drums=drums),
+                          960, 24, 0, 1, extra=('-sidresume',)),
+                     workspace_size(960), super_host=super_host, perf=perf)
+    if resumed.init() != 0:
+        return 'effects: init rejected the -sidresume pack'
+    for frame in range(30):
+        resumed.mfp.clear()
+        _, writes = resumed.frame()
+        registers = dict(writes)
+        if frame == 21:
+            if resumed.mfp != [(0xFFFFFA07, 0x00)]:     # masked: IER bit
+                return ('effects: resume-model frame 21 wrote '
+                        f'{resumed.mfp}')
+            if 8 not in registers:
+                return 'effects: resume-model frame 21 kept the gate shut'
+        elif frame == 22:
+            if resumed.mfp != [(TADR, 90), (0xFFFFFA07, 0x20)]:
+                return ('effects: resume-model frame 22 programmed '
+                        f'{resumed.mfp}')
+            if registers.get(8, None) is not None and registers[8] == 0:
+                return 'effects: the resume silenced a running square'
+        elif frame == 27:
+            if resumed.mfp != [(0xFFFFFA07, 0x00)]:
+                return ('effects: resume-model frame 27 wrote '
+                        f'{resumed.mfp}')
 
     # The monitor's color protocol, unchanged from v1: every frame paints
     # the yellow timer bar, then its own red, then puts the original back;
