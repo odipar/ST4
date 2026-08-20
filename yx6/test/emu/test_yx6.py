@@ -511,20 +511,13 @@ def run_effects(super_host: bool = False, perf: bool = False) -> str:
                 player.file + Yx6_DRUM_TABLE(player), 4), 'big')
             if position != player.file + drum:
                 return 'effects: the retrigger points at the wrong sample'
-        elif frame == 32:                           # the drum outlives its
-            if mfp:                                 # code; the bake holds
-                return f'effects: frame 32 wrote {mfp}'
-            if registers.get(7) != 0x38 | 0xC0 | 0x24:
-                return 'effects: frame 32 released the mixer too early'
-            if 10 in registers:
-                return 'effects: frame 32 wrote the drummed volume'
-        elif frame == 33:                           # the computed end, frame
+        elif frame == 32:                           # the computed end, frame
             if mfp:                                 # aligned: gate and mixer
-                return f'effects: frame 33 wrote {mfp}'     # come back as one
+                return f'effects: frame 32 wrote {mfp}'     # come back as one
             if registers.get(7) != 0x38 | 0xC0:
-                return 'effects: frame 33 mixer still forced'
+                return 'effects: frame 32 mixer still forced'
             if 10 not in registers:
-                return 'effects: frame 33 kept the drum gate shut'
+                return 'effects: frame 32 kept the drum gate shut'
         elif frame == 40:                           # buzzer start on slot 1
             if mfp != [(TACR, 0), (TADR, 200), (TACR, 6),
                        (0xFFFFFA07, 0x20)]:
@@ -552,20 +545,17 @@ def run_effects(super_host: bool = False, perf: bool = False) -> str:
                 return 'effects: frame 48 wrote the drummed volume'
             if registers.get(7) != 0x38 | 0xC0 | 0x12:
                 return f'effects: frame 48 mixer {registers.get(7):#x}'
-        elif frame == 49:                           # the suppressed SID costs
-            if mfp:                                 # nothing at all - v1 spun
-                return f'effects: frame 49 wrote {mfp}'     # ~560 cycles here
-        elif frame == 50:                           # the computed end: the
+        elif frame == 49:                           # the computed end: the
             want = [(TCDCR, 0), (TDDR, 90), (TCDCR, 1),     # SID re-STARTS -
                     (0xFFFFFA09, 0x10)]             # deterministic, phase 0
             if mfp != want:
-                return f'effects: frame 50 programmed {mfp}'
+                return f'effects: frame 49 programmed {mfp}'
             if registers.get(9) != 0:               # the start's own silence
-                return ('effects: frame 50 volume '
+                return ('effects: frame 49 volume '
                         f'{registers.get(9)}, not the silent first half')
             if registers.get(7) != 0x38 | 0xC0:
-                return f'effects: frame 50 mixer {registers.get(7):#x}'
-        elif frame in (51, 52):
+                return f'effects: frame 49 mixer {registers.get(7):#x}'
+        elif frame in (50, 51, 52):
             if mfp:
                 return f'effects: frame {frame} wrote {mfp}'
         elif frame == 53:                           # the restarted SID
