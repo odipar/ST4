@@ -199,7 +199,7 @@ configuration in one call.
 
 ```sh
 mvn -q compile exec:exec@yx6 -Dargs="-f song.ym song.yx6"
-yx6/mkprg.sh song.yx6                 # -> SONG.PRG
+yx6/mkprg.sh SONG.PRG song.yx6        # -> SONG.PRG
 ```
 
 ## Tests

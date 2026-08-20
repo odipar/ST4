@@ -18,10 +18,18 @@ other player including the format author's.
 |---|---|
 | [`org.yx6.Yx6`](../src/main/java/org/yx6/Yx6.java) | the packer: YM5!/YM6! in, `.yx6` out - one tune or a whole set |
 | [YX6.S](YX6.S) | the player library, 2,264 bytes plus ST4_wrap's 292 |
-| [YX6_sndh.S](YX6_sndh.S) + [mksndh.sh](mksndh.sh) | the canonical container: an SNDH v2.2 file, subtunes included |
-| [ym_sndh.sh](ym_sndh.sh) | `.ym` dumps straight to one SNDH, packer flags and all |
-| [YX6_player.S](YX6_player.S) + [mkprg.sh](mkprg.sh) | a thin TOS shell around those same SNDH bytes |
-| [play.sh](play.sh) | one command: pack a `.ym`, build it, play it under Hatari |
+| [YX6_sndh.S](YX6_sndh.S) + [`MkSndh`](../src/main/java/org/yx6/MkSndh.java) | the canonical container: an SNDH v2.2 file, subtunes included |
+| [`YmSndh`](../src/main/java/org/yx6/YmSndh.java) | `.ym` dumps straight to one SNDH, packer flags and all |
+| [YX6_player.S](YX6_player.S) + [`MkPrg`](../src/main/java/org/yx6/MkPrg.java) | a thin TOS shell around those same SNDH bytes |
+| [`Play`](../src/main/java/org/yx6/Play.java) | one command: pack a `.ym`, build it, play it under Hatari |
+
+The four build tools are Java; `mksndh.sh`, `ym_sndh.sh`, `mkprg.sh` and
+`play.sh` are four-line wrappers that find the repository and the compiled
+classes, so every command below is spelled the way it always was. Reading a
+`.yx6` header, validating that a set shares one configuration, generating the
+SNDH tags and driving rmac all live in [`org.yx6`](../src/main/java/org/yx6)
+alongside the packer, which the front ends call in process rather than
+through another JVM.
 
 **Unit sizes.** `yx6 -kK` (and `play.sh -kK`) packs the register sections at
 ST4 units of 1, 2 or 4 bytes: wider units hand the decoder half or a quarter
@@ -64,7 +72,7 @@ Or do the steps yourself:
 
 ```sh
 mvn -q compile exec:exec@yx6 -Dargs="-f song.ym song.yx6"
-yx6/mkprg.sh song.yx6                 # -> SONG.PRG, runnable on an ST
+yx6/mkprg.sh SONG.PRG song.yx6        # -> SONG.PRG, runnable on an ST
 ```
 
 `mkprg.sh -m` builds the same program but has it drop a `YX6DONE.MRK` file as
