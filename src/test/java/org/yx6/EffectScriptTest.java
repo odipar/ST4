@@ -152,15 +152,16 @@ final class EffectScriptTest {
         expect(r, 27, M_SLOT1 | M_GATES, action(VERB_STOP, 0, 0), 0, 0, 0);
 
         // The drum: trigger, retrigger with that frame's number, computed
-        // end. Sample 0 has 2 values + marker at 4*122 -> 2 frames.
+        // end. Sample 0 has 2 values + marker at 4*122: well inside the
+        // retrigger's own frame, so the reopen lands on the next boundary.
         expect(r, 30, M_SLOT2 | M_GATES | (4 << M_GATE_SHIFT),
                 0, 0, action(VERB_DRUM, 2, 1), 122);
         expect(r, 31, M_SLOT2, 0, 0, action(VERB_DRUM, 2, 1), 122);
         assertEquals(0x24, r.r7force()[31] & 0xFF, "voice C forced while owned");
-        assertEquals(0x24, r.r7force()[32] & 0xFF);
-        expect(r, 33, M_GATES, 0, 0, 0, 0);     // the frame-aligned reopen
-        assertEquals(0, r.r7force()[33] & 0xFF);
-        assertTrue(r.reopens().stream().anyMatch(x -> x[0] == 33 && x[1] == 2));
+        expect(r, 32, M_GATES, 0, 0, 0, 0);     // the frame-aligned reopen
+        assertEquals(0, r.r7force()[32] & 0xFF);
+        expect(r, 33, 0, 0, 0, 0, 0);
+        assertTrue(r.reopens().stream().anyMatch(x -> x[0] == 32 && x[1] == 2));
 
         expect(r, 40, M_SLOT1, action(VERB_BUZZ_START, 1, 6), 200, 0, 0);
         expect(r, 41, 0, 0, 0, 0, 0);
@@ -174,9 +175,9 @@ final class EffectScriptTest {
                 0, 0, action(VERB_SID_START, 1, 1), 90);
         expect(r, 48, M_SLOT1, action(VERB_DRUM_ARB, 1, 1), 60, 0, 0);
         assertEquals(0x12, r.r7force()[48] & 0xFF, "voice B forced");
-        expect(r, 49, 0, 0, 0, 0, 0);           // suppressed: nothing at all
-        expect(r, 50, M_SLOT2, 0, 0, action(VERB_SID_START, 1, 1), 90);
-        assertEquals(0, r.r7force()[50] & 0xFF, "mixer free from the reopen");
+        expect(r, 49, M_SLOT2, 0, 0, action(VERB_SID_START, 1, 1), 90);
+        assertEquals(0, r.r7force()[49] & 0xFF, "mixer free from the reopen");
+        expect(r, 50, 0, 0, 0, 0, 0);
         expect(r, 51, 0, 0, 0, 0, 0);
         expect(r, 52, 0, 0, 0, 0, 0);
         expect(r, 53, M_SLOT2 | M_GATES, 0, 0, action(VERB_STOP, 0, 0), 0);
@@ -194,7 +195,7 @@ final class EffectScriptTest {
                 action(VERB_SID_RESUME, 0, RESUME_RELOAD), 90, 0, 0);
         expect(r, 27, M_SLOT1 | M_GATES, action(VERB_STOP, 0, STOP_MASK),
                 0, 0, 0);
-        expect(r, 50, M_SLOT2, 0, 0, action(VERB_SID_START, 1, 1), 90);
+        expect(r, 49, M_SLOT2, 0, 0, action(VERB_SID_START, 1, 1), 90);
         expect(r, 53, M_SLOT2 | M_GATES, 0, 0,
                 action(VERB_STOP, 0, STOP_MASK), 0);
     }
@@ -237,11 +238,11 @@ final class EffectScriptTest {
         v[8][19] = (byte) (v[8][19] | 0);
         byte[] drum = new byte[60];
         EffectScript.Result r = compile(song(frames, v, 20, new byte[][] {drum}), 20);
-        // The window is [19, 19+dur); dur = ceil(61*400*50/2457600)+1 = 3.
-        // States at 20 (drum 2 frames left) and at 40 (no drum) differ, so
-        // the cut rotates to 22, where both arrivals are quiet.
-        assertEquals(22, r.split(), "rotated past the drum window");
-        assertEquals(42, r.frames());
+        // The window is [19, 19+dur); dur = ceil(61*400*50/2457600 + 1/16)
+        // = 1. The wrap arrival at 20 carries the reopen where the pristine
+        // start is quiet, so the cut rotates one frame past it, to 21.
+        assertEquals(21, r.split(), "rotated past the drum window");
+        assertEquals(41, r.frames());
         assertTrue(r.notes().stream().anyMatch(n -> n.contains("rotated")));
     }
 

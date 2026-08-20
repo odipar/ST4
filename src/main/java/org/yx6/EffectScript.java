@@ -73,8 +73,12 @@ import java.util.List;
  * at timer rate, mid-frame, and only the marker tick knows the instant. The
  * script reopens the voice's gate, releases the mixer and re-starts a
  * suppressed SID at the frame boundary AFTER the computed end - never
- * before, so a burst write can never race a live drum; at most one extra
- * frame of the parked mid-volume.
+ * before, so a burst write can never race a live drum. The computation
+ * allows for the arming phase (the trigger runs a bounded slice into its
+ * frame) and no more: v1 reopened at the marker tick itself, and a whole
+ * frame of grace on top of that parks the voice at the drum's tail volume,
+ * tone forced off, 20ms longer than v1 - an audible click after every
+ * drum.
  *
  * <h2>The split rotation</h2>
  *
@@ -577,15 +581,18 @@ public final class EffectScript {
     /**
      * A drum's length in frames, rounded so the reopen is never early: the
      * sample plus its marker tick at the (already downsample-scaled) timer
-     * rate, plus one frame for the arming phase against the VBL.
+     * rate, plus a sixteenth of a frame for the arming phase - the trigger
+     * action runs a bounded slice into its VBL, so the last tick lands that
+     * much later than the tick count alone says. A whole frame here instead
+     * held every voice muted 20ms past its drum: the click v1 never had.
      */
     private int duration(int f, int code, int count, int voice) {
         int number = song.registers()[8 + voice][f] & 31;
         long samples = fx.drums()[number].length + 1L;
         long divisor = (long) YmEffects.PREDIV[code & 7] * count;
-        long frames = (samples * divisor * song.playerHz()
-                + YmEffects.MFP_CLOCK - 1) / YmEffects.MFP_CLOCK;
-        return (int) frames + 1;
+        long scaled = samples * divisor * song.playerHz()
+                + YmEffects.MFP_CLOCK / 16;
+        return (int) ((scaled + YmEffects.MFP_CLOCK - 1) / YmEffects.MFP_CLOCK);
     }
 
     private void emit(int p, int index, int action, int count) {
