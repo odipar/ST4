@@ -13,73 +13,10 @@
 # to switch subtunes. -m makes the program drop YX6DONE.MRK as it exits,
 # which is how yx6/play.sh knows to close the emulator.
 #
+# The work is org.yx6.MkPrg's; this only finds the repo and the classes.
 # Needs rmac on PATH.
 set -e
-
 YX6_DIR=$(cd "$(dirname "$0")" && pwd)
-
-MARKER=0
-TITLE=""
-COMPOSER=""
-NAMES=""
-PERF=""
-while true; do
-    case $1 in
-        -m)  MARKER=1; shift ;;
-        -perf) PERF=-perf; shift ;;
-        -t*) TITLE=${1#-t}; shift ;;
-        -c*) COMPOSER=${1#-c}; shift ;;
-        -N*) NAMES=${1#-N}; shift ;;
-        *)   break ;;
-    esac
-done
-
-# both argument orders: the .prg names the output wherever it stands
-case $1 in
-    *.prg|*.PRG) output=$1; shift ;;
-    *) output=""; ;;
-esac
-if [ -z "$output" ]; then
-    tune=$1; output=$2
-    [ -n "$output" ] || { echo "usage: mkprg.sh [-m] output.prg tunes..." >&2; exit 1; }
-    set -- "$tune"
-fi
-
-work=$(dirname "$output")/.prg_work
-mkdir -p "$work"
-
-[ -n "$TITLE" ] || TITLE=$(basename "$output" | sed 's/\.[Pp][Rr][Gg]$//')
-sh "$YX6_DIR/mksndh.sh" $PERF -t"$TITLE" ${COMPOSER:+-c"$COMPOSER"} \
-   ${NAMES:+-N"$NAMES"} "$work/tune.sndh" "$@"
-
-# subtune count and the first tune's frame count (0 when it loops), for the
-# shell's key handling and play-once end detection
-tunes=$#
-field() {
-    od -A n -t u1 -j "$2" -N "$3" "$1" | tr -s ' ' '\n' | grep . | {
-        v=0
-        while read b; do v=$(( (v << 8) + b )); done
-        echo $v
-    }
-}
-flags=$(field "$1" 6 2)
-frames=0
-if [ $((flags & 1)) -eq 0 ] && [ "$tunes" -eq 1 ]; then
-    frames=$(field "$1" 8 4)
-fi
-
-cat > "$work/wrapper.S" <<WRAP
-YX6_TUNES       equ     $tunes
-YX6_FRAMES      equ     $frames
-YX6_EXIT_MARKER equ     $MARKER
-        include "YX6_player.S"
-        .data
-        even
-sndh:   incbin  "tune.sndh"
-        even
-WRAP
-
-out=$(cd "$(dirname "$output")" && pwd)/$(basename "$output")
-(cd "$work" && rmac -m68000 -p +o3 -i"$YX6_DIR" -o "$out" wrapper.S)
-size=$(wc -c < "$output" | tr -d ' ')
-echo "$output: $size bytes, $tunes subtune$([ $tunes -ne 1 ] && echo s)"
+REPO=$(cd "$YX6_DIR/.." && pwd)
+[ -d "$REPO/target/classes" ] || (cd "$REPO" && mvn -q compile)
+exec java -ea -Dyx6.repo="$REPO" -cp "$REPO/target/classes" org.yx6.MkPrg "$@"
