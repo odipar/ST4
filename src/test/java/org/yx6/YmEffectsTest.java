@@ -127,18 +127,20 @@ final class YmEffectsTest {
 
         assertEquals(0, effects.tooFast());
         assertEquals(1, effects.notes().size());
-        // The sample halved, neighbouring values averaged: the 8-bit source
-        // {0x80, 0xF3, 0x21} converts to volumes {8, 15, 2}, then pairs to
-        // one value (8+15+1)/2 -> {12} once the odd tail is dropped.
-        assertEquals(1, effects.drums()[0].length);
-        assertEquals(12, effects.drums()[0][0]);
-        // Both triggers scale their divisor by two, keeping pitch: 4*16*2
-        // = 128 fits as prescaler 1, count 32; 4*200*2 = 1600 as
-        // prescaler 2, count 160.
+        // Resampled to the ceiling itself, not halved: 38400 Hz lands at
+        // 25600 (divisor 64 -> 96, ratio 3/2), so the converted 3-value
+        // sample {8, 15, 2} becomes 2 values through the windowed sinc in
+        // the chip curve's linear domain.
+        assertEquals(2, effects.drums()[0].length);
+        assertEquals(13, effects.drums()[0][0]);
+        assertEquals(13, effects.drums()[0][1]);
+        // Both triggers scale their divisor by 3/2, keeping pitch: 4*16
+        // *3/2 = 96 fits as prescaler 1, count 24; 4*200*3/2 = 1200 as
+        // prescaler 2, count 120.
         assertEquals(0x51, effects.e2()[2] & 0xFF);
-        assertEquals(32, effects.t2()[2] & 0xFF);
+        assertEquals(24, effects.t2()[2] & 0xFF);
         assertEquals(0x52, effects.e2()[4] & 0xFF);
-        assertEquals(160, effects.t2()[4] & 0xFF);
+        assertEquals(120, effects.t2()[4] & 0xFF);
     }
 
     @Test

@@ -146,7 +146,8 @@ yx6 [-f] [-o] [-nN] [-cC] [-kK] [-lF] input.ym [output.yx6]
   -lF   loop from frame F, overriding the YM header
   -o    play once: pack no loop section
   -drumhzH  the drum rate ceiling (default 25600): a drum asking for a
-        faster timer is downsampled to fit, with a warning
+        faster timer is resampled to the highest MFP rate under the
+        ceiling (windowed-sinc, pitch and duration exact), with a warning
   -sidresume  the maxYMiser SID gap model: a released SID's timer keeps
         counting (interrupt masked) and a re-arrival resumes its phase.
         The default is the ym2149-rs model: every re-arrival restarts the

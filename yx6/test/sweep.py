@@ -23,7 +23,7 @@ unicorn, like the rigs.
 
 One status line per tune: OK, ISSUE, PACKFAIL or SKIP.
 """
-import subprocess, sys, struct, tempfile, os
+import math, subprocess, sys, struct, tempfile, os
 
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 EMU = os.path.join(REPO, 'yx6', 'test', 'emu')
@@ -75,7 +75,7 @@ def slot_codes(fmt, regs, f):
              (regs[8][f] >> 5) & 7, regs[15][f])]
 
 
-def validate(code, tp, tc, regs, f, drums, factor):
+def validate(code, tp, tc, regs, f, drums, scale):
     """The packer's drop rules: returns the effective (code, divisor) or
     None when the slot is idle this frame."""
     v = (code >> 4) & 3
@@ -88,15 +88,30 @@ def validate(code, tp, tc, regs, f, drums, factor):
         n = regs[8 + v - 1][f] & 0x1F
         if n >= drums:
             return None                 # missing drum
-        return code, PREDIV[tp] * tc * factor[n]
+        num, den = scale[n]
+        return code, PREDIV[tp] * tc * num // den
     if MFP_CLOCK // (PREDIV[tp] * tc) > MAX_HZ:
         return None                     # too-fast SID/buzzer
     return code, PREDIV[tp] * tc
 
 
-def drum_factors(fmt, frames, drums, regs):
-    """Each drum's downsample factor: the largest any trigger demands."""
-    factor = [1] * drums
+def representable(divisor):
+    return any(divisor % PREDIV[p] == 0 and 1 <= divisor // PREDIV[p] <= 255
+               for p in range(1, 8))
+
+
+def ceiling_divisor():
+    """The smallest representable divisor at or under the rate ceiling."""
+    needed = -(-MFP_CLOCK // MAX_HZ)
+    return min(PREDIV[p] * -(-needed // PREDIV[p]) for p in range(1, 8)
+               if -(-needed // PREDIV[p]) <= 255)
+
+
+def drum_scales(fmt, frames, drums, regs):
+    """Each drum's divisor scale num/den, mirroring the packer: resample to
+    the highest representable rate under the ceiling when every trigger
+    takes the exact ratio, the power-of-two factor otherwise."""
+    seen = [set() for _ in range(drums)]
     for f in range(frames):
         for code, tp, tc in slot_codes(fmt, regs, f):
             if (code & 0xC0) != 0x40 or (code & 0x30) == 0:
@@ -106,12 +121,26 @@ def drum_factors(fmt, frames, drums, regs):
             n = regs[8 + ((code >> 4) & 3) - 1][f] & 0x1F
             if n >= drums:
                 continue
-            hz = MFP_CLOCK // (PREDIV[tp] * tc)
-            needed = 1
-            while hz // needed > MAX_HZ and needed < 64:
-                needed *= 2
-            factor[n] = max(factor[n], needed)
-    return factor
+            seen[n].add(PREDIV[tp] * tc)
+    scale = [(1, 1)] * drums
+    for n in range(drums):
+        if not seen[n]:
+            continue
+        fastest = min(seen[n])
+        if MAX_HZ * fastest >= MFP_CLOCK:
+            continue
+        target = ceiling_divisor()
+        g = math.gcd(target, fastest)
+        num, den = target // g, fastest // g
+        if all(d * num % den == 0 and representable(d * num // den)
+               for d in seen[n]):
+            scale[n] = (num, den)
+        else:
+            f2 = 1
+            while MAX_HZ * fastest * f2 < MFP_CLOCK and f2 < 64:
+                f2 *= 2
+            scale[n] = (f2, 1)
+    return scale
 
 
 class Model:
@@ -123,9 +152,9 @@ class Model:
     def __init__(self, fmt, frames, drums, hz, regs, lengths):
         self.fmt, self.frames, self.drums = fmt, frames, drums
         self.hz, self.regs = hz, regs
-        self.factor = drum_factors(fmt, frames, drums, regs)
-        self.lengths = [max(1, lengths[n] // self.factor[n]) if n < len(lengths)
-                        else 1 for n in range(drums)]
+        self.scale = drum_scales(fmt, frames, drums, regs)
+        self.lengths = [max(1, lengths[n] * self.scale[n][1] // self.scale[n][0])
+                        if n < len(lengths) else 1 for n in range(drums)]
         self.elast = [0, 0]
         self.owner = [-1, -1, -1]       # per voice: the owning slot
         self.left = [0, 0, 0]           # frames until the gate reopens;
@@ -144,7 +173,7 @@ class Model:
                     self.gated &= ~(1 << v)
         for slot in (0, 1):
             code, tp, tc = slot_codes(self.fmt, regs, f)[slot]
-            valid = validate(code, tp, tc, regs, f, drums, self.factor)
+            valid = validate(code, tp, tc, regs, f, drums, self.scale)
             if valid is None:
                 code = 0
             if code == self.elast[slot]:
@@ -197,7 +226,9 @@ class Model:
         v = ((code >> 4) & 3) - 1
         n = self.regs[8 + v][f] & 0x1F
         ticks = self.lengths[n] + 1
-        frames = -(-(ticks * divisor * self.hz) // MFP_CLOCK) + 1
+        # the packer's duration(): a sixteenth of a frame covers the arming
+        # phase; the old whole spare frame was the reopen click
+        frames = -(-(ticks * divisor * self.hz + MFP_CLOCK // 16) // MFP_CLOCK)
         self.owner[v] = slot
         self.left[v] = frames
         self.gated |= 1 << v
