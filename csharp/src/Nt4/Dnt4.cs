@@ -25,7 +25,7 @@ public static class Dnt4
     public static int Run(string[] args)
     {
         ArgumentNullException.ThrowIfNull(args);
-        Console.WriteLine("DNT4: aligned split-stream unpacker v1.0 by Robbert van Dalen, "
+        Console.WriteLine("DNT4: aligned split-stream unpacker v2.0 by Robbert van Dalen, "
             + "based on ZX1 v1.5 by Einar Saukas");
 
         bool forcedMode = false;

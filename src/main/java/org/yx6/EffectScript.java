@@ -1,0 +1,535 @@
+package org.yx6;
+
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
+
+/**
+ * The compiled effect script - format v2's replacement for the player's
+ * effect interpreter.
+ *
+ * <p>The v1 player re-derived, on every frame, decisions that are pure
+ * functions of the tune: is this code new or held, does the count need
+ * reloading, which slot's timer must stop for whose drum. This class replays
+ * exactly that decision logic - the branch structure of {@code yx6_slot} and
+ * {@code yx6_drum_start}, transcribed - over the whole timeline at pack
+ * time, and emits five streams of prepared actions the player executes
+ * without comparing anything against remembered state.
+ *
+ * <h2>The stream ABI (frozen: packer, player and rigs all cite this)</h2>
+ *
+ * <pre>
+ * stream 14  M   master byte. 0 = nothing anywhere this frame.
+ *                bit 0 = slot 1 acts (read A1, maybe P1)
+ *                bit 1 = slot 2 acts
+ *                bit 2 = apply the gate state in bits 5-3
+ *                bits 5-3 = burst-gate mask, voices A/B/C, 1 = muted;
+ *                           absolute state, idempotent to re-assert
+ * stream 15  A1  slot 1 action: verb in bits 7-5, voice in bits 4-3,
+ * stream 16  P1  bits 2-0 the prescaler (program verbs) or HELD flags;
+ * stream 17  A2  P carries the MFP timer count for any action that
+ * stream 18  P2  programs or reloads. Bytes on frames where a stream is
+ *                not consumed are unspecified; the encoder repeats the
+ *                previous byte, which the event optimizer packs away.
+ * </pre>
+ *
+ * The verbs:
+ *
+ * <pre>
+ * 1 HELD        flags: 1 = reload the count (P), 2 = track SID volume,
+ *               4 = track buzzer shape - emitted only on frames where the
+ *               value actually changed (v1 repatched unconditionally)
+ * 2 STOP        stop this slot's timer (a SID or buzzer level dropped)
+ * 3 SID_START   selects, volume, vector := the loud half, full program
+ * 4 SID_RETUNE  volume, full stop/count/run - the vector is NOT touched:
+ *               the square's phase lives through every retune
+ * 5 BUZZ_START  shape, vector := the buzzer tick, full program
+ * 6 DRUM        a trigger (fresh or the held-code retrigger): sample
+ *               table lookup, select, vector, full program
+ * 7 DRUM_ARB    as DRUM, but first stop the partner slot's timer - the
+ *               contract's stop-the-victim-first order, straight-line
+ * </pre>
+ *
+ * <p>SID volume, buzzer shape and the drum number are read by the player
+ * from the voice's own register ring (v1's mechanism), so they need no
+ * streams; the packer merely marks the frames. The drummed voice's ring
+ * byte is NOT sanitized: its burst write is gated (it lands on the PSG
+ * select register and the next select overrides it), so nothing edits the
+ * ring at runtime and v1's whole borrow/patch/restore machinery has no v2
+ * counterpart. R7 arrives with the drummed voices' mixer forcing already
+ * baked in ({@link Result#r7force}).
+ *
+ * <h2>Frame alignment</h2>
+ *
+ * A drum's end is the one genuinely asynchronous event: its sample runs out
+ * at timer rate, mid-frame, and only the marker tick knows the instant. The
+ * script reopens the voice's gate, releases the mixer and resumes a
+ * suppressed SID at the frame boundary AFTER the computed end - never
+ * before, so a burst write can never race a live drum; at most one extra
+ * frame of the parked mid-volume. A resumed SID whose slot still holds its
+ * vector comes back through SID_RETUNE, so the square's phase free-runs
+ * across the drum (v1 restarted it at the loud half, silently).
+ *
+ * <h2>The split rotation</h2>
+ *
+ * v2's loop sections are compiled against one entry state, but the state
+ * arriving from the intro and the state arriving from the wrap owe each
+ * other nothing. A loop is a cycle, so it is cut where the states agree:
+ * the smallest unit-aligned {@code c} with S(L+c) = S(O+c) rotates the
+ * split to L+c, the intro absorbs the first {@code c} loop frames, and the
+ * loop section is one full cycle taken from the steady window. The played
+ * sequence is exactly v1's; the rotation is inaudible. Convergence within
+ * one pass follows from determinism; if a tune needs more, the intro
+ * absorbs a whole extra pass, and failing even that is a pack error.
+ */
+public final class EffectScript {
+
+    // The action ABI.
+    public static final int VERB_HELD = 1 << 5;
+    public static final int VERB_STOP = 2 << 5;
+    public static final int VERB_SID_START = 3 << 5;
+    public static final int VERB_SID_RETUNE = 4 << 5;
+    public static final int VERB_BUZZ_START = 5 << 5;
+    public static final int VERB_DRUM = 6 << 5;
+    public static final int VERB_DRUM_ARB = 7 << 5;
+    public static final int HELD_RELOAD = 1;
+    public static final int HELD_VOLUME = 2;
+    public static final int HELD_SHAPE = 4;
+
+    // The master byte.
+    public static final int M_SLOT1 = 1;
+    public static final int M_SLOT2 = 2;
+    public static final int M_GATES = 4;
+    public static final int M_GATE_SHIFT = 3;
+
+    public static int action(int verb, int voice, int low) {
+        return verb | (voice << 3) | low;
+    }
+
+    /**
+     * The compiled script: {@code frames} played frames splitting at
+     * {@code split}, {@code source[p]} naming the dump frame each played
+     * frame shows, the five effect streams, and the mixer bits to OR into
+     * R7. {@code reopens} lists {playedFrame, voice} for every drum-end
+     * edge - the differential test's skew windows - and {@code notes} what
+     * a packer should tell the user.
+     */
+    public record Result(int frames, int split, int[] source,
+                         byte[] m, byte[] a1, byte[] p1, byte[] a2, byte[] p2,
+                         byte[] r7force, List<int[]> reopens, List<int[]> resumes,
+                         List<String> notes) {
+
+        public byte[][] streams() {
+            return new byte[][] {m, a1, p1, a2, p2};
+        }
+    }
+
+    /** A voice's gate never reopens: its drum was cut mid-sample and the
+     * marker that would have cleared it will never run (v1's stuck flag,
+     * replicated for differential exactness). */
+    private static final int STUCK = Integer.MAX_VALUE;
+
+    private static final int TYPE_SID = YmEffects.TYPE_SID;
+    private static final int TYPE_DRUM = YmEffects.TYPE_DRUM;
+    private static final int TYPE_BUZZ = YmEffects.TYPE_BUZZER;
+
+    /** One slot's remembered state - the v1 descriptor, field for field,
+     * minus the machine addresses. */
+    private static final class Slot {
+        int elast;                      // SD_ELAST
+        int tlast;                      // SD_TLAST
+        int vec = -1;                   // what the timer vector holds: -1
+        int vecVoice = -1;              // parked, else the type, plus voice
+        int sel = -1;                   // the ISR's patched select voice
+        int vol = -1;                   // the ISR's patched SID volume
+        int shape = -1;                 // the ISR's patched buzzer shape
+
+        int[] snapshot() {
+            return new int[] {elast, tlast, vec, vecVoice, sel, vol, shape};
+        }
+    }
+
+    private final Ym6Reader.Song song;
+    private final YmEffects.Extraction fx;
+    private final int loopFrame;
+    private final Slot[] slots = {new Slot(), new Slot()};
+    private final int[] drumEnd = {-1, -1, -1};   // played frame the voice's
+    private final int[] drumOwner = {-1, -1, -1}; // gate reopens; -1 = free
+    private int gates;                            // bit v = muted
+    private final List<int[]> reopens = new ArrayList<>();
+    private final List<int[]> resumes = new ArrayList<>();
+    private final List<String> notes = new ArrayList<>();
+
+    // The emission arrays, over the full simulated horizon; cut at the end.
+    private final byte[] m;
+    private final byte[] a1;
+    private final byte[] p1;
+    private final byte[] a2;
+    private final byte[] p2;
+    private final byte[] r7;
+    private final int horizon;
+    private boolean stuckNoted;
+
+    private EffectScript(Ym6Reader.Song song, YmEffects.Extraction fx, int loopFrame) {
+        this.song = song;
+        this.fx = fx;
+        this.loopFrame = loopFrame;
+        int total = song.frames();
+        boolean loops = loopFrame >= 0 && loopFrame < total;
+        // Simulate far enough to compare three loop passes.
+        horizon = loops ? total + 3 * (total - loopFrame) : total;
+        m = new byte[horizon];
+        a1 = new byte[horizon];
+        p1 = new byte[horizon];
+        a2 = new byte[horizon];
+        p2 = new byte[horizon];
+        r7 = new byte[horizon];
+    }
+
+    /**
+     * Compiles the script. {@code loopFrame} is the effective loop start
+     * (after any CLI override), or negative for a play-once tune;
+     * {@code unit} aligns the rotated split the way the encoder needs.
+     */
+    public static Result compile(Ym6Reader.Song song, YmEffects.Extraction fx,
+                                 int loopFrame, int unit) {
+        return new EffectScript(song, fx, loopFrame).run(unit);
+    }
+
+    private Result run(int unit) {
+        int total = song.frames();
+        boolean loops = loopFrame >= 0 && loopFrame < total;
+        int cycle = loops ? total - loopFrame : 0;
+
+        int[][] snaps = new int[horizon + 1][];
+        for (int p = 0; p < horizon; p++) {
+            snaps[p] = snapshot(p);
+            frame(p, source(p, total));
+        }
+        snaps[horizon] = snapshot(horizon);
+
+        int split;
+        int frames;
+        if (!loops) {
+            split = total;              // "looping at the end": one rule
+            frames = total;
+        } else {
+            int cut = findCut(snaps, total, cycle, unit);
+            split = cut;
+            frames = cut + cycle;
+            if (cut != loopFrame) {
+                notes.add("loop split rotated by " + (cut - loopFrame)
+                        + " frames so the wrap state matches");
+            }
+            // Belt and braces: the loop's first frame re-asserts the gate
+            // state both arrivals agree on, unless it sets gates itself.
+            if ((m[split] & M_GATES) == 0) {
+                int mask = snaps[split][snaps[split].length - 1];
+                if (mask != 0 || m[split] != 0) {
+                    m[split] |= M_GATES | (mask << M_GATE_SHIFT);
+                }
+            }
+        }
+
+        int[] source = new int[frames];
+        for (int p = 0; p < frames; p++) {
+            source[p] = source(p, total);
+        }
+        reopens.removeIf(r -> r[0] >= frames);
+        resumes.removeIf(r -> r[0] >= frames);
+        return new Result(frames, split, source,
+                Arrays.copyOf(m, frames), Arrays.copyOf(a1, frames),
+                Arrays.copyOf(p1, frames), Arrays.copyOf(a2, frames),
+                Arrays.copyOf(p2, frames), Arrays.copyOf(r7, frames),
+                List.copyOf(reopens), List.copyOf(resumes), List.copyOf(notes));
+    }
+
+    /** The dump frame played frame {@code p} shows. */
+    private int source(int p, int total) {
+        if (p < total) {
+            return p;
+        }
+        return loopFrame + (p - total) % (total - loopFrame);
+    }
+
+    /**
+     * The smallest unit-aligned cut with S(L+c) = S(O+c); if one pass is
+     * not enough for convergence, the intro absorbs a whole pass and the
+     * search repeats one cycle later.
+     */
+    private int findCut(int[][] snaps, int total, int cycle, int unit) {
+        for (int base = loopFrame; base <= total; base += cycle) {
+            for (int c = 0; c < cycle; c += unit) {
+                if (Arrays.equals(snaps[base + c], snaps[base + c + cycle])) {
+                    return base + c;
+                }
+            }
+            if (base + 2 * cycle + cycle > snaps.length - 1) {
+                break;
+            }
+        }
+        throw new IllegalArgumentException("the effect state never repeats "
+                + "across the loop - this tune cannot be split (loop frame "
+                + loopFrame + " of " + total + ")");
+    }
+
+    /** Everything two arrivals must agree on before sharing loop sections.
+     * Drum ends compare as frames-remaining; the SID square's half is
+     * deliberately absent - phase free-runs in v1 too. */
+    private int[] snapshot(int frame) {
+        int[] s1 = slots[0].snapshot();
+        int[] s2 = slots[1].snapshot();
+        int[] out = new int[s1.length + s2.length + 7];
+        System.arraycopy(s1, 0, out, 0, s1.length);
+        System.arraycopy(s2, 0, out, s1.length, s2.length);
+        int at = s1.length + s2.length;
+        for (int v = 0; v < 3; v++) {
+            out[at++] = drumOwner[v];
+            out[at++] = drumEnd[v] < 0 ? -1
+                    : drumEnd[v] == STUCK ? STUCK : drumEnd[v] - frame;
+        }
+        out[at] = gates;                // last: run() reads the mask here
+        return out;
+    }
+
+    // -------------------------------------------------------------------------
+    // One played frame: expire drum windows, then slot 1, then slot 2 -
+    // exactly the order the v1 player discovers the same events in.
+    // -------------------------------------------------------------------------
+
+    private int gatesBefore;
+
+    private void frame(int p, int f) {
+        gatesBefore = gates;
+
+        for (int v = 0; v < 3; v++) {
+            if (drumOwner[v] >= 0 && drumEnd[v] == p) {
+                drumOwner[v] = -1;      // the marker has run by now: the
+                drumEnd[v] = -1;        // gate reopens, the mixer frees
+                gates &= ~(1 << v);
+                reopens.add(new int[] {p, v});
+            }
+        }
+
+        slot(p, f, 0);
+        slot(p, f, 1);
+
+        for (int v = 0; v < 3; v++) {
+            if (drumOwner[v] >= 0) {    // the forced mixer, baked into R7
+                r7[p] |= (byte) (0x09 << v);
+            }
+        }
+        if (gates != gatesBefore) {
+            m[p] |= M_GATES | (gates << M_GATE_SHIFT);
+        }
+    }
+
+    /** yx6_slot, transcribed: the labels in the comments are v1's. */
+    private void slot(int p, int f, int index) {
+        Slot slot = slots[index];
+        int code = (index == 0 ? fx.e1() : fx.e2())[f] & 0xFF;
+        int count = (index == 0 ? fx.t1() : fx.t2())[f] & 0xFF;
+
+        if (code == slot.elast) {
+            if (code == 0) {
+                return;                 // the idle frame
+            }
+            held(p, f, index, slot, code, count);
+            return;
+        }
+        int old = slot.elast;           // move.b (a5),d4
+        slot.elast = code;              // move.b d0,(a5)
+        if (code == 0) {                // .released
+            released(p, index, slot, old);
+            return;
+        }
+        int voice = ((code >> 4) & 3) - 1;
+        int type = code & 0xC0;
+        if (type == TYPE_SID) {         // .sid
+            sid(p, f, index, slot, code, count, voice, old);
+        } else if (type == TYPE_DRUM) { // .drum
+            drum(p, f, index, slot, code, count, voice, old);
+        } else {                        // the buzzer arm
+            buzz(p, f, index, slot, code, count, voice);
+        }
+    }
+
+    /** .held: a running effect's count reload and parameter tracking -
+     * emitted only on frames where a value actually changed. */
+    private void held(int p, int f, int index, Slot slot, int code, int count) {
+        int type = code & 0xC0;
+        int voice = ((code >> 4) & 3) - 1;
+        if (type == TYPE_DRUM) {        // a held drum code retriggers every
+            drum(p, f, index, slot, code, count, voice, code);
+            return;                     // frame, with THAT frame's number
+        }
+        int flags = 0;
+        if (count != slot.tlast) {      // cmp.b SD_TLAST(a5),d1
+            slot.tlast = count;
+            flags |= HELD_RELOAD;
+        }
+        int value = parameter(f, voice);
+        if (type == TYPE_SID) {         // .track: v1 repatched blindly
+            if (value != slot.vol) {
+                slot.vol = value;
+                flags |= HELD_VOLUME;
+            }
+        } else if (value != slot.shape) {
+            slot.shape = value;
+            flags |= HELD_SHAPE;
+        }
+        if (flags != 0) {
+            emit(p, index, action(VERB_HELD, voice, flags), count);
+        }
+    }
+
+    /** .released: a SID or buzzer level dropped; a drum finishes itself. */
+    private void released(int p, int index, Slot slot, int old) {
+        int type = old & 0xC0;
+        if (type == TYPE_DRUM) {
+            return;                     // timer left running: the marker ends it
+        }
+        if (type == TYPE_SID) {
+            openOld(old);               // bsr yx6_burst_open_old
+        }
+        cut(p, index, -1);
+        emit(p, index, action(VERB_STOP, 0, 0), 0);
+    }
+
+    private void sid(int p, int f, int index, Slot slot, int code, int count,
+                     int voice, int old) {
+        if (drumOwner[voice] >= 0) {    // the drum owns the volume register:
+            slot.elast = 0;             // clr.b (a5) - retry next frame
+            openOld(old);
+            return;                     // nothing armed, nothing emitted
+        }
+        slot.tlast = count;
+        int value = parameter(f, voice);
+        // .sid_retune when only the prescaler moved; also - the resume
+        // improvement - when the slot's vector still holds this SID's half
+        // (the timer merely stopped meanwhile), so the square's phase
+        // free-runs where v1 restarted it at the loud half. The gate bit is
+        // set on every path: the handlers never touch gates, M carries them.
+        boolean retune = old != 0 && ((code ^ old) & 0xF0) == 0
+                || slot.vec == TYPE_SID && slot.vecVoice == voice
+                        && slot.sel == voice;
+        cut(p, index, -1);
+        openOld(old);
+        gates |= 1 << voice;
+        slot.vol = value;
+        if (retune) {
+            if (old == 0 || ((code ^ old) & 0xF0) != 0) {
+                resumes.add(new int[] {p, index});  // v1 would full-start here
+            }
+            emit(p, index, action(VERB_SID_RETUNE, voice, code & 7), count);
+            return;
+        }
+        slot.sel = voice;
+        slot.vec = TYPE_SID;
+        slot.vecVoice = voice;
+        emit(p, index, action(VERB_SID_START, voice, code & 7), count);
+    }
+
+    private void drum(int p, int f, int index, Slot slot, int code, int count,
+                      int voice, int old) {
+        if (old != code) {              // the old-effect cleanup; a
+            if ((old & 0xC0) == TYPE_SID && old != 0) {
+                openOld(old);           // retrigger short-circuits it all
+            } else if ((old & 0xC0) == TYPE_DRUM && old != 0
+                    && ((old ^ code) & 0x30) != 0) {
+                int orphan = ((old >> 4) & 3) - 1;
+                if (drumOwner[orphan] == index) {
+                    drumOwner[orphan] = -1;   // cut mid-sample: its marker
+                    drumEnd[orphan] = -1;     // never runs, so the start
+                    gates &= ~(1 << orphan);  // cleans up for it
+                }
+            }
+        }
+        // Arbitration: the partner holds a SID on this voice - its timer
+        // stops FIRST (inside the DRUM_ARB handler), and it retries.
+        Slot other = slots[1 - index];
+        int verb = VERB_DRUM;
+        if ((other.elast & 0xC0) == TYPE_SID && other.elast != 0
+                && ((other.elast >> 4) & 3) - 1 == voice) {
+            other.elast = 0;
+            verb = VERB_DRUM_ARB;
+        }
+        cut(p, index, voice);           // the retrigger's own voice gets a
+        slot.tlast = count;             // fresh window, not a stuck flag
+        slot.vec = TYPE_DRUM;
+        slot.vecVoice = voice;
+        gates |= 1 << voice;
+        drumOwner[voice] = index;
+        drumEnd[voice] = p + duration(f, code, count, voice);
+        emit(p, index, action(verb, voice, code & 7), count);
+    }
+
+    private void buzz(int p, int f, int index, Slot slot, int code, int count,
+                      int voice) {
+        cut(p, index, -1);
+        slot.tlast = count;
+        slot.shape = parameter(f, voice);
+        slot.vec = TYPE_BUZZ;
+        slot.vecVoice = voice;
+        emit(p, index, action(VERB_BUZZ_START, voice, code & 7), count);
+    }
+
+    /** yx6_burst_open_old: only an old SID's voice gate reopens. */
+    private void openOld(int old) {
+        if (old != 0 && (old & 0xC0) == TYPE_SID) {
+            gates &= ~(1 << (((old >> 4) & 3) - 1));
+        }
+    }
+
+    /**
+     * Any action that programs or stops this slot's timer cuts a drum the
+     * slot still owes ticks to: its marker will never run, so its voice
+     * stays muted and forced - v1's stuck flag, replicated and logged.
+     */
+    private void cut(int p, int index, int skip) {
+        for (int v = 0; v < 3; v++) {
+            if (v == skip) {
+                continue;
+            }
+            if (drumOwner[v] == index && drumEnd[v] > p && drumEnd[v] != STUCK) {
+                drumEnd[v] = STUCK;
+                if (!stuckNoted) {
+                    stuckNoted = true;
+                    notes.add("an effect armed over its own slot's running "
+                            + "drum: voice " + (char) ('A' + v)
+                            + " stays muted (v1 semantics)");
+                }
+            }
+        }
+    }
+
+    /** The voice's parameter register byte, as the player reads it. */
+    private int parameter(int f, int voice) {
+        return song.registers()[8 + voice][f] & 15;
+    }
+
+    /**
+     * A drum's length in frames, rounded so the reopen is never early: the
+     * sample plus its marker tick at the (already downsample-scaled) timer
+     * rate, plus one frame for the arming phase against the VBL.
+     */
+    private int duration(int f, int code, int count, int voice) {
+        int number = song.registers()[8 + voice][f] & 31;
+        long samples = fx.drums()[number].length + 1L;
+        long divisor = (long) YmEffects.PREDIV[code & 7] * count;
+        long frames = (samples * divisor * song.playerHz()
+                + YmEffects.MFP_CLOCK - 1) / YmEffects.MFP_CLOCK;
+        return (int) frames + 1;
+    }
+
+    private void emit(int p, int index, int action, int count) {
+        m[p] |= (byte) (index == 0 ? M_SLOT1 : M_SLOT2);
+        if (index == 0) {
+            a1[p] = (byte) action;
+            p1[p] = (byte) count;
+        } else {
+            a2[p] = (byte) action;
+            p2[p] = (byte) count;
+        }
+    }
+}

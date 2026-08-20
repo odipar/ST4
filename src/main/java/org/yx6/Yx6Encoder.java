@@ -11,8 +11,9 @@ import org.st4.Units;
 
 /**
  * Turns a parsed YM tune into a {@code .yx6} file: fourteen register vectors,
- * masked down to what a plain YM2149 sees, plus the four effect streams and
- * the drum table, each vector packed as its own embedded ST4 container.
+ * masked down to what a plain YM2149 sees, plus the five compiled effect
+ * script streams and the drum table, each vector packed as its own embedded
+ * ST4 container.
  *
  * <p>Packing the registers separately is the whole point. A register's value
  * usually repeats from frame to frame, and a vector holds one register's values
@@ -38,12 +39,13 @@ import org.st4.Units;
 public final class Yx6Encoder {
 
     /** What packing one stream's vector produced; the first fourteen stream
-     * indices are registers, then E1, T1, E2, T2. */
+     * indices are registers, then M, A1, P1, A2, P2. */
     public record Stream(int register, boolean loop, int frames, int packedSize, int longestOp) {}
 
     /** The finished file plus the per-stream numbers the CLI reports. */
     public record Result(byte[] file, List<Stream> streams, int ringSize, int chunk,
-                         int loopFrame, boolean loops, int unit, YmEffects.Extraction effects) {
+                         int loopFrame, boolean loops, int unit, YmEffects.Extraction effects,
+                         EffectScript.Result script) {
 
         public int packedSize() {
             return streams.stream().mapToInt(Stream::packedSize).sum();
@@ -122,11 +124,11 @@ public final class Yx6Encoder {
         }
         // Without a loop the intro covers everything, which is the same thing
         // as looping at the end - so the player needs only one rule.
-        int split = loops ? loopFrame : song.frames();
-        if (song.frames() % unit != 0 || split % unit != 0) {
+        if (song.frames() % unit != 0 || (loops ? loopFrame : 0) % unit != 0) {
             throw new IllegalArgumentException("a tune of " + song.frames()
-                    + " frames splitting at " + split + " cannot be packed in "
-                    + unit + "-byte units: both must be multiples of " + unit);
+                    + " frames splitting at " + (loops ? loopFrame : song.frames())
+                    + " cannot be packed in " + unit + "-byte units: both must be"
+                    + " multiples of " + unit);
         }
 
         // A back-reference may never reach out of the ring the player decodes
@@ -134,16 +136,40 @@ public final class Yx6Encoder {
         // still applies above that.
         int offsetLimit = Math.min(ringSize / unit, St4Format.maxOffsetUnits(unit));
 
-        // The eighteen vectors: the masked registers, then the effect streams
-        // exactly as the player wants them - same length, same split, same
-        // rules, just different content.
+        // The nineteen vectors, on the PLAYED timeline the script compiled:
+        // registers source-mapped through the split rotation with R7 carrying
+        // the baked mixer force, then the script's own five streams. Bytes a
+        // stream does not consume repeat their predecessor - the event
+        // optimizer packs a repeat to nothing, and the player never reads
+        // them.
         YmEffects.Extraction effects = YmEffects.extract(song, drumHz);
+        EffectScript.Result script = EffectScript.compile(song, effects,
+                loops ? loopFrame : -1, unit);
+        int frames = script.frames();
+        int split = script.split();
         byte[][] vectors = new byte[Yx6Format.STREAMS][];
         for (int register = 0; register < Yx6Format.REGISTER_STREAMS; register++) {
-            vectors[register] = Ym2149.mask(register, song.registers()[register]);
+            byte[] source = Ym2149.mask(register, song.registers()[register]);
+            byte[] played = new byte[frames];
+            for (int p = 0; p < frames; p++) {
+                played[p] = source[script.source()[p]];
+            }
+            if (register == 7) {
+                for (int p = 0; p < frames; p++) {
+                    played[p] |= script.r7force()[p];
+                }
+            }
+            vectors[register] = played;
         }
-        System.arraycopy(effects.streams(), 0, vectors,
-                Yx6Format.REGISTER_STREAMS, effects.streams().length);
+        vectors[Yx6Format.STREAM_M] = script.m();
+        vectors[Yx6Format.STREAM_A1] = carry(script.a1(), script.m(),
+                EffectScript.M_SLOT1, null);
+        vectors[Yx6Format.STREAM_P1] = carry(script.p1(), script.m(),
+                EffectScript.M_SLOT1, script.a1());
+        vectors[Yx6Format.STREAM_A2] = carry(script.a2(), script.m(),
+                EffectScript.M_SLOT2, null);
+        vectors[Yx6Format.STREAM_P2] = carry(script.p2(), script.m(),
+                EffectScript.M_SLOT2, script.a2());
 
         var streams = new ArrayList<Stream>(2 * Yx6Format.STREAMS);
         var intro = new byte[Yx6Format.STREAMS][];
@@ -157,10 +183,37 @@ public final class Yx6Encoder {
                     offsetLimit, unit);
         }
 
-        byte[] file = build(song, ringSize, chunk, split, loops, intro, loop,
-                effects.drums());
+        byte[] file = build(song, ringSize, chunk, frames, split, loops, intro,
+                loop, effects.drums());
         return new Result(file, List.copyOf(streams), ringSize, chunk, split, loops, unit,
-                effects);
+                effects, script);
+    }
+
+    /**
+     * A stream byte is meaningful only on frames its master bit marks - and
+     * for a count stream, only when the action actually reads the count (a
+     * program verb, or a HELD carrying the reload flag). Everywhere else the
+     * previous byte repeats, which costs nothing packed.
+     */
+    static byte[] carry(byte[] values, byte[] master, int bit,
+                                byte @org.jspecify.annotations.Nullable [] actions) {
+        byte[] out = values.clone();
+        byte last = 0;
+        for (int p = 0; p < out.length; p++) {
+            boolean read = (master[p] & bit) != 0;
+            if (read && actions != null) {
+                int verb = actions[p] & 0xE0;
+                read = verb >= EffectScript.VERB_SID_START
+                        || verb == EffectScript.VERB_HELD
+                                && (actions[p] & EffectScript.HELD_RELOAD) != 0;
+            }
+            if (read) {
+                last = out[p];
+            } else {
+                out[p] = last;
+            }
+        }
+        return out;
     }
 
     /**
@@ -183,8 +236,8 @@ public final class Yx6Encoder {
         return container;
     }
 
-    private static byte[] build(Ym6Reader.Song song, int ringSize, int chunk, int split,
-                                boolean loops, byte[][] intro, byte[][] loop,
+    private static byte[] build(Ym6Reader.Song song, int ringSize, int chunk, int frames,
+                                int split, boolean loops, byte[][] intro, byte[][] loop,
                                 byte[][] drums) {
         // Containers carry alignment promises of their own - stream A and D
         // are read a word at a time - so each is placed on a long boundary.
@@ -207,7 +260,7 @@ public final class Yx6Encoder {
         putLong(file, Yx6Format.OFFSET_MAGIC, Yx6Format.MAGIC);
         putWord(file, Yx6Format.OFFSET_VERSION, Yx6Format.VERSION);
         putWord(file, Yx6Format.OFFSET_FLAGS, loops ? Yx6Format.FLAG_LOOPS : 0);
-        putLong(file, Yx6Format.OFFSET_FRAMES, song.frames());
+        putLong(file, Yx6Format.OFFSET_FRAMES, frames);
         putWord(file, Yx6Format.OFFSET_PLAYER_HZ, song.playerHz());
         putWord(file, Yx6Format.OFFSET_STREAM_COUNT, Yx6Format.STREAMS);
         putWord(file, Yx6Format.OFFSET_RING_SIZE, ringSize);

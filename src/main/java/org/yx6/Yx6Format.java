@@ -14,7 +14,7 @@ package org.yx6;
  *   6   2  flags: bit 0 set when the tune loops
  *   8   4  O, the number of frames
  *  12   2  player frequency in Hz (50 for a standard ST tune)
- *  14   2  S, the stream count (18: R0..R13, then E1 T1 E2 T2)
+ *  14   2  S, the stream count (19: R0..R13, then M A1 P1 A2 P2)
  *  16   2  N, the ring size in bytes each stream decodes through
  *  18   2  C, the chunk size one ST4_resume call produces
  *  20   4  L, the loop frame; equal to O when the tune does not loop
@@ -22,16 +22,19 @@ package org.yx6;
  *  28   4  byte offset of the drum table; zero when there are no drums
  *  32   2  drum count
  *  34   4*S  byte offset of each intro section, covering frames [0, L)
- * 106   4*S  byte offset of each loop section, covering frames [L, O)
- * 178   ...  the packed sections, then the drum table
+ * 110   4*S  byte offset of each loop section, covering frames [L, O)
+ * 186   ...  the packed sections, then the drum table
  * </pre>
  *
- * <p>Streams 14-17 are the effect streams, one byte per frame like the
- * registers: E holds an effect slot's control byte - the YM6 code nibble in
- * bits 7-4 and the MFP timer prescaler in bits 2-0, zero when the slot is
- * idle - and T its timer count. The packer normalizes YM5's different
- * encoding, and every inert or unplayable code, into this one shape; see
- * EFFECTS.md for the whole design.
+ * <p>Streams 14-18 carry the compiled effect script, one byte per frame
+ * like the registers: the packer replays the reference player's effect
+ * decisions over the whole timeline and emits prepared actions - M says
+ * what acts this frame (zero on the vast majority), A names each slot's
+ * action, P carries its timer count. O and L count PLAYED frames: a loop
+ * whose wrap state differs from its first arrival is rotated until the two
+ * agree, so the file may carry a few frames twice, compiled differently.
+ * {@link EffectScript} owns the byte semantics; see EFFECTS.md for the
+ * design.
  *
  * <p>The drum table is {@code count} entries of {byte offset (long), sample
  * length (word)}, each offset pointing at PSG-ready volume bytes 0..15
@@ -60,24 +63,28 @@ public final class Yx6Format {
     /** {@code 'YX6!'}, the first four bytes of every file. */
     public static final int MAGIC = 0x59583621;
 
-    /** The only version this release writes or reads: 4 added the effect
-     * streams and the drum table. */
-    public static final int VERSION = 4;
+    /** The only version this release writes or reads: 5 replaced the
+     * interpreted effect streams with the compiled effect script. */
+    public static final int VERSION = 5;
 
     /** Flag bit 0: the tune loops back to {@code L} instead of ending. */
     public static final int FLAG_LOOPS = 1;
 
-    /** R0..R13 plus E1/T1/E2/T2, the two YM6 effect slots. */
-    public static final int STREAMS = 18;
+    /** R0..R13 plus the script streams M, A1, P1, A2, P2. */
+    public static final int STREAMS = 19;
 
     /** The first fourteen streams: the YM2149 sound registers. */
     public static final int REGISTER_STREAMS = 14;
 
-    /** Stream indices of the effect streams. */
-    public static final int STREAM_E1 = 14;
-    public static final int STREAM_T1 = 15;
-    public static final int STREAM_E2 = 16;
-    public static final int STREAM_T2 = 17;
+    /** Stream indices of the effect script streams: the master byte, then
+     * each slot's action and timer-count bytes. The byte semantics - the
+     * verb vocabulary, the master bits, the gate mask - are
+     * {@link EffectScript}'s ABI, which packer, player and rigs all cite. */
+    public static final int STREAM_M = 14;
+    public static final int STREAM_A1 = 15;
+    public static final int STREAM_P1 = 16;
+    public static final int STREAM_A2 = 17;
+    public static final int STREAM_P2 = 18;
 
     public static final int OFFSET_MAGIC = 0;
     public static final int OFFSET_VERSION = 4;
