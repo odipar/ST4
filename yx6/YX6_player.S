@@ -195,7 +195,7 @@ puts:
         rts
 
         .data
-m_banner:   dc.b    "YX6 player v1.1 - streaming through ST4",13,10,0
+m_banner:   dc.b    "YX6 player v1.0 - streaming through ST4",13,10,0
 m_playing:  dc.b    "Playing. SPACE stops."
         .if YX6_TUNES-1                 ; a line of its own: the console is
             dc.b    13,10               ; 40 columns and one line ran over
