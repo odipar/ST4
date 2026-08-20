@@ -32,7 +32,7 @@ public final class Yx6 {
             System.out.println(song.playerHz());
             return;
         }
-        System.out.println("YX6: YM chiptune packer v0.7 by Robbert van Dalen, "
+        System.out.println("YX6: YM chiptune packer v1.1 by Robbert van Dalen, "
                 + "streaming ST4");
 
         int ringSize = Yx6Format.DEFAULT_RING_SIZE;
