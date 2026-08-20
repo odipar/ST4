@@ -58,5 +58,13 @@ gap restarts at phase zero, gate-off first). Mapped to timers: a fresh
 START writes the voice silent immediately and installs the loud half; the
 first tick, one timer period out, begins the alternation - one quiet
 period, then loud, deterministic at every gap. HELD frees the phase;
-RETUNE keeps the installed half. The maxYMiser mask/resume variant is one
-ABI verb away (verb 0 is still free) if ears ever ask for it.
+RETUNE keeps the installed half.
+
+Both gap models are now ordinary stream verbs the player always carries:
+verb 0 is the maxYMiser RESUME and STOP grew a mask flag. The packer
+chooses per tune - `-sidresume` selects the mask/resume model, the
+ym2149-rs restarts are the default - and since the choice is per emitted
+byte, a future packer could even switch models mid-song; nothing in the
+format forbids it. The Synergy originals (SidSound Designer, binary-only)
+are a third, unknowable driver - the per-tune switch exists precisely for
+that uncertainty.

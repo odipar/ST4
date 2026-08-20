@@ -146,6 +146,11 @@ yx6 [-f] [-o] [-nN] [-cC] [-kK] [-lF] input.ym [output.yx6]
   -o    play once: pack no loop section
   -drumhzH  the drum rate ceiling (default 25600): a drum asking for a
         faster timer is downsampled to fit, with a warning
+  -sidresume  the maxYMiser SID gap model: a released SID's timer keeps
+        counting (interrupt masked) and a re-arrival resumes its phase.
+        The default is the ym2149-rs model: every re-arrival restarts the
+        square at phase zero. Both are ordinary stream verbs - the player
+        always carries both, the packer chooses per tune
 ```
 
 `N` decides how much RAM the player needs (`19 × N` plus about 1.2 KB of

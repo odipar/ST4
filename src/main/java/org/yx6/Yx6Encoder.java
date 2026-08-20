@@ -113,6 +113,18 @@ public final class Yx6Encoder {
     public static Result encode(Ym6Reader.Song song, int ringSize, int chunk,
                                 int loopFrame, boolean progress, int unit,
                                 int drumHz) {
+        return encode(song, ringSize, chunk, loopFrame, progress, unit, drumHz,
+                false);
+    }
+
+    /**
+     * As above, choosing the SID gap model: {@code sidResume} packs the
+     * maxYMiser mask-and-resume semantics instead of the default ym2149-rs
+     * phase-zero restarts - see {@link EffectScript#compile}.
+     */
+    public static Result encode(Ym6Reader.Song song, int ringSize, int chunk,
+                                int loopFrame, boolean progress, int unit,
+                                int drumHz, boolean sidResume) {
         String problem = Yx6Format.checkShape(ringSize, chunk, unit);
         if (!problem.isEmpty()) {
             throw new IllegalArgumentException(problem);
@@ -144,7 +156,7 @@ public final class Yx6Encoder {
         // them.
         YmEffects.Extraction effects = YmEffects.extract(song, drumHz);
         EffectScript.Result script = EffectScript.compile(song, effects,
-                loops ? loopFrame : -1, unit);
+                loops ? loopFrame : -1, unit, sidResume);
         int frames = script.frames();
         int split = script.split();
         byte[][] vectors = new byte[Yx6Format.STREAMS][];
@@ -205,7 +217,9 @@ public final class Yx6Encoder {
                 int verb = actions[p] & 0xE0;
                 read = verb >= EffectScript.VERB_SID_START
                         || verb == EffectScript.VERB_HELD
-                                && (actions[p] & EffectScript.HELD_RELOAD) != 0;
+                                && (actions[p] & EffectScript.HELD_RELOAD) != 0
+                        || verb == EffectScript.VERB_SID_RESUME
+                                && (actions[p] & EffectScript.RESUME_RELOAD) != 0;
             }
             if (read) {
                 last = out[p];

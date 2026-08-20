@@ -66,6 +66,7 @@ public final class Yx6 {
         int loopFrame = -1;                     // tune's shape; -1 likewise
         boolean playOnce = false;
         boolean forcedMode = false;
+        boolean sidResume = false;
         int startMin = 0;                       // the trim window, for zooming
         int startSec = 0;                       // in on a moment of a tune
         int startFrame = -1;
@@ -77,6 +78,7 @@ public final class Yx6 {
             switch (args[i]) {
                 case "-f" -> forcedMode = true;
                 case "-o" -> playOnce = true;
+                case "-sidresume" -> sidResume = true;
                 default -> {
                     if (args[i].startsWith("-drumhz")) {
                         drumHz = parseNumber(args[i].substring(7));
@@ -123,7 +125,7 @@ public final class Yx6 {
                         .replaceAll("(?i)\\.ym$", "");
                 packOne(args[input], dir.resolve(stem + ".yx6").toString(),
                         ringSize, chunk, unit, loopFrame, playOnce, forcedMode,
-                        drumHz, 0, 0, -1, -1, -1);
+                        drumHz, sidResume, 0, 0, -1, -1, -1);
             }
             return;
         }
@@ -152,6 +154,10 @@ public final class Yx6 {
                       -drumhzH   The drum rate ceiling (default 25600): a drum
                               asking for a faster timer is downsampled to fit,
                               with a warning
+                      -sidresume   The maxYMiser SID gap model: a released
+                              SID's timer keeps counting and a re-arrival
+                              resumes its phase. Default: the ym2149-rs
+                              model, phase-zero restarts
                       -startframeF -endframeF -framesN   The same window in
                               frames: start, end, or a length cap
 
@@ -163,16 +169,16 @@ public final class Yx6 {
             return;
         }
         packOne(args[i], outputName, ringSize, chunk, unit, loopFrame, playOnce,
-                forcedMode, drumHz, startMin, startSec, startFrame, endFrame,
-                frameCount);
+                forcedMode, drumHz, sidResume, startMin, startSec, startFrame,
+                endFrame, frameCount);
     }
 
     /** The whole pipeline for one tune: read, trim, pad, pack, write, report. */
     private static void packOne(String inputName, String outputName, int ringSize,
                                 int chunk, int unit, int loopFrame, boolean playOnce,
-                                boolean forcedMode, int drumHz, int startMin,
-                                int startSec, int startFrame, int endFrame,
-                                int frameCount) {
+                                boolean forcedMode, int drumHz, boolean sidResume,
+                                int startMin, int startSec, int startFrame,
+                                int endFrame, int frameCount) {
         String problem = Yx6Format.checkShape(ringSize, chunk, Math.max(unit, 1));
         if (!problem.isEmpty()) {
             throw error(problem);
@@ -277,7 +283,7 @@ public final class Yx6 {
         Yx6Encoder.Result result;
         try {
             result = Yx6Encoder.encode(song, ringSize, chunk, loopFrame, true, unit,
-                    drumHz);
+                    drumHz, sidResume);
         } catch (IllegalArgumentException e) {
             // The encoder always says what it rejected, but getMessage() is
             // @Nullable, so give it something to fall back on.
