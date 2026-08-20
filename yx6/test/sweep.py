@@ -159,12 +159,19 @@ class Model:
         self.owner = [-1, -1, -1]       # per voice: the owning slot
         self.left = [0, 0, 0]           # frames until the gate reopens;
         self.gated = 0                  # -1 = stuck (a cut drum)
+        self.silenced = 0               # voices whose SID starts this frame
         STUCK = None
 
     def step(self, f):
         """Advances one played frame showing source frame f; returns
-        (gated_mask, forced_mask) for the frame's writes."""
+        (gated_mask, forced_mask, silenced_mask) for the frame's writes.
+
+        A voice in the silenced mask is one whose SID starts this frame:
+        the ym2149-rs gap model writes its volume register to zero before
+        installing the loud half, so a closed gate expects exactly that
+        one write instead of none."""
         regs, drums = self.regs, self.drums
+        self.silenced = 0
         for v in range(3):
             if self.owner[v] >= 0 and self.left[v] > 0:
                 self.left[v] -= 1
@@ -199,6 +206,7 @@ class Model:
                     self.gated &= ~(1 << (((old >> 4) & 3) - 1))
                 self._cut(slot)
                 self.gated |= 1 << v
+                self.silenced |= 1 << v         # SID_START silences first
             elif kind == 0x40:                              # drum
                 if (old & 0xC0) == 0x00 and old:
                     self.gated &= ~(1 << (((old >> 4) & 3) - 1))
@@ -220,7 +228,7 @@ class Model:
         for v in range(3):
             if self.owner[v] >= 0:
                 forced |= 1 << v
-        return self.gated, forced
+        return self.gated, forced, self.silenced
 
     def _drum(self, slot, code, divisor, f):
         v = ((code >> 4) & 3) - 1
@@ -284,7 +292,7 @@ def sweep(path):
                 break
             if result == 1:
                 wrapped = True
-            gated, forced = model.step(src)
+            gated, forced, silenced = model.step(src)
             got = dict(writes)
             for r in strict:
                 want = regs[r][src] & MASK[r]
@@ -295,7 +303,13 @@ def sweep(path):
                             f'{got.get(r)} want {want}')
             for v in range(3):
                 r = 8 + v
-                if gated & (1 << v):
+                if silenced & (1 << v):
+                    # the SID start's own silence write, then the loud half
+                    if got.get(r) != 0:
+                        return (f'ISSUE {name}: frame {f} started a SID on '
+                                f'voice {"ABC"[v]} without silencing R{r} '
+                                f'(wrote {got.get(r)})')
+                elif gated & (1 << v):
                     if r in got:
                         return (f'ISSUE {name}: frame {f} wrote R{r} '
                                 'through a closed gate')
