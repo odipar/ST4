@@ -33,8 +33,10 @@
 ; uses one value from each of the nineteen rings and refills exactly one
 ; stream - stream k on the VBL where the frame number modulo C is k. With
 ; C >= 19 every stream is refilled once per C frames, one refill per VBL, so
-; the work per frame is flat: the effect script, fourteen register writes
-; and one ST4_resume of C bytes. Since C divides N and a call never reaches
+; the work per frame is flat, and ordered for the chip's benefit: the burst
+; gates, then the fourteen register writes - leaving the VBL at a FIXED
+; offset, whatever the frame's effects cost - then the effect script's
+; actions, then one ST4_resume of C bytes. Since C divides N and a call never reaches
 ; the ring end, ST4_wrap.S is the decoder that fits: the player counts the
 ; calls itself and wraps the write pointer when it lands on the ring end.
 ;
@@ -171,13 +173,15 @@ YX6_SUPER_HOST  equ     0
 ; each tick handler paints its own sliver - Timer A green, Timer D blue -
 ; wherever the beam happens to be, and because slivers are hard to read, the
 ; handlers also accumulate an estimated cost that the next frame burns off
-; as a solid yellow bar ahead of the red one: the timers' total, in
-; scanlines. The frame step waits for the display to start before it paints
-; anything - the VBL fires far above the visible screen, so an unsynced
-; monitor draws its bands into the top border where nothing can be seen -
-; and the wait is a constant, so nothing it measures is distorted. An
-; estimate - the quanta are ~10-cycle loop turns - and pure debug: with the
-; flag off (the default) not one cycle or byte remains.
+; as a solid yellow bar AFTER the red one: the timers' total, in scanlines,
+; burned once the frame's own work - and above all the register burst - is
+; done, so the monitor never moves the chip writes. The frame step waits
+; for the display to start before it paints anything - the VBL fires far
+; above the visible screen, so an unsynced monitor draws its bands into
+; the top border where nothing can be seen - and the wait is a constant,
+; so nothing it measures is distorted. An estimate - the quanta are
+; ~10-cycle loop turns - and pure debug: with the flag off (the default)
+; not one cycle or byte remains.
         .if ^^defined YX6_PERF
         .else
 YX6_PERF        equ     0
@@ -640,8 +644,6 @@ YX6_play:
         rts                             ; does not loop: write nothing
 
 .frame:
-        moveq   #0,d3
-        move.w  YX6_N(a3),d3            ; one ring to the next
         .if YX6_PERF
         move.w  $FFFF8240.w,-(sp)       ; the raster monitor. The background
         move.b  $FFFF8209.w,d0          ; goes on the stack first, before any
@@ -655,47 +657,25 @@ YX6_play:
                                         ; host that plays mid-screen - or a
                                         ; machine whose counter never moves -
                                         ; gives up rather than hangs.
-        move.w  #$770,$FFFF8240.w       ; then the timers' bar, yellow...
-        lea     yx6_perf_acc(pc),a0
-        move.w  (a0),d0
-        clr.w   (a0)
-.perf_bar:
-        dbra    d0,.perf_bar
-        move.w  #$700,$FFFF8240.w       ; ...then this frame's work, red
-        .endif
+        move.w  #$700,$FFFF8240.w       ; this frame's work, red - first,
+        .endif                          ; so the monitor never delays the
+                                        ; burst; the timers' bar follows
 
-; The effect stage: replay the compiled script. One master byte says what
-; acts this frame - almost always nothing, and the whole stage is one test.
-; The action bytes were decided at pack time; the handlers copy prepared
-; values to prepared places and compare nothing.
+; The gates first, then the burst, then everything else: the fourteen chip
+; writes leave the VBL at a FIXED offset, whatever the frame's effects cost.
+; Only the gate state must precede the burst (a trigger frame's voice must
+; be muted before the burst would write its sample number); the actions -
+; timer programs, handler patches - happen after, where their varying cost
+; cannot jitter the writes. Gate changes are rare, so the burst's offset
+; moves only on those frames, and by a fixed amount.
         movea.l YX6_CURSOR(a3),a0
         adda.l  YX6_EFXOFF(a3),a0       ; ring M, at this frame's offset
-        move.b  (a0),d0
-        beq.s   .effects_done           ; the common frame ends here
-        lsr.b   #1,d0                   ; bit 0: slot 1 acts
-        bcc.s   .slot2
-        lea     yx6_desc1(pc),a5
-        movea.l a0,a4
-        adda.l  d3,a4                   ; ring A1 = M + N
-        move.w  d0,-(sp)
-        bsr     yx6_act
-        move.w  (sp)+,d0
-.slot2:
-        lsr.b   #1,d0                   ; bit 1: slot 2 acts
-        bcc.s   .gates
-        lea     yx6_desc2(pc),a5
-        movea.l a0,a4
-        adda.l  d3,a4
-        adda.l  d3,a4
-        adda.l  d3,a4                   ; ring A2 = M + 3N
-        move.w  d0,-(sp)
-        bsr     yx6_act
-        move.w  (sp)+,d0
-.gates:
-        lsr.b   #1,d0                   ; bit 2: the gate mask changed;
-        bcc.s   .effects_done           ; bits 5-3 carried the new state
+        move.b  (a0),d0                 ; a0 survives everything below
+        btst    #2,d0                   ; the gate mask changed?
+        beq.s   .burst                  ; bits 5-3 carried the new state
+        lsr.b   #3,d0
         bsr     yx6_gates
-.effects_done:
+.burst:
         movea.l YX6_CURSOR(a3),a1       ; the cursor: every register's ring
         lea     YX6_PSG,a2              ; byte is a patched k*N above it
 
@@ -736,6 +716,33 @@ yx6_w13:
         move.b  d1,2(a2)
 .envelope_held:
         move.w  (sp)+,sr
+
+; The actions, now that the chip has its frame: replay the compiled script.
+; One master byte says what acts - almost always nothing. The action bytes
+; were decided at pack time; the handlers copy prepared values to prepared
+; places and compare nothing. a0 still points at ring M.
+        move.b  (a0),d0
+        andi.b  #3,d0                   ; the slots' bits; gates are done
+        beq.s   .effects_done
+        moveq   #0,d3
+        move.w  YX6_N(a3),d3
+        lsr.b   #1,d0                   ; bit 0: slot 1 acts
+        bcc.s   .slot2
+        lea     yx6_desc1(pc),a5
+        movea.l a0,a4
+        adda.l  d3,a4                   ; ring A1 = M + N
+        bsr     yx6_act
+.slot2:
+        move.b  (a0),d0                 ; a0 survives yx6_act; d0 does not
+        btst    #1,d0                   ; bit 1: slot 2 acts
+        beq.s   .effects_done
+        lea     yx6_desc2(pc),a5
+        movea.l a0,a4
+        adda.l  d3,a4
+        adda.l  d3,a4
+        adda.l  d3,a4                   ; ring A2 = M + 3N
+        bsr     yx6_act
+.effects_done:
 
 ; Refill the stream whose turn it is. Slots 19..C-1 exist when C is larger
 ; than the stream count; they simply have nothing to do.
@@ -783,12 +790,24 @@ yx6_w13:
         beq.s   .played                 ; zero and no loop: the next call ends
         move.l  YX6_LOOPLEN(a3),YX6_LEFTFR(a3)
         .if YX6_PERF
+        move.w  #$770,$FFFF8240.w       ; then the timers' bar: what the
+        lea     yx6_perf_acc(pc),a0     ; ticks cost since last frame,
+        move.w  (a0),d0                 ; burned AFTER the frame's work
+        clr.w   (a0)
+.perf_bar_w:
+        dbra    d0,.perf_bar_w
         move.w  (sp)+,$FFFF8240.w
         .endif
         moveq   #1,d0                   ; played, and wrapped to the loop point
         rts
 .played:
         .if YX6_PERF
+        move.w  #$770,$FFFF8240.w
+        lea     yx6_perf_acc(pc),a0
+        move.w  (a0),d0
+        clr.w   (a0)
+.perf_bar_p:
+        dbra    d0,.perf_bar_p
         move.w  (sp)+,$FFFF8240.w
         .endif
         moveq   #0,d0

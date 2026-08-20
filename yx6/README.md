@@ -85,8 +85,9 @@ background red for exactly as long as it runs, so its cost reads directly in
 scanlines (one scanline = 512 cycles), and every timer tick paints its own
 sliver — Timer A green, Timer D blue — wherever the beam happens to be.
 Because ticks are far too short to count by eye, the handlers also tally an
-estimated cost, and the next frame burns it off as a solid yellow bar ahead
-of the red one: the timers' total for that frame, as one readable block. The
+estimated cost, and the frame burns it off as a solid yellow bar right
+after its red band: the timers' total, as one readable block - after, so
+the monitor never delays the register burst it is measuring. The
 frame step waits for the display to start before painting anything: the VBL
 fires dozens of lines above the visible screen, so an unsynced monitor draws
 its bands into the top border where you cannot see them. It syncs on the
@@ -213,8 +214,10 @@ VBL 23: use value 23 from every stream; no refill
 ```
 
 Every stream is therefore one full group ahead of what is being read, and the
-work per frame is flat: the effect stage, fourteen register writes and one
-24-byte decoder call.
+work per frame is flat, and ordered so the chip writes never jitter: the
+burst gates, the fourteen register writes — at a fixed offset from the
+call, whatever the frame's effects cost — then the script's actions, then
+one 24-byte decoder call.
 The player counts the calls itself and wraps a ring's write pointer when it
 lands on the ring end, which is exactly ST4_wrap's contract — there is no DONE
 state to poll and no bound check inside the decoder.
