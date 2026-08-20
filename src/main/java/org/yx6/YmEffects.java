@@ -26,12 +26,15 @@ package org.yx6;
  * happened.
  *
  * <p>A DRUM above the rate ceiling is rescued rather than dropped: the
- * sample is downsampled by a power of two - neighbouring values averaged -
- * and every trigger of that drum has its timer divisor scaled by the same
- * factor, so pitch and duration stay exactly what the dump asked for and
- * only the sample resolution falls. Conversion-family dumps ask for 38 kHz
- * drums an 8 MHz machine cannot service; at half or a quarter rate they
- * play. Each rescue is reported in {@code notes()}.
+ * sample is resampled to the highest MFP-representable rate under the
+ * ceiling - through the chip's volume curve, with a windowed-sinc filter,
+ * so no alias fold-back brightens the sound - and every trigger of that
+ * drum has its timer divisor scaled by the same exact ratio, so pitch and
+ * duration stay what the dump asked for and only the bandwidth falls, by
+ * as little as the ceiling allows. A 29 kHz conversion-family drum lands
+ * at 25.6 kHz, not at the old half-rate 14.6. When a drum's triggers
+ * cannot all take the exact ratio, the old power-of-two factor is the
+ * fallback. Each rescue is reported in {@code notes()}.
  *
  * <p>Drum samples are converted to PSG-ready volume values here: the high
  * nibble of an 8-bit sample, or the byte as-is for a 4-bit file - exactly the
@@ -72,7 +75,9 @@ public final class YmEffects {
 
     private final Ym6Reader.Song song;
     private final byte[][] drums;
-    private final int[] factor;
+    private final int[] num;            // per-drum divisor scale num/den >= 1;
+    private final int[] den;            // 1/1 = the drum plays as dumped
+    private final java.util.List<java.util.TreeSet<Integer>> divisors;
     private final int drumHz;
     private final java.util.List<String> notes = new java.util.ArrayList<>();
     private int inert;
@@ -84,7 +89,14 @@ public final class YmEffects {
         this.song = song;
         this.drumHz = drumHz;
         this.drums = convertDrums(song);
-        this.factor = new int[drums.length];
+        this.num = new int[drums.length];
+        this.den = new int[drums.length];
+        this.divisors = new java.util.ArrayList<>();
+        for (int i = 0; i < drums.length; i++) {
+            num[i] = 1;
+            den[i] = 1;
+            divisors.add(new java.util.TreeSet<>());
+        }
     }
 
     public static Extraction extract(Ym6Reader.Song song) {
@@ -128,10 +140,11 @@ public final class YmEffects {
     }
 
     /**
-     * Surveys every drum trigger for rates above the ceiling and downsamples
-     * the drums that need it: neighbouring values averaged, one factor per
-     * drum - the largest any of its triggers demands - so that every trigger
-     * of the drum can scale its divisor by the same amount.
+     * Surveys every drum trigger and rescues the drums whose rate exceeds
+     * the ceiling: each is resampled to the highest MFP-representable rate
+     * under it, and every trigger's divisor scales by the same exact ratio.
+     * When a drum's triggers cannot all take the ratio exactly, the
+     * power-of-two factor is the fallback.
      */
     private void downsample() {
         boolean ym6 = song.format().startsWith("YM6");
@@ -144,21 +157,41 @@ public final class YmEffects {
                     register(8, frame) >> 5, register(15, frame), frame);
         }
         for (int i = 0; i < drums.length; i++) {
-            if (factor[i] <= 1) {
+            if (divisors.get(i).isEmpty()) {
                 continue;
             }
-            byte[] source = drums[i];
-            byte[] shrunk = new byte[Math.max(1, source.length / factor[i])];
-            for (int j = 0; j < shrunk.length; j++) {
-                int sum = 0;
-                for (int k = 0; k < factor[i]; k++) {
-                    sum += source[j * factor[i] + k];
-                }
-                shrunk[j] = (byte) ((sum + factor[i] / 2) / factor[i]);
+            int fastest = divisors.get(i).first();
+            if ((long) drumHz * fastest >= MFP_CLOCK) {
+                continue;               // the fastest trigger fits already
             }
-            drums[i] = shrunk;
-            notes.add("drum " + i + " downsampled " + factor[i] + "x to fit "
-                    + drumHz + " Hz (-drumhz to change)");
+            int target = ceilingDivisor();
+            int g = gcd(target, fastest);
+            int n = target / g;
+            int d = fastest / g;
+            boolean exact = true;
+            for (int divisor : divisors.get(i)) {
+                long scaled = (long) divisor * n;
+                if (scaled % d != 0 || !representable((int) (scaled / d))) {
+                    exact = false;
+                    break;
+                }
+            }
+            if (!exact) {               // the old rescue: a power of two
+                n = 1;
+                d = 1;
+                while ((long) drumHz * fastest * n < MFP_CLOCK && n < 64) {
+                    n *= 2;
+                }
+            }
+            num[i] = n;
+            den[i] = d;
+            byte[] source = drums[i];
+            int outLength = Math.max(1, (int) ((long) source.length * d / n));
+            drums[i] = resample(source, outLength);
+            notes.add("drum " + i + " resampled "
+                    + MFP_CLOCK / fastest + " -> "
+                    + (long) MFP_CLOCK * d / ((long) fastest * n)
+                    + " Hz to fit " + drumHz + " Hz (-drumhz to change)");
         }
     }
 
@@ -175,12 +208,86 @@ public final class YmEffects {
         if (number >= drums.length) {
             return;
         }
-        int hz = MFP_CLOCK / (PREDIV[prescaler] * count);
-        int needed = 1;
-        while (hz / needed > drumHz && needed < 64) {
-            needed *= 2;
+        divisors.get(number).add(PREDIV[prescaler] * count);
+    }
+
+    /** The smallest MFP-representable divisor whose rate is at or under
+     *  the ceiling - the fastest way to play a rescued drum. */
+    private int ceilingDivisor() {
+        int needed = (MFP_CLOCK + drumHz - 1) / drumHz;
+        int best = Integer.MAX_VALUE;
+        for (int p = 1; p < PREDIV.length; p++) {
+            int count = (needed + PREDIV[p] - 1) / PREDIV[p];
+            if (count <= 255 && PREDIV[p] * count < best) {
+                best = PREDIV[p] * count;
+            }
         }
-        factor[number] = Math.max(factor[number], needed);
+        return best;
+    }
+
+    private static boolean representable(int divisor) {
+        for (int p = 1; p < PREDIV.length; p++) {
+            if (divisor % PREDIV[p] == 0) {
+                int count = divisor / PREDIV[p];
+                if (count >= 1 && count <= 255) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private static int gcd(int a, int b) {
+        while (b != 0) {
+            int t = a % b;
+            a = b;
+            b = t;
+        }
+        return a;
+    }
+
+    /** The chip's volume curve, per the reference player: filtering happens
+     *  in the linear domain the ear lives in, not on the register indices. */
+    private static final int[] CURVE = {62, 161, 265, 377, 580, 774, 1155,
+            1575, 2260, 3088, 4570, 6233, 9330, 13187, 21220, 32767};
+
+    /**
+     * Windowed-sinc resample of a volume-index sample: indices become
+     * amplitudes through the chip curve, a Hann-windowed sinc low-passes at
+     * the target rate's band, and the result quantizes back to the nearest
+     * index. The old neighbour average folded the removed band back into
+     * the audible one; a real filter removes it.
+     */
+    private static byte[] resample(byte[] source, int outLength) {
+        final int taps = 12;
+        double step = (double) source.length / outLength;
+        double cutoff = Math.min(1.0, 1.0 / step);
+        byte[] out = new byte[outLength];
+        for (int j = 0; j < outLength; j++) {
+            double center = (j + 0.5) * step - 0.5;
+            int base = (int) Math.floor(center);
+            double acc = 0;
+            double weight = 0;
+            for (int m = base - taps + 1; m <= base + taps; m++) {
+                double t = (m - center) * cutoff;
+                double x = (m - center) / taps;
+                double w = (0.5 + 0.5 * Math.cos(Math.PI * x))
+                        * (t == 0 ? 1.0 : Math.sin(Math.PI * t) / (Math.PI * t));
+                int at = Math.min(source.length - 1, Math.max(0, m));
+                acc += w * CURVE[source[at] & 15];
+                weight += w;
+            }
+            double amplitude = acc / weight;
+            int nearest = 0;
+            for (int i = 1; i < 16; i++) {
+                if (Math.abs(CURVE[i] - amplitude)
+                        < Math.abs(CURVE[nearest] - amplitude)) {
+                    nearest = i;
+                }
+            }
+            out[j] = (byte) nearest;
+        }
+        return out;
     }
 
     /**
@@ -231,13 +338,16 @@ public final class YmEffects {
                 missingDrum++;
                 return 0;
             }
-            // The drum's sample may have been downsampled: every trigger
-            // scales its divisor by the same factor, keeping pitch and
-            // duration exact. A divisor no prescaler/count pair represents
-            // is dropped - it cannot happen for power-of-two factors, but
-            // honesty costs one branch.
-            if (factor[number] > 1) {
-                long fitted = fit(code, PREDIV[prescaler] * count * factor[number]);
+            // The drum's sample may have been resampled: every trigger
+            // scales its divisor by the same exact ratio, keeping pitch
+            // and duration exact. A divisor no prescaler/count pair
+            // represents is dropped - the survey rules it out for the
+            // ratio path, but the power-of-two fallback keeps the branch
+            // honest.
+            if (num[number] > den[number]) {
+                long scaled = (long) PREDIV[prescaler] * count * num[number]
+                        / den[number];
+                long fitted = fit(code, (int) scaled);
                 if (fitted == 0) {
                     tooFast++;
                 }
@@ -245,9 +355,9 @@ public final class YmEffects {
             }
         }
         int hz = MFP_CLOCK / (PREDIV[prescaler] * count);
-        if (hz > MAX_TIMER_HZ) {
-            tooFast++;
-            return 0;
+        if (hz > (type == TYPE_DRUM ? drumHz : MAX_TIMER_HZ)) {
+            tooFast++;                  // drums use their own ceiling, so
+            return 0;                   // -drumhz above 25600 works too
         }
         return ((long) ((code & 0xF0) | prescaler) << 8) | count;
     }
