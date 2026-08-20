@@ -50,6 +50,14 @@ import java.util.List;
  *               contract's stop-the-victim-first order, straight-line
  * </pre>
  *
+ * <p>A SID that went away and comes back - a released note, a drum that
+ * borrowed the voice - always re-enters through SID_START, which restarts
+ * the square at phase zero: the player writes the voice silent, and the
+ * first tick - one timer period later - plays the loud half. Free-running
+ * phase belongs only to a HELD code (and its retunes): the ym2149-rs
+ * reference model, deterministic at every gap. SID_RETUNE is ONLY the held
+ * prescaler-slide.
+ *
  * <p>SID volume, buzzer shape and the drum number are read by the player
  * from the voice's own register ring (v1's mechanism), so they need no
  * streams; the packer merely marks the frames. The drummed voice's ring
@@ -63,12 +71,10 @@ import java.util.List;
  *
  * A drum's end is the one genuinely asynchronous event: its sample runs out
  * at timer rate, mid-frame, and only the marker tick knows the instant. The
- * script reopens the voice's gate, releases the mixer and resumes a
+ * script reopens the voice's gate, releases the mixer and re-starts a
  * suppressed SID at the frame boundary AFTER the computed end - never
  * before, so a burst write can never race a live drum; at most one extra
- * frame of the parked mid-volume. A resumed SID whose slot still holds its
- * vector comes back through SID_RETUNE, so the square's phase free-runs
- * across the drum (v1 restarted it at the loud half, silently).
+ * frame of the parked mid-volume.
  *
  * <h2>The split rotation</h2>
  *
@@ -116,8 +122,7 @@ public final class EffectScript {
      */
     public record Result(int frames, int split, int[] source,
                          byte[] m, byte[] a1, byte[] p1, byte[] a2, byte[] p2,
-                         byte[] r7force, List<int[]> reopens, List<int[]> resumes,
-                         List<String> notes) {
+                         byte[] r7force, List<int[]> reopens, List<String> notes) {
 
         public byte[][] streams() {
             return new byte[][] {m, a1, p1, a2, p2};
@@ -157,7 +162,6 @@ public final class EffectScript {
     private final int[] drumOwner = {-1, -1, -1}; // gate reopens; -1 = free
     private int gates;                            // bit v = muted
     private final List<int[]> reopens = new ArrayList<>();
-    private final List<int[]> resumes = new ArrayList<>();
     private final List<String> notes = new ArrayList<>();
 
     // The emission arrays, over the full simulated horizon; cut at the end.
@@ -236,12 +240,11 @@ public final class EffectScript {
             source[p] = source(p, total);
         }
         reopens.removeIf(r -> r[0] >= frames);
-        resumes.removeIf(r -> r[0] >= frames);
         return new Result(frames, split, source,
                 Arrays.copyOf(m, frames), Arrays.copyOf(a1, frames),
                 Arrays.copyOf(p1, frames), Arrays.copyOf(a2, frames),
                 Arrays.copyOf(p2, frames), Arrays.copyOf(r7, frames),
-                List.copyOf(reopens), List.copyOf(resumes), List.copyOf(notes));
+                List.copyOf(reopens), List.copyOf(notes));
     }
 
     /** The dump frame played frame {@code p} shows. */
@@ -403,24 +406,22 @@ public final class EffectScript {
             openOld(old);
             return;                     // nothing armed, nothing emitted
         }
-        slot.tlast = count;
         int value = parameter(f, voice);
-        // .sid_retune when only the prescaler moved; also - the resume
-        // improvement - when the slot's vector still holds this SID's half
-        // (the timer merely stopped meanwhile), so the square's phase
-        // free-runs where v1 restarted it at the loud half. The gate bit is
-        // set on every path: the handlers never touch gates, M carries them.
-        boolean retune = old != 0 && ((code ^ old) & 0xF0) == 0
-                || slot.vec == TYPE_SID && slot.vecVoice == voice
-                        && slot.sel == voice;
+        // The ym2149-rs model (the reference the owner trusts by ear; see
+        // doc/experiments/2026-08-20-sid-phase-semantics.md): the phase
+        // free-runs only while the code is HELD - a retune keeps the
+        // installed half - and any arrival after a gap RESTARTS the square
+        // deterministically at phase zero: one silent timer period (the
+        // player writes the voice silent at start), then the loud half.
+        // The gate bit is set on every path: the handlers never touch
+        // gates, M carries them.
+        boolean retune = old != 0 && ((code ^ old) & 0xF0) == 0;
         cut(p, index, -1);
         openOld(old);
         gates |= 1 << voice;
+        slot.tlast = count;
         slot.vol = value;
         if (retune) {
-            if (old == 0 || ((code ^ old) & 0xF0) != 0) {
-                resumes.add(new int[] {p, index});  // v1 would full-start here
-            }
             emit(p, index, action(VERB_SID_RETUNE, voice, code & 7), count);
             return;
         }

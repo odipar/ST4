@@ -16,3 +16,5 @@ decline - the door left open.
 | 2026-08-19 | [movep and pre-formatted streams](2026-08-19-movep-and-stream-formats.md) | declined - ties at best, +25% bytes at worst |
 | 2026-08-19 | [register clustering](2026-08-19-register-clustering.md) | declined - real but marginal; fixed variant noted |
 | 2026-08-19 | [the SID ticking](2026-08-19-sid-ticking.md) | diagnosed and fixed - the burst may not write a register a timer effect owns |
+- [2026-08-20 SID phase semantics](2026-08-20-sid-phase-semantics.md) — no player agrees on re-start phase; v2 keeps v1's deterministic loud-half restart
+- [2026-08-20 the Synergy Credits hunt](2026-08-20-synergy-credits-sid-phase.md) — a phase bug every write-level instrument called correct; how it hid and what convicted it

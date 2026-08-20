@@ -27,9 +27,9 @@ import org.junit.jupiter.api.Test;
  * the rig cannot reach.
  *
  * <p>Where v2's frame-aligned semantics deliberately differ from v1 (a
- * drum's gate reopens at the computed end's frame boundary; a SID whose
- * vector survived resumes by retune), the expectations here encode the v2
- * side; the differential harness owns proving the rest equivalent.
+ * drum's gate reopens at the computed end's frame boundary), the
+ * expectations here encode the v2 side; everything else is v1's, the
+ * loud-half phase reset on every SID arrival included.
  */
 final class EffectScriptTest {
 
@@ -58,6 +58,9 @@ final class EffectScriptTest {
             v[1][f] |= 0x10;
             v[6][f] |= 1 << 5;
             v[14][f] = (byte) (f >= 15 ? 80 : 100);
+        }
+        for (int f = 6; f <= 14; f++) {         // ...with a sliding volume
+            v[8][f] = (byte) (10 - (f - 4) / 2);
         }
         for (int f = 22; f <= 26; f++) {        // the retune scene
             v[1][f] |= 0x10;
@@ -116,21 +119,25 @@ final class EffectScriptTest {
         }
         expect(r, 5, M_SLOT1 | M_GATES | (1 << M_GATE_SHIFT),
                 action(VERB_SID_START, 0, 1), 100, 0, 0);
-        for (int f = 6; f <= 14; f++) {         // held, count and volume flat
-            expect(r, f, 0, 0, 0, 0, 0);
+        for (int f = 6; f <= 14; f++) {         // held: the slide emits a
+            if (f % 2 == 0) {                   // volume track exactly on
+                expect(r, f, M_SLOT1,           // the frames it changes; P
+                        action(VERB_HELD, 0, HELD_VOLUME), 100, 0, 0);
+            } else {
+                expect(r, f, 0, 0, 0, 0, 0);
+            }
         }
-        expect(r, 15, M_SLOT1, action(VERB_HELD, 0, HELD_RELOAD), 80, 0, 0);
+        expect(r, 15, M_SLOT1,                  // the count reload and the
+                action(VERB_HELD, 0, HELD_RELOAD | HELD_VOLUME), 80, 0, 0);
         for (int f = 16; f <= 20; f++) {
             expect(r, f, 0, 0, 0, 0, 0);
         }
         expect(r, 21, M_SLOT1 | M_GATES, action(VERB_STOP, 0, 0), 0, 0, 0);
 
-        // The re-start finds the slot's vector still holding the square:
-        // the resume improvement retunes instead of restarting the phase.
+        // A re-start after a release is a FULL start - the loud-half phase
+        // reset is part of the sound, exactly as v1 played it.
         expect(r, 22, M_SLOT1 | M_GATES | (1 << M_GATE_SHIFT),
-                action(VERB_SID_RETUNE, 0, 1), 90, 0, 0);
-        assertTrue(r.resumes().stream().anyMatch(x -> x[0] == 22 && x[1] == 0),
-                "frame 22 is a resume-for-start substitution");
+                action(VERB_SID_START, 0, 1), 90, 0, 0);
         expect(r, 23, 0, 0, 0, 0, 0);
         expect(r, 24, 0, 0, 0, 0, 0);
         expect(r, 25, M_SLOT1, action(VERB_SID_RETUNE, 0, 2), 90, 0, 0);
@@ -155,15 +162,13 @@ final class EffectScriptTest {
 
         // Arbitration: the takeover drum stops the SID's timer first, holds
         // the voice's gate (no mask change - it was already closed), and
-        // the suppressed SID resumes by retune when the window ends.
+        // the suppressed SID re-starts when the window ends.
         expect(r, 45, M_SLOT2 | M_GATES | (2 << M_GATE_SHIFT),
                 0, 0, action(VERB_SID_START, 1, 1), 90);
         expect(r, 48, M_SLOT1, action(VERB_DRUM_ARB, 1, 1), 60, 0, 0);
         assertEquals(0x12, r.r7force()[48] & 0xFF, "voice B forced");
         expect(r, 49, 0, 0, 0, 0, 0);           // suppressed: nothing at all
-        expect(r, 50, M_SLOT2, 0, 0, action(VERB_SID_RETUNE, 1, 1), 90);
-        assertTrue(r.resumes().stream().anyMatch(x -> x[0] == 50 && x[1] == 1),
-                "the resume keeps the square's phase");
+        expect(r, 50, M_SLOT2, 0, 0, action(VERB_SID_START, 1, 1), 90);
         assertEquals(0, r.r7force()[50] & 0xFF, "mixer free from the reopen");
         expect(r, 51, 0, 0, 0, 0, 0);
         expect(r, 52, 0, 0, 0, 0, 0);
