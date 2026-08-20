@@ -1,9 +1,17 @@
 package org.yx6;
 
 /**
- * Extracts the YM special effects into the four effect streams, normalizing
- * every dialect and every unplayable code away at pack time - the player
- * never sees an effect it cannot run.
+ * Extracts the YM special effects, normalizing every dialect and every
+ * unplayable code away at pack time - the player never sees an effect it
+ * cannot run.
+ *
+ * <p>This is where the vocabulary changes. On the way in the names are the
+ * YM format's, because the bytes are its: effect slots, codes, TP and TC.
+ * On the way out they are the engine's, and what leaves here as a pair of
+ * bytes per frame becomes a TICK STREAM - a series of values written to one
+ * register between frames, at a rate a timer sets. {@code doc/terminology.md}
+ * holds the mapping and the model; a digidrum is a PCM stream there, a SID
+ * voice a toggle stream, a sync-buzzer a retrigger stream.
  *
  * <p>A YM6 frame carries up to two effect slots, each three fields smeared
  * across spare register bits: a code nibble (type in bits 7-6, voice+1 in
@@ -42,23 +50,27 @@ package org.yx6;
  */
 public final class YmEffects {
 
-    /** The four effect types, as they sit in code bits 7-6. */
+    /** The four effect types, as they sit in code bits 7-6. In the
+     *  engine's words: SID is a toggle stream, DRUM a PCM stream, BUZZER a
+     *  retrigger stream, SINUS a curve stream (never implemented). */
     public static final int TYPE_SID = 0x00;
     public static final int TYPE_DRUM = 0x40;
     public static final int TYPE_SINUS = 0x80;
     public static final int TYPE_BUZZER = 0xC0;
 
-    /** The fastest timer a real player programs: SIDs and buzzers above it
-     * are dropped, drums are downsampled under it. The CLI's -drumhz option
-     * moves the drum ceiling. */
+    /** The fastest tick rate a real player programs: SIDs and buzzers
+     * above it are dropped, drums resampled under it. The CLI's -drumhz
+     * option moves the drum ceiling. */
     public static final int MAX_TIMER_HZ = 25600;
 
     /** The MFP timer clock and its prescaler table; index 0 stops the timer. */
     public static final int MFP_CLOCK = 2457600;
     static final int[] PREDIV = {0, 4, 10, 16, 50, 64, 100, 200};
 
-    /** The four streams, the converted drums, what was dropped, and one
-     *  note per downsampled drum. */
+    /** What the reader's frames become: two byte pairs per frame naming
+     *  the tick streams to run, the converted drum samples, what was
+     *  dropped, and one note per resampled drum. This is the handover
+     *  point - past here the vocabulary is the engine's. */
     public record Extraction(byte[] e1, byte[] t1, byte[] e2, byte[] t2,
                              byte[][] drums, int inert, int tooFast, int sinus,
                              int missingDrum, java.util.List<String> notes) {

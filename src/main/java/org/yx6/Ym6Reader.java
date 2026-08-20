@@ -6,6 +6,12 @@ import java.nio.charset.StandardCharsets;
  * Reads a YM5!/YM6! register dump, as described by
  * <a href="http://leonard.oxg.free.fr/ymformat.html">the YM format page</a>.
  *
+ * <p>This class is the boundary. Everything here speaks the YM format's own
+ * language - digidrums, SID voices, effect slots, TP and TC - because those
+ * are the names of the bytes it is reading, and calling them anything else
+ * would misdescribe the file. The engine's vocabulary starts downstream, at
+ * {@link YmEffects.Extraction}; {@code doc/terminology.md} maps the two.
+ *
  * <p>The layout is a fixed header, optional extra data, the digidrum samples,
  * three NUL-terminated strings, and then the frames: either 16 vectors of one
  * register each (the interleaved option) or one 16-byte record per frame. Both
