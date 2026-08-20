@@ -17,7 +17,7 @@ public final class St4 {
     private St4() {}
 
     public static void main(String[] args) {
-        System.out.println("ST4: aligned split-stream packer v0.7 by Robbert van Dalen, "
+        System.out.println("ST4: aligned split-stream packer v1.1 by Robbert van Dalen, "
                 + "based on ZX1 v1.5 by Einar Saukas");
 
         int unit = 1;

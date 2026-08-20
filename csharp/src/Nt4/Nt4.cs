@@ -27,7 +27,7 @@ public static class Nt4
     public static int Run(string[] args)
     {
         ArgumentNullException.ThrowIfNull(args);
-        Console.WriteLine("NT4: aligned split-stream packer v0.7 by Robbert van Dalen, "
+        Console.WriteLine("NT4: aligned split-stream packer v1.1 by Robbert van Dalen, "
             + "based on ZX1 v1.5 by Einar Saukas");
 
         int unit = 1;
