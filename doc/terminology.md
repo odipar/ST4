@@ -405,6 +405,27 @@ Names YX6 itself used before this file, and one from elsewhere:
 | the ym2149-rs and maxYMiser gap models | **zero-restart** and **free-running** **phase policy** |
 | SNDH's TC50 and TC200 tags | the **frame clock** a tune asks for |
 
+## The names in the code
+
+The engine's identifiers use these words, so a term here can be grepped
+for:
+
+| term | in the code |
+|---|---|
+| the four kinds | `KIND_PCM`, `KIND_TOGGLE`, `KIND_RETRIGGER`, `KIND_CURVE` |
+| what a stream is told to do | `VERB_START_PCM`, `VERB_START_TOGGLE`, `VERB_START_RETRIGGER`, `VERB_START_PCM_PREEMPT`, `VERB_HOLD`, `VERB_RETUNE`, `VERB_RELEASE`, `VERB_RESUME` |
+| the player's tick handlers | `yx6_pcmA`, `yx6_toggleA_on`, `yx6_toggleA_off`, `yx6_retriggerA`, and their Timer D twins |
+| the actions the script runs | `yx6_pcm_start`, `yx6_pcm_preempt`, `yx6_toggle_start`, `yx6_retrigger_start`, `yx6_retune`, `yx6_resume`, `yx6_hold`, `yx6_release` |
+
+`Ym6Reader` and `YmEffects` keep the YM format's names on their input
+side, for the reason given above: those are the names of the bytes.
+
+The rename was verified as a change of words only. Every one of the 543
+packable corpus tunes packs byte-for-byte identically, the player binary
+is unchanged in both the plain and `-perf` builds, the SNDH container is
+unchanged, the Java suite and the emulation rig pass, and the Hatari
+hardware harness returns its documented checksum at the same tick count.
+
 ## If you know these ideas from elsewhere
 
 Nothing here is new outside the Atari world:

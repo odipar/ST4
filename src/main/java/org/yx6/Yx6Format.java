@@ -2,7 +2,8 @@ package org.yx6;
 
 /**
  * The {@code .yx6} container: a fixed header followed by one embedded ST4
- * container per YM2149 sound register section.
+ * container per stream section - fourteen frame streams carrying the
+ * YM2149's sound registers, and five carrying the compiled effect script.
  *
  * <p>Every field is big-endian, which is what the 68000 player reads directly
  * out of the loaded file. The header is a fixed size so the player can index
@@ -10,36 +11,38 @@ package org.yx6;
  *
  * <pre>
  *   0   4  'YX6!'
- *   4   2  format version (4)
+ *   4   2  format version (5)
  *   6   2  flags: bit 0 set when the tune loops
  *   8   4  O, the number of frames
- *  12   2  player frequency in Hz (50 for a standard ST tune)
+ *  12   2  frame rate in Hz: how often the player is called (50 usually)
  *  14   2  S, the stream count (19: R0..R13, then M A1 P1 A2 P2)
  *  16   2  N, the ring size in bytes each stream decodes through
  *  18   2  C, the chunk size one ST4_resume call produces
  *  20   4  L, the loop frame; equal to O when the tune does not loop
  *  24   4  YM master clock in Hz, informational
- *  28   4  byte offset of the drum table; zero when there are no drums
- *  32   2  drum count
+ *  28   4  byte offset of the sample table; zero when there are none
+ *  32   2  sample count
  *  34   4*S  byte offset of each intro section, covering frames [0, L)
  * 110   4*S  byte offset of each loop section, covering frames [L, O)
- * 186   ...  the packed sections, then the drum table
+ * 186   ...  the packed sections, then the sample table
  * </pre>
  *
  * <p>Streams 14-18 carry the compiled effect script, one byte per frame
- * like the registers: the packer replays the reference player's effect
- * decisions over the whole timeline and emits prepared actions - M says
- * what acts this frame (zero on the vast majority), A names each slot's
- * action, P carries its timer count. O and L count PLAYED frames: a loop
+ * like the registers, but they are script data rather than frame streams:
+ * their bytes never reach a register. The packer replays the reference
+ * player's decisions over the whole timeline and emits prepared actions -
+ * M says what acts this frame (zero on the vast majority), A names each
+ * tick channel's action, P carries its timer count. O and L count PLAYED frames: a loop
  * whose wrap state differs from its first arrival is rotated until the two
  * agree, so the file may carry a few frames twice, compiled differently.
  * {@link EffectScript} owns the byte semantics; see EFFECTS.md for the
  * design.
  *
- * <p>The drum table is {@code count} entries of {byte offset (long), sample
- * length (word)}, each offset pointing at PSG-ready volume bytes 0..15
- * followed by one end marker with bit 7 set - the marker the drum interrupt
- * routine stops on, so it needs no counter.
+ * <p>The sample table is {@code count} entries of {byte offset (long),
+ * sample length (word)}, each offset pointing at PSG-ready volume bytes
+ * 0..15 followed by one end marker with bit 7 set. A PCM stream plays one
+ * of these out, and its tick handler stops on the marker rather than
+ * counting. YM calls them digidrums, and their numbering is the YM file's.
  *
  * <p>Each section is a complete, standard ST4 container - twenty-byte header,
  * then its four streams - packed at unit size 1, placed on a long boundary so
@@ -73,10 +76,10 @@ public final class Yx6Format {
     /** R0..R13 plus the script streams M, A1, P1, A2, P2. */
     public static final int STREAMS = 19;
 
-    /** The first fourteen streams: the YM2149 sound registers. */
+    /** The frame streams: one per YM2149 sound register. */
     public static final int REGISTER_STREAMS = 14;
 
-    /** Stream indices of the effect script streams: the master byte, then
+    /** Stream indices of the script data: the master byte, then
      * each slot's action and timer-count bytes. The byte semantics - the
      * verb vocabulary, the master bits, the gate mask - are
      * {@link EffectScript}'s ABI, which packer, player and rigs all cite. */
@@ -96,22 +99,22 @@ public final class Yx6Format {
     public static final int OFFSET_CHUNK = 18;
     public static final int OFFSET_LOOP_FRAME = 20;
     public static final int OFFSET_MASTER_CLOCK = 24;
-    public static final int OFFSET_DRUM_TABLE = 28;
-    public static final int OFFSET_DRUM_COUNT = 32;
+    public static final int OFFSET_SAMPLE_TABLE = 28;
+    public static final int OFFSET_SAMPLE_COUNT = 32;
     public static final int OFFSET_INTRO_TABLE = 34;
     public static final int OFFSET_LOOP_TABLE = OFFSET_INTRO_TABLE + 4 * STREAMS;
 
     public static final int HEADER_SIZE = OFFSET_LOOP_TABLE + 4 * STREAMS;
 
     /** A drum table entry: a long offset and a word length. */
-    public static final int DRUM_ENTRY_SIZE = 6;
+    public static final int SAMPLE_ENTRY_SIZE = 6;
 
     /** The byte after a drum's last sample value has this bit set; the drum
      * interrupt routine's own move.b sees it as negative and stops. */
-    public static final int DRUM_END_MARK = 0x80;
+    public static final int SAMPLE_END_MARK = 0x80;
 
     /** The format's ceiling: a drum number is five bits. */
-    public static final int MAX_DRUMS = 32;
+    public static final int MAX_SAMPLES = 32;
 
     /** Default ring size: the size the timings in the README are quoted for. */
     public static final int DEFAULT_RING_SIZE = 960;

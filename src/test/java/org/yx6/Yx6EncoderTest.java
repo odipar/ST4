@@ -232,18 +232,18 @@ final class Yx6EncoderTest {
                 Ym6TestData.file(registers, FRAMES, true, "YM6!", 50, 2, 0));
         byte[] file = Yx6Encoder.encode(source, 960, 24, false).file();
 
-        assertEquals(2, word(file, Yx6Format.OFFSET_DRUM_COUNT));
-        int table = longAt(file, Yx6Format.OFFSET_DRUM_TABLE);
+        assertEquals(2, word(file, Yx6Format.OFFSET_SAMPLE_COUNT));
+        int table = longAt(file, Yx6Format.OFFSET_SAMPLE_TABLE);
         assertTrue(table > 0, "the drum table exists");
         for (int i = 0; i < 2; i++) {
-            int at = longAt(file, table + Yx6Format.DRUM_ENTRY_SIZE * i);
-            int length = word(file, table + Yx6Format.DRUM_ENTRY_SIZE * i + 4);
+            int at = longAt(file, table + Yx6Format.SAMPLE_ENTRY_SIZE * i);
+            int length = word(file, table + Yx6Format.SAMPLE_ENTRY_SIZE * i + 4);
             assertEquals(3, length, "the test drums are three samples long");
             for (int j = 0; j < length; j++) {
                 assertTrue((file[at + j] & 0xFF) <= 15,
                         "sample bytes are PSG-ready volumes");
             }
-            assertEquals(Yx6Format.DRUM_END_MARK, file[at + length] & 0xFF,
+            assertEquals(Yx6Format.SAMPLE_END_MARK, file[at + length] & 0xFF,
                     "drum " + i + " ends with the marker the ISR stops on");
         }
     }
@@ -251,8 +251,8 @@ final class Yx6EncoderTest {
     @Test
     void aDrumlessFileHasNoDrumTable() {
         byte[] file = Yx6Encoder.encode(song(true), 960, 24, false).file();
-        assertEquals(0, longAt(file, Yx6Format.OFFSET_DRUM_TABLE));
-        assertEquals(0, word(file, Yx6Format.OFFSET_DRUM_COUNT));
+        assertEquals(0, longAt(file, Yx6Format.OFFSET_SAMPLE_TABLE));
+        assertEquals(0, word(file, Yx6Format.OFFSET_SAMPLE_COUNT));
     }
 
     /** Unpacks one embedded ST4 container, holding it to an offset limit. */
