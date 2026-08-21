@@ -139,11 +139,11 @@
 ;              decoder state spans a4 and a5, which is why they no longer do.
 ;
 ; YX6_play writes to the sound chip at $FFFF8800, so it must run in supervisor
-; mode - which a VBL handler already does. It masks interrupts around the
-; fourteen writes, because selecting a register and writing it are two bus
-; cycles and TOS's own handlers use the chip too. Its effect stage programs
-; the timers YX6_init claimed, vectors included. Beyond the chip, those
-; timers and the workspace, the player writes only ITSELF: it is
+; mode - which a VBL handler already does. It masks NOTHING: each of the
+; fourteen writes is a single movep.w, which a 68000 cannot split, so
+; ticks interleave with the frame write instead of waiting behind it. Its
+; effect stage programs the timers YX6_init claimed, vectors included.
+; Beyond the chip, those timers and the workspace, it writes only ITSELF: it is
 ; self-modifying code. The channel descriptors, the prepared tables and the
 ; tick handlers' operands live in this blob, init patches the burst's ring
 ; displacements and the run-time addresses into it, and the script's
@@ -229,6 +229,11 @@ YX6_STREAMS     equ     25              ; R0..R13, then the compiled effect
                                         ; like any register
 YX6_CHAN0       equ     17              ; stream index of channel 0's action
                                         ; byte: R0..R13, then M, X and T
+YX6_WRITE_READ  equ     6               ; inside a YX6_WRITE: the ring read's
+                                        ; displacement, patched at init
+YX6_WRITE_MOVEP equ     8               ; and the movep, which the burst gate
+                                        ; swaps for two nops
+YX6_WRITE_SIZE  equ     12              ; the whole write
 YX6_STATE_SIZE  equ     64              ; per stream, so the index is a shift
                                         ; both ways: *64 in, /16 back to *4
 
@@ -363,9 +368,10 @@ YX6_ENVELOPE    equ     13
 ; compare that would save the write costs about as much as the write.
 ; -----------------------------------------------------------------------------
         .macro YX6_WRITE number
-        move.b  #\number,(a2)           ; select
-        move.b  $7FFF(a1),2(a2)         ; and write - SMC: k*N, set at init
-        .endm
+        move.w  #\number<<8,d1          ; the select byte, in the high half
+        move.b  $7FFF(a1),d1            ; the value - SMC: k*N, set at init
+        movep.w d1,0(a2)                ; select and write in ONE instruction,
+        .endm                           ; so no tick can land between them
 
 ; Jump table: bra.w keeps 4-byte slots for a program that loads YX6 as a blob.
                 bra.w   YX6_init
@@ -528,26 +534,26 @@ YX6_init:
 
 ; The burst reads register k's ring byte through an assembled-in k*N
 ; displacement - patch all fourteen now that N is known. The packer keeps
-; N at 2520 or less, so 13*N fits the signed word. Each YX6_WRITE is ten
-; bytes with its displacement at +6; R7 and R13 read out of line.
+; N at 2520 or less, so 13*N fits the signed word. The displacement sits
+; at YX6_WRITE_READ inside each write; R7 and R13 read out of line.
         move.w  YX6_N(a3),d2
         moveq   #0,d1                   ; k*N, accumulated
-        lea     yx6_wA+6(pc),a0
+        lea     yx6_wA+YX6_WRITE_READ(pc),a0
         moveq   #6,d0                   ; R0..R6
 .wpatchA:
         move.w  d1,(a0)
         add.w   d2,d1
-        lea     10(a0),a0
+        lea     YX6_WRITE_SIZE(a0),a0
         dbra    d0,.wpatchA
         lea     yx6_w7+2(pc),a0         ; R7 reads through d1
         move.w  d1,(a0)
         add.w   d2,d1
-        lea     yx6_wB+6(pc),a0
+        lea     yx6_wB+YX6_WRITE_READ(pc),a0
         moveq   #4,d0                   ; R8..R12
 .wpatchB:
         move.w  d1,(a0)
         add.w   d2,d1
-        lea     10(a0),a0
+        lea     YX6_WRITE_SIZE(a0),a0
         dbra    d0,.wpatchB
         lea     yx6_w13+2(pc),a0
         move.w  d1,(a0)
@@ -811,13 +817,20 @@ YX6_play:
         movea.l YX6_CURSOR(a3),a1       ; the cursor: every register's ring
         lea     YX6_PSG,a2              ; byte is a patched k*N above it
 
-; Selecting a register and writing it are two bus cycles. An interrupt that
-; uses the sound chip in between - TOS has several, its floppy motor timeout
-; among them - would leave this write going to whatever register it selected,
-; so the burst runs masked. Cheap: about 24 cycles for the whole frame.
-        move.w  sr,-(sp)
-        ori.w   #$0700,sr
-
+; Selecting a register and writing it are two bus cycles, and an interrupt
+; between them would send the value to whatever register the interrupt
+; selected. The burst used to mask interrupts for its whole run to prevent
+; that, which delayed every tick that fell inside it - at 25,000 ticks a
+; second the mask was longer than a tick period, so a sample could lose
+; its place or a tick could be coalesced away.
+;
+; movep.w writes both bytes from one register in ONE instruction. A 68000
+; takes interrupts between instructions, so nothing can land inside a
+; write, and the burst runs UNMASKED: ticks interleave with it, delayed by
+; one instruction at worst. The tick handlers are atomic the same way -
+; move.l #imm,$FFFF8800.w - so the interleaving is safe in both
+; directions, and a tick that lands between two register writes is
+; followed by a write that selects again.
 yx6_wA:
         YX6_WRITE 0                     ; channel A period, fine and coarse
         YX6_WRITE 1
@@ -838,11 +851,11 @@ yx6_wA:
 ; and the same class of artefact cost a day and a half on Trapped in China.
 ; Nothing automated would catch it: the harness reads registers at the end
 ; of a frame, and the rig compares each frame's writes as a set.
-        move.b  #YX6_MIXER,(a2)         ; R7 also carries the ST's I/O port
+        move.w  #YX6_MIXER<<8,d1        ; R7 also carries the ST's I/O port
 yx6_w7:
         move.b  $7FFF(a1),d1            ; directions, which port A needs kept
         or.b    #YX6_PORTS,d1           ; as outputs for the floppy select
-        move.b  d1,2(a2)
+        movep.w d1,0(a2)                ; one instruction, like every write
 
 yx6_wB:
         YX6_WRITE 8                     ; the three volumes
@@ -851,14 +864,13 @@ yx6_wB:
         YX6_WRITE 11                    ; envelope period
         YX6_WRITE 12
 
+        move.w  #YX6_ENVELOPE<<8,d1     ; the select, above the shape byte
 yx6_w13:
         move.b  $7FFF(a1),d1            ; R13 restarts the envelope whenever it
         cmp.b   #YX6_NO_ENV,d1          ; is written, so $FF means leave it be
         beq.s   .envelope_held
-        move.b  #YX6_ENVELOPE,(a2)
-        move.b  d1,2(a2)
+        movep.w d1,0(a2)
 .envelope_held:
-        move.w  (sp)+,sr
 
 ; The actions, now that the chip has its frame: replay the compiled script.
 ; One master byte says what acts - almost always nothing. The action bytes
@@ -1535,15 +1547,20 @@ yx6_program:
 ; in: d0 bits 2-0 = the state, voices A/B/C; clobbers d0-d2/a1.
 ; -----------------------------------------------------------------------------
 yx6_gates:
-        lea     yx6_wB+8(pc),a1         ; a YX6_WRITE is ten bytes; R8's
-        moveq   #3-1,d1                 ; destination word sits at +8
+        lea     yx6_wB+YX6_WRITE_MOVEP(pc),a1   ; R8's movep, then R9's, R10's
+        moveq   #3-1,d1
 .gate:
-        moveq   #2,d2                   ; open: the write reaches the data
-        lsr.b   #1,d0                   ; register
-        bcc.s   .set
-        moveq   #0,d2                   ; muted
-.set:
-        move.w  d2,(a1)
-        lea     10(a1),a1
+        move.l  yx6_movep(pc),d2        ; open: the instruction itself, copied
+        lsr.b   #1,d0                   ; from a template so no hand-encoded
+        bcc.s   .set                    ; opcode can drift
+        move.l  #$4E714E71,d2           ; muted: two nops - the displacement
+.set:                                   ; word is part of the instruction
+        move.l  d2,(a1)
+        lea     YX6_WRITE_SIZE(a1),a1
         dbra    d1,.gate
         rts
+
+; The template, never executed: yx6_gates copies these two words back over
+; a muted write to open it again.
+yx6_movep:
+        movep.w d1,0(a2)
