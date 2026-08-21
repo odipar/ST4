@@ -127,6 +127,14 @@ public final class Yx6Encoder {
     public static Result encode(Ym6Reader.Song song, int ringSize, int chunk,
                                 int loopFrame, boolean progress, int unit,
                                 int drumHz, boolean sidResume) {
+        return encode(song, ringSize, chunk, loopFrame, progress, unit, drumHz,
+                sidResume, Yx6Format.DEFAULT_TIMERS);
+    }
+
+    /** As above, with the channel-to-timer map the T stream carries. */
+    public static Result encode(Ym6Reader.Song song, int ringSize, int chunk,
+                                int loopFrame, boolean progress, int unit,
+                                int drumHz, boolean sidResume, int timerMap) {
         // The floor first, on what every tune decodes; the exact check waits
         // for the script, since a tune that leaves channels idle decodes
         // fewer streams and may use a smaller chunk.
@@ -162,7 +170,7 @@ public final class Yx6Encoder {
         // them.
         YmEffects.Extraction effects = YmEffects.extract(song, drumHz);
         EffectScript.Result script = EffectScript.compile(song, effects,
-                loops ? loopFrame : -1, unit, sidResume);
+                loops ? loopFrame : -1, unit, sidResume, timerMap);
         int channels = channelsUsed(script);
         problem = Yx6Format.checkShape(ringSize, chunk, unit,
                 Yx6Format.liveStreams(channels));

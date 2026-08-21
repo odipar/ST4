@@ -287,8 +287,23 @@ public final class EffectScript {
      */
     public static Result compile(Ym6Reader.Song song, YmEffects.Extraction fx,
                                  int loopFrame, int unit, boolean sidResume) {
+        return compile(song, fx, loopFrame, unit, sidResume,
+                Yx6Format.DEFAULT_TIMERS);
+    }
+
+    /**
+     * As above, with the channel-to-timer map the T stream will carry: two
+     * bits a channel, {@link Yx6Format#DEFAULT_TIMERS} being the one a YM
+     * tune is packed with. Naming a different timer changes nothing the
+     * script decides - the channels are the same, and only which hardware
+     * ticks them moves.
+     */
+    public static Result compile(Ym6Reader.Song song, YmEffects.Extraction fx,
+                                 int loopFrame, int unit, boolean sidResume,
+                                 int timerMap) {
         EffectScript script = new EffectScript(song, fx, loopFrame);
         script.sidResume = sidResume;
+        java.util.Arrays.fill(script.timers, (byte) timerMap);
         return script.run(unit);
     }
 

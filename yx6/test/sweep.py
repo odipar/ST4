@@ -249,6 +249,11 @@ class Model:
                 self.left[v] = -1                           # stuck
 
 
+# Extra packer options, for verifying a shape the corpus never asks for:
+#   YX6_PACK_OPTIONS='-timersBC' python3 yx6/test/sweep.py one.ym
+PACK_OPTIONS = os.environ.get('YX6_PACK_OPTIONS', '').split()
+
+
 def sweep(path):
     name = os.path.basename(path)
     try:
@@ -259,7 +264,8 @@ def sweep(path):
         yx6 = tf.name
     try:
         out = subprocess.run(['java', '-cp', CLASSES, 'org.yx6.Yx6',
-                              '-f', '-k1', path, yx6], capture_output=True, text=True)
+                              '-f', '-k1', *PACK_OPTIONS, path, yx6],
+                             capture_output=True, text=True)
         if out.returncode:
             return f'PACKFAIL {name}: {(out.stderr or out.stdout).strip().splitlines()[-1][:70]}'
         warns = [l for l in out.stdout.splitlines()

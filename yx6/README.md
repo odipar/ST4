@@ -152,6 +152,11 @@ yx6 [-f] [-o] [-nN] [-cC] [-kK] [-lF] input.ym [output.yx6]
   -nN   ring size per stream, in bytes (default 960)
   -cC   values decoded per call, and the round-robin group size (default 24)
   -kK   ST4 unit size: 1, 2 or 4 (default: 2 when the shape allows, else 1)
+  -timersT   which MFP timer each channel runs on, one letter per
+        channel from 0 up: -timersBC puts channel 0 on Timer B and
+        channel 1 on Timer C. The default is AD. Timer C is the
+        system's 200 Hz clock, so a tune that takes it stops that
+        clock and cannot be hosted from a Timer C interrupt
   -lF   loop from frame F, overriding the YM header
   -o    play once: pack no loop section
   -minM -secS   trim: drop everything before M:S, so a moment deep in a
@@ -172,9 +177,11 @@ fixed state) and how far back the packer may reference, so it trades memory
 for compression; it stops at 2520, because the player reads register `k`'s
 ring through an assembled-in displacement of `k*N`. `C` must be at least
 one refill slot per stream the tune **decodes** — 17 when it drives no
-timer channel, 21 for a YM tune, 25 when it uses all four — and must
-divide `N`, which is what lets the
-player use ST4_wrap rather than the bigger general ring decoder. The packer
+timer channel, 19, 21, 23 as it names more, 25 when it uses all four —
+and must divide `N`, which is what lets the player use ST4_wrap rather
+than the bigger general ring decoder. So the default 960/24 covers
+everything up to three channels; a tune on all four needs 25 slots and a
+ring that divides by them, 1000/25 say. The packer
 enforces both, packs every stream with `-mN` so no back-reference reaches
 outside the ring, and with `-l65535` so no operation outruns the 68000
 decoder's word counters.
