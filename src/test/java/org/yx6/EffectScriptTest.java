@@ -266,7 +266,7 @@ final class EffectScriptTest {
     }
 
     /** The stuck-flag quirk, replicated: a buzzer arming over its own
-     * slot's running drum leaves the voice muted, and says so. */
+     * channel's running drum leaves the voice muted, and says so. */
     @Test
     void armingOverOwnRunningDrumSticksTheVoice() {
         int frames = 24;

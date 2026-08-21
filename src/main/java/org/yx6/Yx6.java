@@ -385,13 +385,13 @@ public final class Yx6 {
                 song.author().isBlank() ? "" : " by " + song.author(),
                 song.interleaved() ? "" : " (de-interleaved)");
         YmEffects.Extraction effects = result.effects();
-        if (effects.drums().length > 0) {
+        if (effects.samples().length > 0) {
             int bytes = 0;
-            for (byte[] drum : effects.drums()) {
-                bytes += drum.length + 1;
+            for (byte[] sample : effects.samples()) {
+                bytes += sample.length + 1;
             }
-            System.out.printf("%d digidrum%s, %d bytes%n", effects.drums().length,
-                    effects.drums().length == 1 ? "" : "s", bytes);
+            System.out.printf("%d digidrum%s, %d bytes%n", effects.samples().length,
+                    effects.samples().length == 1 ? "" : "s", bytes);
         }
         if (effects.sinus() > 0) {
             System.out.printf("Warning: %d Sinus-SID frame%s dropped (unimplemented "

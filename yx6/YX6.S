@@ -49,12 +49,12 @@
 ; reach a register. They carry the COMPILED EFFECT SCRIPT, in which the
 ; packer replayed the reference player's whole decision logic over the
 ; timeline - held or new, retune or restart, who stops whose timer, when a
-; drum's gate reopens - and wrote the outcomes down as prepared actions.
+; sample's gate reopens - and wrote the outcomes down as prepared actions.
 ; Ring M says what acts this frame (almost always: nothing, one test);
 ; A1/P1 and A2/P2 carry each tick channel's action byte and timer count.
 ; The handlers copy prepared values into Timers A and D and this blob's
 ; tick handlers - digidrum, SID square, sync-buzzer - and compare NOTHING
-; at run time. The drummed voice is DISCONNECTED by routing baked into the
+; at run time. A sample's voice is DISCONNECTED by routing baked into the
 ; R7 stream, so its sample is heard alone, and no ring byte is ever edited:
 ; what v1 discovered per frame, the file simply says.
 ;
@@ -104,7 +104,7 @@
 ;   YX6_init   in   a0 = .yx6 file, at an even address, a1 = workspace
 ;              out  d0 = 0 accepted, -1 not a v5 yx6 file with 19 streams
 ;                        packed at this build's unit size
-;              Claims MFP Timers A and D for the effect slots: stops them,
+;              Claims MFP Timers A and D for the tick channels: stops them,
 ;              parks their vectors, drops stale pendings, enables and
 ;              unmasks both. It saves NOTHING - the machine state is the
 ;              host's, see assumption 5. Timer B stays free for rasters,
@@ -127,7 +127,7 @@
 ; cycles and TOS's own handlers use the chip too. Its effect stage programs
 ; the two timers YX6_init claimed, vectors included. Beyond the chip, those
 ; timers and the workspace, the player writes only ITSELF: it is
-; self-modifying code. The slot descriptors, the prepared tables and the
+; self-modifying code. The channel descriptors, the prepared tables and the
 ; tick handlers' operands live in this blob, init patches the burst's ring
 ; displacements and the run-time addresses into it, and the script's
 ; handlers keep patching as effects come and go. Two consequences: the
@@ -155,15 +155,15 @@
 ;      init..stop, exactly what the player touches: the vectors $134 and
 ;      $110, TACR, TADR, TDDR, TCDCR's low (Timer D) nibble, bit 5 of IERA
 ;      and IMRA, bit 4 of IERB and IMRB - and, built with YX6_SUPER_HOST,
-;      the USP, which the drum tick parks a0 in. A demo that has already
+;      the USP, which the PCM tick parks a0 in. A demo that has already
 ;      taken the machine over saves nothing at all. YX6_player.S is the
 ;      worked example of the polite version
 ; -----------------------------------------------------------------------------
 
 ; A host that never runs user-mode code while the player is live - a demo
 ; under its own takeover, say - may define YX6_SUPER_HOST equ 1 before
-; including this file: the slot-2 drum tick then parks a0 in the then-unused
-; USP (4 cycles each way instead of 12 through the stack; slot 1's drum
+; including this file: channel B's PCM tick then parks a0 in the then-unused
+; USP (4 cycles each way instead of 12 through the stack; channel A's
 ; always uses the stack, because Timer A nests into Timer D's parked
 ; windows and must never overwrite one). The park restores a0
 ; but not the USP: a host that ever returns to user mode must save its USP
@@ -200,7 +200,7 @@ PERF_SYNC       equ     8000            ; the sync loop's ceiling: a whole
                                         ; that calls from anywhere still runs
 
 YX6_STREAMS     equ     19              ; R0..R13, then the compiled effect
-                                        ; script: M, then each slot's action
+                                        ; script: M, then each channel's action
                                         ; and count bytes - decoded like any
                                         ; register
 YX6_STATE_SIZE  equ     64              ; per stream, so the index is a shift
@@ -219,27 +219,28 @@ YX6_LOOPLEN     equ     28              ; long  O - L, zero when it does not loo
 YX6_LOOP        equ     32              ; long  L, read at init to split sections
 YX6_N           equ     36              ; word  ring size N
 YX6_C           equ     38              ; word  values per call C
-YX6_SLOT        equ     40              ; word  refill slot, 0..C-1
+YX6_SLOT        equ     40              ; word  refill turn, 0..C-1
 YX6_INDEX       equ     42              ; word  stream index, during init only
 YX6_LOOPS       equ     44              ; word  nonzero when the tune loops
 YX6_EFXOFF      equ     46              ; long  14*N: the cursor's ring to M's
 YX6_STATE       equ     50              ; 19 decoder states, from an even base
 
-; Each effect slot's descriptor holds only what tells the two slots apart:
+; Each tick channel's descriptor holds only what tells the two apart:
 ; its timer's registers, its vector, its partner's control register (the
-; START_PCM_PREEMPT action stops that timer first), and its tick-handler block. No
-; remembered state - the script compiled every comparison at pack time. The
-; hardware addresses are words: movea.w sign-extends $FAxx to $FFFFFAxx.
-SD_CTRL         equ     0               ; word  timer control register
-SD_DATA         equ     2               ; word  timer data register
-SD_VEC          equ     4               ; word  timer vector
-SD_OTHER_CTRL   equ     6               ; word  the partner slot's control
-SD_IER          equ     8               ; word  the timer's enable register
-SD_IERBIT       equ     10              ; word  and its bit: a SID release
+; START_PCM_PREEMPT action stops that timer first), and its tick-handler
+; block. No remembered state - the script compiled every comparison at
+; pack time. The hardware addresses are words: movea.w sign-extends $FAxx
+; to $FFFFFAxx.
+CH_CTRL         equ     0               ; word  timer control register
+CH_DATA         equ     2               ; word  timer data register
+CH_VEC          equ     4               ; word  timer vector
+CH_OTHER_CTRL   equ     6               ; word  the partner channel's control
+CH_IER          equ     8               ; word  the timer's enable register
+CH_IERBIT       equ     10              ; word  and its bit: a toggle release
                                         ; only MASKS the interrupt, so the
                                         ; counter keeps counting and a
                                         ; resume is phase-continuous
-SD_ISR          equ     12              ; long  the slot's tick handlers
+CH_ISR          equ     12              ; long  the channel's tick handlers
 ; rmac evaluates left to right, so the parentheses here are load-bearing:
 ; without them this reads as (YX6_STATE+YX6_STREAMS)*YX6_STATE_SIZE.
 YX6_FIXED       equ     YX6_STATE+(YX6_STREAMS*YX6_STATE_SIZE)
@@ -273,7 +274,7 @@ YH_RING         equ     16
 YH_CHUNK        equ     18
 YH_LOOP         equ     20
 YH_CLOCK        equ     24
-YH_SAMPLES        equ     28              ; long: the drum table, 0 when none
+YH_SAMPLES        equ     28              ; long: the sample table, 0 when none
 YH_SAMPLECOUNT    equ     32              ; word
 YH_INTRO_TABLE  equ     34              ; 19 offsets: the frames before the loop
 YH_LOOP_TABLE   equ     YH_INTRO_TABLE+(YX6_STREAMS*4)
@@ -318,7 +319,7 @@ YX6_ENVELOPE    equ     13
 ; YX6_init: a0 = .yx6 file, a1 = workspace. Sets up eighteen decoders, decodes
 ; each stream's first group so frame 0 can be played immediately, patches the
 ; blob's run-time addresses and the burst's ring displacements, and claims
-; MFP Timers A and D for the effect slots - saving nothing, per assumption 5.
+; MFP Timers A and D for the tick channels - saving nothing, per assumption 5.
 ; -----------------------------------------------------------------------------
 YX6_init:
         movea.l a1,a3                   ; a3 is the workspace throughout
@@ -432,7 +433,7 @@ YX6_init:
 
 ; The cursor reaches the script rings by fixed hops: 14*N to M, computed
 ; once, and the three parameter offsets (8+voice)*N the handlers read the
-; SID volume, buzzer shape and drum number through.
+; the toggle volume, retrigger shape and sample number through.
         move.w  YX6_N(a3),d0
         mulu.w  #14,d0
         move.l  d0,YX6_EFXOFF(a3)
@@ -447,7 +448,7 @@ YX6_init:
         add.l   d0,d1
         move.l  d1,(a1)                 ; voice C
 
-; The drum table becomes a table of absolute sample addresses, so a trigger
+; The sample table becomes a table of absolute addresses, so a trigger
 ; is one indexed load instead of an entry walk: the DRUM action's byte is
 ; the sample number, pre-scaled to index these longs.
         movea.l YX6_FILE(a3),a0
@@ -729,11 +730,11 @@ yx6_w13:
 ; were decided at pack time; the handlers copy prepared values to prepared
 ; places and compare nothing. a0 still points at ring M.
         move.b  (a0),d0
-        andi.b  #3,d0                   ; the slots' bits; gates are done
+        andi.b  #3,d0                   ; the channels' bits; gates are done
         beq.s   .effects_done
         moveq   #0,d3
         move.w  YX6_N(a3),d3
-        lsr.b   #1,d0                   ; bit 0: slot 1 acts
+        lsr.b   #1,d0                   ; bit 0: channel A acts
         bcc.s   .slot2
         lea     yx6_desc1(pc),a5
         movea.l a0,a4
@@ -741,7 +742,7 @@ yx6_w13:
         bsr     yx6_act
 .slot2:
         move.b  (a0),d0                 ; a0 survives yx6_act; d0 does not
-        btst    #1,d0                   ; bit 1: slot 2 acts
+        btst    #1,d0                   ; bit 1: channel B acts
         beq.s   .effects_done
         lea     yx6_desc2(pc),a5
         movea.l a0,a4
@@ -857,13 +858,13 @@ YX6_stop:
 
 ; -----------------------------------------------------------------------------
 ; The effect machinery. The per-frame stage lives inlined in YX6_play; what
-; follows is everything it drives: the two slot descriptors, the tick
-; handlers, and the one slot machine that serves both timers.
+; follows is everything it drives: the two channel descriptors, the tick
+; handlers, and the one machine that serves both timers.
 ; -----------------------------------------------------------------------------
 
-; The slot descriptors - see the SD_ equates. Slot 1 owns Timer A, slot 2
+; The channel descriptors - see the CH_ equates. Channel A owns Timer A, B
 ; Timer D, whose control nibble is shared with Timer C and only ever changed
-; read-modify-write; the slot machine uses that form for both, which on
+; read-modify-write; the channel machine uses that form for both, which on
 ; Timer A writes the same values a clear would.
         even
 yx6_desc1:
@@ -877,7 +878,7 @@ yx6_desc2:
         dc.w    $FA09,4
         dc.l    0
 
-; The two prepared tables the script indexes into: the drums' absolute
+; The two prepared tables the script indexes into: the samples' absolute
 ; sample addresses (YX6_init resolves the file's table once, so a trigger
 ; is one indexed load) and the three parameter-ring offsets (8+voice)*N.
 yx6_samples:
@@ -894,7 +895,7 @@ yx6_parmoff:
 ; patched operand is addressed pc-relatively so the player stays loadable
 ; anywhere - which also means it must run from RAM, where a demo lives.
 ;
-; The two slots' handlers are the same text twice, and MUST stay
+; The two channels' handlers are the same text twice, and MUST stay
 ; byte-congruent: the action handlers reach every patched operand through
 ; ISR_ offsets measured on the A block. The rig checks the congruence from
 ; the symbol table. The park entries - where YX6_init aims the vectors
@@ -906,20 +907,20 @@ yx6_parmoff:
 ; nesting is strictly one-way: Timer A interrupts Timer D's handlers,
 ; never the reverse (SEI mode admits only higher MFP priorities while an
 ; in-service bit is set), and nothing of the player's sits above Timer A.
-; That direction is why the USP park belongs to the D-side drum alone: the
-; A-side drum - the one that can nest into a parked window - always uses
+; That direction is why the USP park belongs to the D-side PCM tick alone:
+; the A-side one - which can nest into a parked window - always uses
 ; the stack, so a parked USP survives. The drop must never come before
 ; the handler's LAST chip write: a nested tick re-selects the PSG.
 ;
 ; The patch offsets are load-bearing (all fixed ones shift by PERF_PAD when
 ; the raster monitor's color prologue sits at each block's top):
-;   drum:  select immediate at +3, sample address at +8
-;   sid:   select at +2 and volume at +4 inside the imm long; the partner's
+;   pcm:      select immediate at +3, sample address at +8
+;   toggle:   select at +2 and volume at +4 inside the imm long; the partner's
 ;          whole vector at +14, past the IPL drop, patched by yx6_link
-;   buzz:  the shape at +4
+;   retrigger: the shape at +4
 ; -----------------------------------------------------------------------------
 
-; One drum tick: the sample byte goes straight to the voice's volume register.
+; One PCM tick: the sample byte goes straight to the voice's volume register.
 ; The byte after the last has bit 7 set, so the same move answers "done": park
 ; the volume mid-scale against the click, stop the timer, drop the flag.
 yx6_pcmA:
@@ -936,7 +937,7 @@ yx6_pcmA:
         addq.l  #1,(a0)                 ; step the operand itself
         .if YX6_PERF
         lea     yx6_perf_acc(pc),a0
-        add.w   #21,(a0)                ; ~a drum tick, in 10-cycle quanta
+        add.w   #21,(a0)                ; ~a PCM tick, in 10-cycle quanta
         .endif
         movea.l (sp)+,a0
         .if YX6_PERF
@@ -958,7 +959,7 @@ yx6_parkA:
         move.b  #$DF,$FFFFFA0F.w
         rte
 
-; The SID square: each tick writes one half of the square - the volume or
+; The toggle tick: each tick writes one of two values - the volume or
 ; silence - and installs the other half as the next tick, one word into the
 ; vector. Select and data land in one move.l: the immediate's bytes hit
 ; $8800 (select) and $8802 (data) by bus layout.
@@ -973,7 +974,7 @@ yx6_toggleA_on:
         .if YX6_PERF                    ; next - the whole vector, so the
         move.l  a0,-(sp)                ; blob may straddle a 64K boundary
         lea     yx6_perf_acc(pc),a0
-        add.w   #15,(a0)                ; ~a SID half, in 10-cycle quanta
+        add.w   #15,(a0)                ; ~a toggle tick, in 10-cycle quanta
         movea.l (sp)+,a0
         move.w  (sp)+,$FFFF8240.w
         .endif
@@ -997,7 +998,7 @@ yx6_toggleA_off:
         move.b  #$DF,$FFFFFA0F.w
         rte
 
-; The sync-buzzer tick: writing the shape to R13 restarts the envelope, and
+; The retrigger tick: writing the shape to R13 restarts the envelope, and
 ; that restart at the timer's rate is the whole effect.
 yx6_retriggerA:
         .if YX6_PERF
@@ -1009,7 +1010,7 @@ yx6_retriggerA:
         .if YX6_PERF
         move.l  a0,-(sp)
         lea     yx6_perf_acc(pc),a0
-        add.w   #12,(a0)                ; ~a buzzer tick, in 10-cycle quanta
+        add.w   #12,(a0)                ; ~a retrigger tick, in 10-cycle quanta
         movea.l (sp)+,a0
         move.w  (sp)+,$FFFF8240.w
         .endif
@@ -1120,7 +1121,7 @@ yx6_perf_acc:
         .endif                          ; last frame, in 10-cycle quanta
 
 ; Where the patched operands sit, measured on the A block; the D block is
-; byte-congruent, so the same offsets serve both through SD_ISR.
+; byte-congruent, so the same offsets serve both through CH_ISR.
 ISR_PCM_SEL    equ     PERF_PAD+3
 ISR_PCM_PTR    equ     PERF_PAD+8
 ISR_TOGGLE_ON       equ     yx6_toggleA_on-yx6_pcmA
@@ -1136,20 +1137,20 @@ ISR_RETRIGGER_SHAPE  equ     ISR_RETRIGGER+PERF_PAD+4
 ; -----------------------------------------------------------------------------
 ; yx6_link, from YX6_init: the run-time addresses only a loaded player knows.
 ; Every burst gate opens (a previous session's mute must not leak), each
-; descriptor gets its ISR block, and the SID halves get each other's whole
+; descriptor gets its ISR block, and the toggle halves get each other's whole
 ; vector - it never changes, so it is patched once here rather than on
-; every SID start.
+; every toggle start.
 ; -----------------------------------------------------------------------------
 yx6_link:
         moveq   #0,d0
         bsr     yx6_gates
         lea     yx6_desc1(pc),a0
         lea     yx6_pcmA(pc),a2
-        move.l  a2,SD_ISR(a0)
+        move.l  a2,CH_ISR(a0)
         bsr.s   .partners
         lea     yx6_desc2(pc),a0
         lea     yx6_pcmD(pc),a2
-        move.l  a2,SD_ISR(a0)
+        move.l  a2,CH_ISR(a0)
 .partners:
         lea     ISR_TOGGLE_OFF(a2),a0       ; each half installs the other,
         move.l  a0,ISR_TOGGLE_ON_NEXT(a2)   ; as a whole vector
@@ -1159,12 +1160,12 @@ yx6_link:
 
 ; -----------------------------------------------------------------------------
 ; The action handlers: the script's verbs, one straight line each. The
-; packer decided everything - which slot acts, which voice, restart or
+; packer decided everything - which channel acts, which voice, restart or
 ; retune, who stops whose timer - so a handler only moves prepared bytes
 ; into prepared places and programs its timer in the contract's order.
 ;
-; in: a4 = the slot's action ring byte (its count byte is one ring above),
-;     a5 = the slot's descriptor, a3 = workspace, d3.l = N.
+; in: a4 = the channel's action ring byte (its count byte is one ring above),
+;     a5 = the channel's descriptor, a3 = workspace, d3.l = N.
 ; preserves d3/a3/a0; clobbers d0-d2/d4-d5, a1-a2/a4-a5.
 ; -----------------------------------------------------------------------------
 yx6_act:
@@ -1175,7 +1176,7 @@ yx6_act:
         move.w  yx6_verbs(pc,d1.w),d1
         jmp     yx6_verbs(pc,d1.w)
 yx6_verbs:
-        dc.w    yx6_resume-yx6_verbs    ; verb 0: the masked SID comes back
+        dc.w    yx6_resume-yx6_verbs    ; verb 0: a masked toggle returns
         dc.w    yx6_hold-yx6_verbs
         dc.w    yx6_release-yx6_verbs
         dc.w    yx6_toggle_start-yx6_verbs
@@ -1184,8 +1185,9 @@ yx6_verbs:
         dc.w    yx6_pcm-yx6_verbs
         dc.w    yx6_pcm_preempt-yx6_verbs
 
-; The voice's parameter ring byte - the SID volume, the buzzer shape or the
-; drum number ride the voice's own register stream, marked by the script.
+; The voice's parameter ring byte - the toggle volume, the retrigger shape
+; or the sample number ride the voice's own register stream, marked by the
+; script.
 ; in: d0 = the action byte; out: a1 = the byte, d5 = voice*4.
 yx6_voice:
         move.w  d0,d5
@@ -1198,14 +1200,14 @@ yx6_voice:
         rts
 
 yx6_release:                               ; STOP: low bit clear = stop the
-        btst    #0,d0                   ; timer (a buzzer release); set =
-        bne.s   .mask                   ; MASK only - a SID release: the
-        movea.w SD_CTRL(a5),a1          ; counter keeps counting and the
+        btst    #0,d0                   ; timer (a retrigger release); set =
+        bne.s   .mask                   ; MASK only - a toggle release: the
+        movea.w CH_CTRL(a5),a1          ; counter keeps counting and the
         andi.b  #$F0,(a1)               ; square's half stays frozen. RMW
         rts                             ; forms throughout: Timer C's nibble
 .mask:                                  ; and the other enable bits belong
-        movea.w SD_IER(a5),a1           ; to the machine
-        move.w  SD_IERBIT(a5),d1
+        movea.w CH_IER(a5),a1           ; to the machine
+        move.w  CH_IERBIT(a5),d1
         bclr    d1,(a1)                 ; disabling drops any pending too
         rts
 
@@ -1215,7 +1217,7 @@ yx6_resume:                             ; unmask; reload the count if it
         movea.l a4,a1                   ; the gap, exactly as a masked
         adda.l  d3,a1                   ; hardware timer does
         move.b  (a1),d1
-        movea.w SD_DATA(a5),a2
+        movea.w CH_DATA(a5),a2
         move.b  d1,(a2)                 ; a running timer loads a changed
 .kept:                                  ; count at its next reload
         btst    #1,d0
@@ -1223,21 +1225,21 @@ yx6_resume:                             ; unmask; reload the count if it
         bsr     yx6_voice
         move.b  (a1),d1
         and.w   #15,d1
-        movea.l SD_ISR(a5),a2
+        movea.l CH_ISR(a5),a2
         move.b  d1,ISR_TOGGLE_VOL(a2)
 .same:
-        movea.w SD_IER(a5),a1
-        move.w  SD_IERBIT(a5),d1
+        movea.w CH_IER(a5),a1
+        move.w  CH_IERBIT(a5),d1
         bset    d1,(a1)
         rts
 
 yx6_hold:                               ; flags: 1 = reload the count, 2 =
-        btst    #0,d0                   ; track the SID volume, 4 = track
-        beq.s   .tracks                 ; the buzzer shape - only on frames
+        btst    #0,d0                   ; track the toggle volume, 4 =
+        beq.s   .tracks                 ; track the retrigger shape - only
         movea.l a4,a1                   ; where the value changed
         adda.l  d3,a1
         move.b  (a1),d1
-        movea.w SD_DATA(a5),a2
+        movea.w CH_DATA(a5),a2
         move.b  d1,(a2)                 ; a running timer loads a changed
 .tracks:                                ; count at its next reload
         moveq   #6,d1
@@ -1246,7 +1248,7 @@ yx6_hold:                               ; flags: 1 = reload the count, 2 =
         bsr.s   yx6_voice
         move.b  (a1),d1
         and.w   #15,d1
-        movea.l SD_ISR(a5),a2
+        movea.l CH_ISR(a5),a2
         btst    #2,d0
         bne.s   .shape
         move.b  d1,ISR_TOGGLE_VOL(a2)
@@ -1258,7 +1260,7 @@ yx6_hold:                               ; flags: 1 = reload the count, 2 =
 
 yx6_toggle_start:                          ; a fresh square restarts at phase
         bsr     yx6_voice               ; zero: the voice goes silent NOW,
-        movea.l SD_ISR(a5),a2           ; and the first tick - one timer
+        movea.l CH_ISR(a5),a2           ; and the first tick - one timer
         move.w  d5,d1                   ; period out - plays the loud half.
         lsr.w   #2,d1                   ; Retunes and resumes never come
         addq.w  #8,d1                   ; here: a held or masked square's
@@ -1281,8 +1283,8 @@ yx6_toggle_start:                          ; a fresh square restarts at phase
 yx6_retune:                         ; the vector is NEVER touched: the
         bsr     yx6_voice               ; square's phase lives through every
         move.b  (a1),d1                 ; retune, and through a resume after
-        and.w   #15,d1                  ; a drum borrowed the voice
-        movea.l SD_ISR(a5),a2
+        and.w   #15,d1                  ; a PCM stream took the voice
+        movea.l CH_ISR(a5),a2
         move.b  d1,ISR_TOGGLE_VOL(a2)
         moveq   #0,d4
         bra.s   yx6_program
@@ -1291,14 +1293,14 @@ yx6_retrigger_start:
         bsr     yx6_voice
         move.b  (a1),d1
         and.w   #15,d1
-        movea.l SD_ISR(a5),a2
+        movea.l CH_ISR(a5),a2
         move.b  d1,ISR_RETRIGGER_SHAPE(a2)
         lea     ISR_RETRIGGER(a2),a1
         move.l  a1,d4
         bra.s   yx6_program
 
 yx6_pcm_preempt:                           ; arbitration, compiled: the loser's
-        movea.w SD_OTHER_CTRL(a5),a1    ; timer stops FIRST, then the drum
+        movea.w CH_OTHER_CTRL(a5),a1    ; timer stops FIRST, then the sample
         andi.b  #$F0,(a1)               ; arms its own - the reference order
 yx6_pcm:
         bsr     yx6_voice
@@ -1307,7 +1309,7 @@ yx6_pcm:
         lsl.w   #2,d1
         lea     yx6_samples(pc),a2
         move.l  0(a2,d1.w),d2           ; its absolute address, from init
-        movea.l SD_ISR(a5),a2
+        movea.l CH_ISR(a5),a2
         move.l  d2,ISR_PCM_PTR(a2)
         move.w  d5,d1
         lsr.w   #2,d1
@@ -1325,22 +1327,22 @@ yx6_program:
         movea.l a4,a1
         adda.l  d3,a1
         move.b  (a1),d2                 ; the count
-        movea.w SD_CTRL(a5),a1
+        movea.w CH_CTRL(a5),a1
         move.w  sr,-(sp)
         ori.w   #$0700,sr
         andi.b  #$F0,(a1)               ; stop
         tst.l   d4
         beq.s   .keep
-        movea.w SD_VEC(a5),a2
+        movea.w CH_VEC(a5),a2
         move.l  d4,(a2)                 ; the vector; a retune keeps it
 .keep:
-        movea.w SD_DATA(a5),a2
+        movea.w CH_DATA(a5),a2
         move.b  d2,(a2)                 ; count
         and.b   #7,d0
         or.b    d0,(a1)                 ; run
         move.w  (sp)+,sr
-        movea.w SD_IER(a5),a1           ; and enabled, whatever a mask
-        move.w  SD_IERBIT(a5),d1        ; left: every program ends live
+        movea.w CH_IER(a5),a1           ; and enabled, whatever a mask
+        move.w  CH_IERBIT(a5),d1        ; left: every program ends live
         bset    d1,(a1)
         rts
 

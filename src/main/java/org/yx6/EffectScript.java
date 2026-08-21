@@ -10,14 +10,14 @@ import java.util.List;
  *
  * <p>The v1 player re-derived, on every frame, decisions that are pure
  * functions of the tune: is this code new or held, does the count need
- * reloading, which slot's timer must stop for whose drum. This class replays
+ * reloading, which channel's timer must stop for whose sample. This replays
  * exactly that decision logic - the branch structure of {@code yx6_slot} and
  * {@code yx6_pcm_start}, transcribed - over the whole timeline at pack
  * time, and emits five streams of prepared actions the player executes
  * without comparing anything against remembered state.
  *
  * <p>Names here are the YM format's, because the codes being compiled are:
- * a SID voice, a digidrum, a sync-buzzer, two effect slots. In the model
+ * a SID voice, a digidrum, a sync-buzzer, two effect channels. In the model
  * {@code doc/terminology.md} describes, all of these are TICK STREAMS -
  * values written to one register between frames, at a rate a timer sets -
  * and what this class decides for each is exactly a stream's lifecycle:
@@ -30,13 +30,13 @@ import java.util.List;
  *
  * <pre>
  * stream 14  M   master byte. 0 = nothing anywhere this frame.
- *                bit 0 = slot 1 acts (read A1, maybe P1)
- *                bit 1 = slot 2 acts
+ *                bit 0 = tick channel A acts (read A1, maybe P1)
+ *                bit 1 = tick channel B acts
  *                bit 2 = apply the gate state in bits 5-3
  *                bits 5-3 = burst-gate mask, voices A/B/C, 1 = muted;
  *                           absolute state, idempotent to re-assert
- * stream 15  A1  slot 1 action: verb in bits 7-5, voice in bits 4-3,
- * stream 16  P1  bits 2-0 the prescaler (program verbs) or HELD flags;
+ * stream 15  A1  channel A action: verb in bits 7-5, voice in bits 4-3,
+ * stream 16  P1  bits 2-0 the prescaler (program verbs) or HOLD flags;
  * stream 17  A2  P carries the MFP timer count for any action that
  * stream 18  P2  programs or reloads. Bytes on frames where a stream is
  *                not consumed are unspecified; the encoder repeats the
@@ -46,49 +46,57 @@ import java.util.List;
  * The verbs:
  *
  * <pre>
- * 1 HELD        flags: 1 = reload the count (P), 2 = track SID volume,
- *               4 = track buzzer shape - emitted only on frames where the
- *               value actually changed (v1 repatched unconditionally)
- * 2 STOP        stop this slot's timer (a SID or buzzer level dropped)
- * 3 SID_START   selects, volume, vector := the loud half, full program
- * 4 SID_RETUNE  volume, full stop/count/run - the vector is NOT touched:
- *               the square's phase lives through every retune
- * 5 BUZZ_START  shape, vector := the buzzer tick, full program
- * 6 DRUM        a trigger (fresh or the held-code retrigger): sample
- *               table lookup, select, vector, full program
- * 7 START_PCM_PREEMPT    as DRUM, but first stop the partner slot's timer - the
- *               contract's stop-the-victim-first order, straight-line
+ * 0 RESUME             an unmasked toggle stream comes back: flags
+ *                      1 = reload the count, 2 = reload the volume
+ * 1 HOLD               flags: 1 = reload the count (P), 2 = track the
+ *                      toggle stream's volume, 4 = track the retrigger
+ *                      stream's shape - emitted only on frames where the
+ *                      value actually changed (v1 repatched every frame)
+ * 2 RELEASE            stop this channel's timer; bit 0 masks instead
+ * 3 START_TOGGLE       selects, volume, vector := the loud half, full
+ *                      program
+ * 4 RETUNE             volume, full stop/count/run - the vector is NOT
+ *                      touched: the square keeps its place in the cycle
+ * 5 START_RETRIGGER    shape, vector := the retrigger tick, full program
+ * 6 START_PCM          a trigger, fresh or repeated: sample table lookup,
+ *                      select, vector, full program
+ * 7 START_PCM_PREEMPT  as START_PCM, but first stop the partner channel's
+ *                      timer - the stop-the-victim-first order,
+ *                      straight-line
  * </pre>
  *
- * <p>A SID that went away and comes back - a released note, a drum that
- * borrowed the voice - always re-enters through SID_START, which restarts
- * the square at phase zero: the player writes the voice silent, and the
+ * <p>A toggle stream that went away and comes back - a released note, or
+ * a PCM stream that took the voice - always re-enters through
+ * START_TOGGLE, which restarts the square at phase zero: the player writes the voice silent, and the
  * first tick - one timer period later - plays the loud half. Free-running
- * phase belongs only to a HELD code (and its retunes): the ym2149-rs
- * reference model, deterministic at every gap. SID_RETUNE is ONLY the held
+ * phase belongs only to a held code (and its retunes): the ym2149-rs
+ * reference model, deterministic at every gap. RETUNE is ONLY the held
  * prescaler-slide.
  *
- * <p>SID volume, buzzer shape and the drum number are read by the player
- * from the voice's own register ring (v1's mechanism), so they need no
- * streams; the packer merely marks the frames. The drummed voice's ring
- * byte is NOT sanitized: its burst write is gated (it lands on the PSG
+ * <p>The parameter each kind needs - the toggle stream's volume, the
+ * retrigger stream's shape, the PCM stream's sample number - is read by
+ * the player from the voice's own register ring (v1's mechanism), so none
+ * of them needs a stream; the packer merely marks the frames. The ring
+ * byte of a voice playing a sample is NOT sanitized: its frame write is
+ * gated (it lands on the PSG
  * select register and the next select overrides it), so nothing edits the
  * ring at runtime and v1's whole borrow/patch/restore machinery has no v2
- * counterpart. R7 arrives with the drummed voices' mixer forcing already
- * baked in ({@link Result#r7force}).
+ * counterpart. R7 arrives with the disconnection of sample-playing voices
+ * baked in ({@link Result#r7force}), which disconnects the voice.
  *
  * <h2>Frame alignment</h2>
  *
- * A drum's end is the one genuinely asynchronous event: its sample runs out
- * at timer rate, mid-frame, and only the marker tick knows the instant. The
- * script reopens the voice's gate, releases the mixer and re-starts a
- * suppressed SID at the frame boundary AFTER the computed end - never
- * before, so a burst write can never race a live drum. The computation
+ * A PCM stream's end is the one genuinely asynchronous event: its sample
+ * runs out at tick rate, mid-frame, and only the marker tick knows the
+ * instant. The script reopens the voice's gate, reconnects it and
+ * re-starts a suppressed toggle stream at the frame boundary AFTER the
+ * computed end - never before, so a frame write can never race a live
+ * sample. The computation
  * allows for the arming phase (the trigger runs a bounded slice into its
  * frame) and no more: v1 reopened at the marker tick itself, and a whole
- * frame of grace on top of that parks the voice at the drum's tail volume,
- * tone forced off, 20ms longer than v1 - an audible click after every
- * drum.
+ * frame of grace on top of that parks the voice at the sample's tail
+ * volume, disconnected, 20ms longer than v1 - an audible click after
+ * every sample.
  *
  * <h2>The split rotation</h2>
  *
@@ -113,7 +121,8 @@ public final class EffectScript {
     public static final int RESUME_VOLUME = 2;
     public static final int VERB_HOLD = 1 << 5;
     public static final int VERB_RELEASE = 2 << 5;
-    /** STOP flag bit 0: mask instead of stopping - a SID release. A buzzer
+    /** RELEASE flag bit 0: mask instead of stopping - a toggle stream let go.
+     * A retrigger stream
      * release hard-stops its timer. */
     public static final int RELEASE_MASK = 1;
     public static final int VERB_START_TOGGLE = 3 << 5;
@@ -139,7 +148,7 @@ public final class EffectScript {
      * The compiled script: {@code frames} played frames splitting at
      * {@code split}, {@code source[p]} naming the dump frame each played
      * frame shows, the five effect streams, and the mixer bits to OR into
-     * R7. {@code reopens} lists {playedFrame, voice} for every drum-end
+     * R7. {@code reopens} lists {playedFrame, voice} for every sample end
      * edge - the differential test's skew windows - and {@code notes} what
      * a packer should tell the user.
      */
@@ -152,7 +161,7 @@ public final class EffectScript {
         }
     }
 
-    /** A voice's gate never reopens: its drum was cut mid-sample and the
+    /** A voice's gate never reopens: its sample was cut mid-play and the
      * marker that would have cleared it will never run (v1's stuck flag,
      * replicated for differential exactness). */
     private static final int STUCK = Integer.MAX_VALUE;
@@ -161,17 +170,17 @@ public final class EffectScript {
     private static final int KIND_PCM = YmEffects.KIND_PCM;
     private static final int KIND_RETRIGGER = YmEffects.KIND_RETRIGGER;
 
-    /** One slot's remembered state - the v1 descriptor, field for field,
+    /** One channel's remembered state - the v1 descriptor, field for field,
      * minus the machine addresses. */
-    private static final class Slot {
-        int elast;                      // SD_ELAST
-        int tlast;                      // SD_TLAST
+    private static final class Channel {
+        int elast;                      // CH_ELAST
+        int tlast;                      // CH_TLAST
         int vec = -1;                   // what the timer vector holds: -1
         int vecVoice = -1;              // parked, else the type, plus voice
         int sel = -1;                   // the ISR's patched select voice
-        int vol = -1;                   // the ISR's patched SID volume
-        int shape = -1;                 // the ISR's patched buzzer shape
-        boolean masked;                 // a released SID: interrupt masked,
+        int vol = -1;                   // the ISR's patched toggle volume
+        int shape = -1;                 // the ISR's patched retrigger shape
+        boolean masked;                 // a released toggle: interrupt masked,
                                         // the timer still counting
         int prescaler = -1;             // what the control register runs at
 
@@ -184,7 +193,7 @@ public final class EffectScript {
     private final Ym6Reader.Song song;
     private final YmEffects.Extraction fx;
     private final int loopFrame;
-    private final Slot[] slots = {new Slot(), new Slot()};
+    private final Channel[] channels = {new Channel(), new Channel()};
     private final int[] drumEnd = {-1, -1, -1};   // played frame the voice's
     private final int[] drumOwner = {-1, -1, -1}; // gate reopens; -1 = free
     private int gates;                            // bit v = muted
@@ -229,7 +238,7 @@ public final class EffectScript {
     }
 
     /**
-     * As above, choosing the SID gap model: {@code false} (the default) is
+     * As above, choosing the phase policy: {@code false} (the default) is
      * the ym2149-rs model - a release stops the timer and every re-arrival
      * restarts the square at phase zero; {@code true} is the maxYMiser
      * model - a release only masks the interrupt and a re-arrival resumes
@@ -321,11 +330,11 @@ public final class EffectScript {
     }
 
     /** Everything two arrivals must agree on before sharing loop sections.
-     * Drum ends compare as frames-remaining; the SID square's half is
+     * Sample ends compare as frames-remaining; the toggle's half is
      * deliberately absent - phase free-runs in v1 too. */
     private int[] snapshot(int frame) {
-        int[] s1 = slots[0].snapshot();
-        int[] s2 = slots[1].snapshot();
+        int[] s1 = channels[0].snapshot();
+        int[] s2 = channels[1].snapshot();
         int[] out = new int[s1.length + s2.length + 7];
         System.arraycopy(s1, 0, out, 0, s1.length);
         System.arraycopy(s2, 0, out, s1.length, s2.length);
@@ -340,7 +349,7 @@ public final class EffectScript {
     }
 
     // -------------------------------------------------------------------------
-    // One played frame: expire drum windows, then slot 1, then slot 2 -
+    // One played frame: expire sample windows, then channel A, then B -
     // exactly the order the v1 player discovers the same events in.
     // -------------------------------------------------------------------------
 
@@ -358,8 +367,8 @@ public final class EffectScript {
             }
         }
 
-        slot(p, f, 0);
-        slot(p, f, 1);
+        channel(p, f, 0);
+        channel(p, f, 1);
 
         for (int v = 0; v < 3; v++) {
             if (drumOwner[v] >= 0) {    // the forced mixer, baked into R7
@@ -372,57 +381,57 @@ public final class EffectScript {
     }
 
     /** yx6_slot, transcribed: the labels in the comments are v1's. */
-    private void slot(int p, int f, int index) {
-        Slot slot = slots[index];
+    private void channel(int p, int f, int index) {
+        Channel channel = channels[index];
         int code = (index == 0 ? fx.e1() : fx.e2())[f] & 0xFF;
         int count = (index == 0 ? fx.t1() : fx.t2())[f] & 0xFF;
 
-        if (code == slot.elast) {
+        if (code == channel.elast) {
             if (code == 0) {
                 return;                 // the idle frame
             }
-            held(p, f, index, slot, code, count);
+            hold(p, f, index, channel, code, count);
             return;
         }
-        int old = slot.elast;           // move.b (a5),d4
-        slot.elast = code;              // move.b d0,(a5)
+        int old = channel.elast;           // move.b (a5),d4
+        channel.elast = code;              // move.b d0,(a5)
         if (code == 0) {                // .released
-            released(p, index, slot, old);
+            released(p, index, channel, old);
             return;
         }
         int voice = ((code >> 4) & 3) - 1;
         int type = code & 0xC0;
-        if (type == KIND_TOGGLE) {         // .sid
-            sid(p, f, index, slot, code, count, voice, old);
-        } else if (type == KIND_PCM) { // .drum
-            drum(p, f, index, slot, code, count, voice, old);
-        } else {                        // the buzzer arm
-            buzz(p, f, index, slot, code, count, voice);
+        if (type == KIND_TOGGLE) {         // .toggle
+            toggle(p, f, index, channel, code, count, voice, old);
+        } else if (type == KIND_PCM) { // .pcm
+            pcm(p, f, index, channel, code, count, voice, old);
+        } else {                        // the retrigger arm
+            retrigger(p, f, index, channel, code, count, voice);
         }
     }
 
     /** .held: a running effect's count reload and parameter tracking -
      * emitted only on frames where a value actually changed. */
-    private void held(int p, int f, int index, Slot slot, int code, int count) {
+    private void hold(int p, int f, int index, Channel channel, int code, int count) {
         int type = code & 0xC0;
         int voice = ((code >> 4) & 3) - 1;
         if (type == KIND_PCM) {        // a held drum code retriggers every
-            drum(p, f, index, slot, code, count, voice, code);
+            pcm(p, f, index, channel, code, count, voice, code);
             return;                     // frame, with THAT frame's number
         }
         int flags = 0;
-        if (count != slot.tlast) {      // cmp.b SD_TLAST(a5),d1
-            slot.tlast = count;
+        if (count != channel.tlast) {      // cmp.b CH_TLAST(a5),d1
+            channel.tlast = count;
             flags |= HOLD_RELOAD;
         }
         int value = parameter(f, voice);
         if (type == KIND_TOGGLE) {         // .track: v1 repatched blindly
-            if (value != slot.vol) {
-                slot.vol = value;
+            if (value != channel.vol) {
+                channel.vol = value;
                 flags |= HOLD_VOLUME;
             }
-        } else if (value != slot.shape) {
-            slot.shape = value;
+        } else if (value != channel.shape) {
+            channel.shape = value;
             flags |= HOLD_SHAPE;
         }
         if (flags != 0) {
@@ -430,13 +439,13 @@ public final class EffectScript {
         }
     }
 
-    /** .released: a buzzer level dropping stops its timer. A SID release
+    /** .released: a retrigger stream ending stops its timer. A toggle stream
      * is where the two gap models fork: the default (ym2149-rs) stops the
      * timer too, so the next arrival restarts at phase zero; the resume
      * model (maxYMiser) only masks the interrupt - the counter keeps
      * counting, the square's half stays frozen, and {@code masked} routes
-     * the next arrival through RESUME. A drum finishes itself. */
-    private void released(int p, int index, Slot slot, int old) {
+     * the next arrival through RESUME. A PCM stream finishes itself. */
+    private void released(int p, int index, Channel channel, int old) {
         int type = old & 0xC0;
         if (type == KIND_PCM) {
             return;                     // timer left running: the marker ends it
@@ -445,7 +454,7 @@ public final class EffectScript {
         if (type == KIND_TOGGLE) {
             openOld(old);               // bsr yx6_burst_open_old
             if (sidResume) {
-                slot.masked = true;
+                channel.masked = true;
                 emit(p, index, action(VERB_RELEASE, 0, RELEASE_MASK), 0);
                 return;
             }
@@ -453,17 +462,17 @@ public final class EffectScript {
         emit(p, index, action(VERB_RELEASE, 0, 0), 0);
     }
 
-    private void sid(int p, int f, int index, Slot slot, int code, int count,
+    private void toggle(int p, int f, int index, Channel channel, int code, int count,
                      int voice, int old) {
-        if (drumOwner[voice] >= 0) {    // the drum owns the volume register:
-            slot.elast = 0;             // clr.b (a5) - retry next frame
+        if (drumOwner[voice] >= 0) {    // a PCM stream owns the volume register:
+            channel.elast = 0;             // clr.b (a5) - retry next frame
             openOld(old);
             return;                     // nothing armed, nothing emitted
         }
         int value = parameter(f, voice);
         // The gap models fork on {@code masked}, which only a resume-mode
         // release sets (doc/experiments/2026-08-20-sid-phase-semantics.md):
-        // a re-arrival on a slot whose masked timer still runs this SID's
+        // a re-arrival on a channel whose masked timer still runs this stream's
         // square at the same prescaler RESUMES - unmask, reload only what
         // changed, the phase ran on through the gap. A prescaler change
         // across a masked gap needs the hardware's stop/load/start
@@ -471,42 +480,42 @@ public final class EffectScript {
         // default model - is a full START: phase zero, one silent timer
         // period, then the loud half. The gate bit is set on every path:
         // M carries the gates.
-        boolean sameSid = slot.vec == KIND_TOGGLE && slot.vecVoice == voice
-                && slot.sel == voice;
-        boolean resume = slot.masked && sameSid && slot.prescaler == (code & 7);
+        boolean sameSid = channel.vec == KIND_TOGGLE && channel.vecVoice == voice
+                && channel.sel == voice;
+        boolean resume = channel.masked && sameSid && channel.prescaler == (code & 7);
         boolean retune = old != 0 && ((code ^ old) & 0xF0) == 0
-                || slot.masked && sameSid && slot.prescaler != (code & 7);
+                || channel.masked && sameSid && channel.prescaler != (code & 7);
         cut(p, index, -1);
         openOld(old);
         gates |= 1 << voice;
-        slot.masked = false;
+        channel.masked = false;
         if (resume) {
             int low = 0;
-            if (count != slot.tlast) {
-                slot.tlast = count;
+            if (count != channel.tlast) {
+                channel.tlast = count;
                 low |= RESUME_RELOAD;
             }
-            if (value != slot.vol) {
-                slot.vol = value;
+            if (value != channel.vol) {
+                channel.vol = value;
                 low |= RESUME_VOLUME;
             }
             emit(p, index, action(VERB_RESUME, voice, low), count);
             return;
         }
-        slot.tlast = count;
-        slot.vol = value;
-        slot.prescaler = code & 7;
+        channel.tlast = count;
+        channel.vol = value;
+        channel.prescaler = code & 7;
         if (retune) {
             emit(p, index, action(VERB_RETUNE, voice, code & 7), count);
             return;
         }
-        slot.sel = voice;
-        slot.vec = KIND_TOGGLE;
-        slot.vecVoice = voice;
+        channel.sel = voice;
+        channel.vec = KIND_TOGGLE;
+        channel.vecVoice = voice;
         emit(p, index, action(VERB_START_TOGGLE, voice, code & 7), count);
     }
 
-    private void drum(int p, int f, int index, Slot slot, int code, int count,
+    private void pcm(int p, int f, int index, Channel channel, int code, int count,
                       int voice, int old) {
         if (old != code) {              // the old-effect cleanup; a
             if ((old & 0xC0) == KIND_TOGGLE && old != 0) {
@@ -521,9 +530,9 @@ public final class EffectScript {
                 }
             }
         }
-        // Arbitration: the partner holds a SID on this voice - its timer
+        // Preemption: the partner holds a toggle stream on this voice - its timer
         // stops FIRST (inside the START_PCM_PREEMPT handler), and it retries.
-        Slot other = slots[1 - index];
+        Channel other = channels[1 - index];
         int verb = VERB_START_PCM;
         if ((other.elast & 0xC0) == KIND_TOGGLE && other.elast != 0
                 && ((other.elast >> 4) & 3) - 1 == voice) {
@@ -531,30 +540,30 @@ public final class EffectScript {
             verb = VERB_START_PCM_PREEMPT;
         }
         cut(p, index, voice);           // the retrigger's own voice gets a
-        slot.tlast = count;             // fresh window, not a stuck flag
-        slot.masked = false;
-        slot.prescaler = code & 7;
-        slot.vec = KIND_PCM;
-        slot.vecVoice = voice;
+        channel.tlast = count;             // fresh window, not a stuck flag
+        channel.masked = false;
+        channel.prescaler = code & 7;
+        channel.vec = KIND_PCM;
+        channel.vecVoice = voice;
         gates |= 1 << voice;
         drumOwner[voice] = index;
         drumEnd[voice] = p + duration(f, code, count, voice);
         emit(p, index, action(verb, voice, code & 7), count);
     }
 
-    private void buzz(int p, int f, int index, Slot slot, int code, int count,
+    private void retrigger(int p, int f, int index, Channel channel, int code, int count,
                       int voice) {
         cut(p, index, -1);
-        slot.tlast = count;
-        slot.masked = false;
-        slot.prescaler = code & 7;
-        slot.shape = parameter(f, voice);
-        slot.vec = KIND_RETRIGGER;
-        slot.vecVoice = voice;
+        channel.tlast = count;
+        channel.masked = false;
+        channel.prescaler = code & 7;
+        channel.shape = parameter(f, voice);
+        channel.vec = KIND_RETRIGGER;
+        channel.vecVoice = voice;
         emit(p, index, action(VERB_START_RETRIGGER, voice, code & 7), count);
     }
 
-    /** yx6_burst_open_old: only an old SID's voice gate reopens. */
+    /** yx6_burst_open_old: only an old toggle stream's voice gate reopens. */
     private void openOld(int old) {
         if (old != 0 && (old & 0xC0) == KIND_TOGGLE) {
             gates &= ~(1 << (((old >> 4) & 3) - 1));
@@ -562,8 +571,8 @@ public final class EffectScript {
     }
 
     /**
-     * Any action that programs or stops this slot's timer cuts a drum the
-     * slot still owes ticks to: its marker will never run, so its voice
+     * Any action that programs or stops this channel's timer cuts a sample the
+     * channel still owes ticks to: its marker will never run, so its voice
      * stays muted and forced - v1's stuck flag, replicated and logged.
      */
     private void cut(int p, int index, int skip) {
@@ -575,7 +584,7 @@ public final class EffectScript {
                 drumEnd[v] = STUCK;
                 if (!stuckNoted) {
                     stuckNoted = true;
-                    notes.add("an effect armed over its own slot's running "
+                    notes.add("an effect armed over its own channel's running "
                             + "drum: voice " + (char) ('A' + v)
                             + " stays muted (v1 semantics)");
                 }
@@ -589,7 +598,7 @@ public final class EffectScript {
     }
 
     /**
-     * A drum's length in frames, rounded so the reopen is never early: the
+     * A sample's length in frames, rounded so the reopen is never early: the
      * sample plus its marker tick at the (already downsample-scaled) timer
      * rate, plus a sixteenth of a frame for the arming phase - the trigger
      * action runs a bounded slice into its VBL, so the last tick lands that
@@ -598,9 +607,9 @@ public final class EffectScript {
      */
     private int duration(int f, int code, int count, int voice) {
         int number = song.registers()[8 + voice][f] & 31;
-        long samples = fx.drums()[number].length + 1L;
+        long ticks = fx.samples()[number].length + 1L;
         long divisor = (long) YmEffects.PREDIV[code & 7] * count;
-        long scaled = samples * divisor * song.playerHz()
+        long scaled = ticks * divisor * song.playerHz()
                 + YmEffects.MFP_CLOCK / 16;
         return (int) ((scaled + YmEffects.MFP_CLOCK - 1) / YmEffects.MFP_CLOCK);
     }
