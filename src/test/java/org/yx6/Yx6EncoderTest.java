@@ -43,7 +43,7 @@ final class Yx6EncoderTest {
                 "a play-once tune does not loop");
         assertEquals(0, word(file, Yx6Format.OFFSET_FLAGS) & Yx6Format.flagChannel(2),
                 "a YM frame starts at most two effects, so no YM tune ever asks"
-                        + " for the third tick channel - and the host keeps its timer");
+                        + " for the third timer channel - and the host keeps its timer");
         assertEquals(FRAMES, longAt(file, Yx6Format.OFFSET_LOOP_FRAME),
                 "a play-once tune loops at its end");
         assertEquals(FRAMES, longAt(file, Yx6Format.OFFSET_FRAMES));
@@ -89,11 +89,12 @@ final class Yx6EncoderTest {
         }
         vectors[Yx6Format.STREAM_M] = script.m();
         vectors[Yx6Format.STREAM_X] = script.x();
+        vectors[Yx6Format.STREAM_T] = script.timers();
         for (int c = 0; c < Yx6Format.CHANNELS; c++) {
-            int acts = EffectScript.M_CHANNEL_1 << c;
-            vectors[Yx6Format.STREAM_A1 + 2 * c] =
+            int acts = EffectScript.M_CHANNEL_0 << c;
+            vectors[Yx6Format.streamAction(c)] =
                     Yx6Encoder.carry(script.actions()[c], script.m(), acts, null);
-            vectors[Yx6Format.STREAM_P1 + 2 * c] = Yx6Encoder.carry(
+            vectors[Yx6Format.streamAction(c) + 1] = Yx6Encoder.carry(
                     script.counts()[c], script.m(), acts, script.actions()[c]);
         }
         return vectors;

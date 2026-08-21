@@ -1,6 +1,13 @@
-# A third tick channel: the design space
+# A third timer channel: the design space
 
-Two tick channels ran on MFP timers A and D. This is what a third cost,
+> **Superseded.** What this note designed shipped in format v6 and was
+> then widened: v7 has four channels and the file carries the
+> channel-to-timer map itself. See
+> [four-timer-channels.md](four-timer-channels.md). The note stays because
+> the four designs it weighs, and the measurements under them, are what
+> the later one builds on.
+
+Two timer channels ran on MFP timers A and D. This is what a third cost,
 four ways of arranging it, which one was built, and what it measured.
 
 **Built, in format v6.** Design 3 with the operand stream, plus two things
@@ -12,7 +19,7 @@ the middle of this note are the pre-build estimates, kept as written.
 ## What it is for
 
 No YM file needs it. A YM6 frame can start at most two effects, so at
-most two tick streams ever run at once, and every tune in the 544-file
+most two timer streams ever run at once, and every tune in the 544-file
 corpus fits in two channels with room to spare. A third channel is for
 sources the packer does not read yet: a tracker format with three
 independent effects, or a tune traced from an original replay that used
@@ -161,7 +168,7 @@ file.
 
 **Timer B is claimed, not requested.** The player already takes timers A
 and D without asking, and assumption 5 puts every machine-state decision
-with the host. A tune whose header asks for three channels claims Timer
+with the host. A tune whose header names three channels claims Timer
 B on the same terms. What changes is that this is now worth saying out
 loud: a three-channel tune cannot run under a host that wants raster
 code.
@@ -177,7 +184,8 @@ a later change, and it can be made without touching the file.
 
 ## What was built, and what it measured
 
-**A tick channel is the format's concept; a timer is the player's.** The
+**A timer channel is the format's concept; which of the machine's timers
+serves it is the player's.** The
 file never names a timer. It names the channels a tune uses, one flag bit
 each, and `YX6_init` claims a timer for each named channel from a table of
 three descriptors - channel 1 on Timer A, 2 on Timer D, 3 on Timer B.
@@ -216,7 +224,7 @@ each - and the workspace is always sized for twenty-two rings, as decided.
 
 The harness number is not a like-for-like comparison and should not be
 read as a speedup for real tunes: it fell because that tune stopped
-decoding four streams it never used. A tune that uses two tick channels
+decoding four streams it never used. A tune that uses two timer channels
 decodes one stream more than v5 did, about 2% more refill work.
 
 ### What the corpus actually needs

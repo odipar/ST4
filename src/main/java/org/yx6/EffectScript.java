@@ -11,14 +11,14 @@ import java.util.List;
  * <p>The v1 player re-derived, on every frame, decisions that are pure
  * functions of the tune: is this code new or held, does the count need
  * reloading, which channel's timer must stop for whose sample. This replays
- * exactly that decision logic - the branch structure of {@code yx6_slot} and
- * {@code yx6_pcm_start}, transcribed - over the whole timeline at pack
- * time, and emits five streams of prepared actions the player executes
- * without comparing anything against remembered state.
+ * exactly that decision logic - the branch structure of the v1 player's
+ * effect stage, transcribed - over the whole timeline at pack time, and
+ * emits eight streams of prepared actions the player executes without
+ * comparing anything against remembered state.
  *
  * <p>Names here are the YM format's, because the codes being compiled are:
  * a SID voice, a digidrum, a sync-buzzer, two effect channels. In the model
- * {@code doc/terminology.md} describes, all of these are TICK STREAMS -
+ * {@code doc/terminology.md} describes, all of these are TIMER STREAMS -
  * values written to one register between frames, at a rate a timer sets -
  * and what this class decides for each is exactly a stream's lifecycle:
  * start, hold, retune (a new rate, the same place in the cycle), release,
@@ -26,31 +26,35 @@ import java.util.List;
  * streams it emits are script data, not register streams: their bytes
  * never reach the chip.
 
- * <p>The format carries three tick channels. A YM frame starts at most two
- * effects, so a YM tune uses two and the third's streams pack to nothing;
- * it is there for sources that need it. Which timer a channel runs on is
- * the player's business, not this class's.
+ * <p>The format carries four timer channels. A YM frame starts at most two
+ * effects, so a YM tune uses two and the others' streams pack to nothing;
+ * they are there for sources that need them. Which MFP timer a channel
+ * runs on is stream T's to say - this class emits the packer's default
+ * map, which puts channels 0 and 1 on Timers A and D.
  *
  * <h2>The stream ABI (frozen: packer, player and rigs all cite this)</h2>
  *
  * <pre>
  * stream 14  M   master byte. 0 = nothing anywhere this frame.
- *                bits 0-2 = tick channel 1, 2, 3 acts (read its A, maybe P)
- *                bit 3 = apply the gate state in bits 6-4
- *                bits 6-4 = burst-gate mask, voices A/B/C, 1 = muted;
+ *                bits 0-3 = timer channel 0, 1, 2, 3 acts (read its A,
+ *                           maybe P)
+ *                bit 4 = apply the gate state in bits 7-5
+ *                bits 7-5 = burst-gate mask, voices A/B/C, 1 = muted;
  *                           absolute state, idempotent to re-assert
- *                bit 7 = spare
  * stream 15  X   the operand an action byte has no room for. Today only
- *                START_PCM_PREEMPT reads it: a bit per tick channel whose
+ *                START_PCM_PREEMPT reads it: a bit per timer channel whose
  *                timer must stop before the sample starts.
- * stream 16  A1  channel 1's action: verb in bits 7-5, voice in bits 4-3,
- * stream 17  P1  bits 2-0 the prescaler (program verbs) or HOLD flags;
- * stream 18  A2  P carries the MFP timer count for any action that
- * stream 19  P2  programs or reloads. Bytes on frames where a stream is
- * stream 20  A3  not consumed are unspecified; the encoder repeats the
- * stream 21  P3  previous byte, which the event optimizer packs away.
- *                The channels come last so a tune that uses fewer of them
- *                leaves a tail the player never decodes.
+ * stream 16  T   the channel-to-timer map, two bits a channel: 0 = Timer
+ *                A, 1 = B, 2 = C, 3 = D. One byte covers all four, and a
+ *                tune that never re-assigns repeats it.
+ * stream 17  A0  channel 0's action: verb in bits 7-5, voice in bits 4-3,
+ * stream 18  P0  bits 2-0 the prescaler (program verbs) or HOLD flags;
+ * stream 19  A1  P carries the MFP timer count for any action that
+ * stream 20  P1  programs or reloads. Bytes on frames where a stream is
+ * stream 21  A2  not consumed are unspecified; the encoder repeats the
+ * stream 22  P2  previous byte, which the event optimizer packs away.
+ * stream 23  A3  The channels come last so a tune that uses fewer of them
+ * stream 24  P3  leaves a tail the player never decodes.
  * </pre>
  *
  * The verbs:
@@ -145,14 +149,16 @@ public final class EffectScript {
     public static final int HOLD_SHAPE = 4;
 
     // The master byte.
-    /** M's bit per tick channel, numbered as the player numbers them.
-     * Three channels take bits 0 to 2, so the gate flag and its mask moved
-     * up one when v6 made room; {@code M_CHANNEL_1 << c} is channel c's. */
-    public static final int M_CHANNEL_1 = 1;
-    public static final int M_CHANNEL_2 = 2;
-    public static final int M_CHANNEL_3 = 4;
-    public static final int M_GATES = 8;
-    public static final int M_GATE_SHIFT = 4;
+    /** M's bit per timer channel, numbered as the format numbers them,
+     * from zero. Four channels take bits 0 to 3, so the gate flag and its
+     * mask moved up again when v7 made room; {@code M_CHANNEL_0 << c} is
+     * channel c's, and the byte is now full. */
+    public static final int M_CHANNEL_0 = 1;
+    public static final int M_CHANNEL_1 = 2;
+    public static final int M_CHANNEL_2 = 4;
+    public static final int M_CHANNEL_3 = 8;
+    public static final int M_GATES = 16;
+    public static final int M_GATE_SHIFT = 5;
 
     public static int action(int verb, int voice, int low) {
         return verb | (voice << 3) | low;
@@ -162,22 +168,24 @@ public final class EffectScript {
      * The compiled script: {@code frames} played frames splitting at
      * {@code split}, {@code source[p]} naming the dump frame each played
      * frame shows, the script streams - M plus an action and a count byte
-     * per tick channel - and the mixer bits to OR into R7. {@code reopens} lists {playedFrame, voice} for every sample end
+     * per timer channel - and the mixer bits to OR into R7. {@code reopens} lists {playedFrame, voice} for every sample end
      * edge - the differential test's skew windows - and {@code notes} what
      * a packer should tell the user.
      */
     public record Result(int frames, int split, int[] source,
                          byte[] m, byte[][] actions, byte[][] counts, byte[] x,
+                         byte[] timers,
                          byte[] r7force, List<int[]> reopens, List<String> notes) {
 
-        /** M, then X, then each channel's action and count, in file order. */
+        /** M, X, T, then each channel's action and count, in file order. */
         public byte[][] streams() {
-            byte[][] out = new byte[2 + 2 * actions.length][];
+            byte[][] out = new byte[3 + 2 * actions.length][];
             out[0] = m;
             out[1] = x;
+            out[2] = timers;
             for (int c = 0; c < actions.length; c++) {
-                out[2 + 2 * c] = actions[c];
-                out[3 + 2 * c] = counts[c];
+                out[3 + 2 * c] = actions[c];
+                out[4 + 2 * c] = counts[c];
             }
             return out;
         }
@@ -231,6 +239,7 @@ public final class EffectScript {
     private final byte[][] actions = new byte[Yx6Format.CHANNELS][];
     private final byte[][] counts = new byte[Yx6Format.CHANNELS][];
     private final byte[] x;
+    private final byte[] timers;
     private final byte[] r7;
     private final int horizon;
     private boolean stuckNoted;
@@ -245,6 +254,10 @@ public final class EffectScript {
         horizon = loops ? total + 3 * (total - loopFrame) : total;
         m = new byte[horizon];
         x = new byte[horizon];
+        // The channel-to-timer map. A YM tune never moves it, so the stream
+        // is one value repeated and packs to nothing.
+        timers = new byte[horizon];
+        java.util.Arrays.fill(timers, (byte) Yx6Format.DEFAULT_TIMERS);
         for (int c = 0; c < Yx6Format.CHANNELS; c++) {
             channels[c] = new Channel();
             actions[c] = new byte[horizon];
@@ -321,7 +334,8 @@ public final class EffectScript {
         reopens.removeIf(r -> r[0] >= frames);
         return new Result(frames, split, source,
                 Arrays.copyOf(m, frames), trim(actions, frames),
-                trim(counts, frames), hold(x, frames), Arrays.copyOf(r7, frames),
+                trim(counts, frames), hold(x, frames),
+                Arrays.copyOf(timers, frames), Arrays.copyOf(r7, frames),
                 List.copyOf(reopens), List.copyOf(notes));
     }
 
@@ -565,7 +579,7 @@ public final class EffectScript {
             if (c != index && (other.elast & 0xC0) == KIND_TOGGLE && other.elast != 0
                     && ((other.elast >> 4) & 3) - 1 == voice) {
                 other.elast = 0;
-                victims |= M_CHANNEL_1 << c;
+                victims |= M_CHANNEL_0 << c;
             }
         }
         int verb = victims == 0 ? VERB_START_PCM : VERB_START_PCM_PREEMPT;
@@ -646,12 +660,12 @@ public final class EffectScript {
     }
 
     private void emit(int p, int index, int action, int count) {
-        m[p] |= (byte) (M_CHANNEL_1 << index);
+        m[p] |= (byte) (M_CHANNEL_0 << index);
         actions[index][p] = (byte) action;
         counts[index][p] = (byte) count;
     }
 
-    /** X is read only on the frames a verb asks for it, so every other
+    /** X is read only on the frames a verb reads it, so every other
      * frame repeats the last value: a stream that packs to nothing. */
     private static byte[] hold(byte[] stream, int frames) {
         byte[] out = Arrays.copyOf(stream, frames);

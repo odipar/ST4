@@ -127,7 +127,11 @@ public final class Yx6Encoder {
     public static Result encode(Ym6Reader.Song song, int ringSize, int chunk,
                                 int loopFrame, boolean progress, int unit,
                                 int drumHz, boolean sidResume) {
-        String problem = Yx6Format.checkShape(ringSize, chunk, unit);
+        // The floor first, on what every tune decodes; the exact check waits
+        // for the script, since a tune that leaves channels idle decodes
+        // fewer streams and may use a smaller chunk.
+        String problem = Yx6Format.checkShape(ringSize, chunk, unit,
+                Yx6Format.STREAM_A0);
         if (!problem.isEmpty()) {
             throw new IllegalArgumentException(problem);
         }
@@ -159,6 +163,12 @@ public final class Yx6Encoder {
         YmEffects.Extraction effects = YmEffects.extract(song, drumHz);
         EffectScript.Result script = EffectScript.compile(song, effects,
                 loops ? loopFrame : -1, unit, sidResume);
+        int channels = channelsUsed(script);
+        problem = Yx6Format.checkShape(ringSize, chunk, unit,
+                Yx6Format.liveStreams(channels));
+        if (!problem.isEmpty()) {
+            throw new IllegalArgumentException(problem);
+        }
         int frames = script.frames();
         int split = script.split();
         byte[][] vectors = new byte[Yx6Format.STREAMS][];
@@ -177,12 +187,13 @@ public final class Yx6Encoder {
         }
         vectors[Yx6Format.STREAM_M] = script.m();
         vectors[Yx6Format.STREAM_X] = script.x();
+        vectors[Yx6Format.STREAM_T] = script.timers();
         for (int c = 0; c < Yx6Format.CHANNELS; c++) {
-            int acts = EffectScript.M_CHANNEL_1 << c;
+            int acts = EffectScript.M_CHANNEL_0 << c;
             byte[] action = script.actions()[c];
-            vectors[Yx6Format.STREAM_A1 + 2 * c] =
+            vectors[Yx6Format.streamAction(c)] =
                     carry(action, script.m(), acts, null);
-            vectors[Yx6Format.STREAM_P1 + 2 * c] =
+            vectors[Yx6Format.streamAction(c) + 1] =
                     carry(script.counts()[c], script.m(), acts, action);
         }
 
@@ -199,7 +210,7 @@ public final class Yx6Encoder {
         }
 
         byte[] file = build(song, ringSize, chunk, frames, split, loops, intro,
-                loop, effects.samples(), channelsUsed(script));
+                loop, effects.samples(), channels);
         return new Result(file, List.copyOf(streams), ringSize, chunk, split, loops, unit,
                 effects, script);
     }
@@ -276,7 +287,7 @@ public final class Yx6Encoder {
         byte[] file = new byte[align(total)];
         putLong(file, Yx6Format.OFFSET_MAGIC, Yx6Format.MAGIC);
         putWord(file, Yx6Format.OFFSET_VERSION, Yx6Format.VERSION);
-        // One flag per tick channel: the player claims a timer for each
+        // One flag per timer channel: the player claims a timer for each
         // channel named here and leaves the rest to the host. A YM tune
         // names two, so Timer B stays the host's.
         putWord(file, Yx6Format.OFFSET_FLAGS,
@@ -325,7 +336,7 @@ public final class Yx6Encoder {
         return at;
     }
 
-    /** The header's channel flags: a bit per tick channel the script ever
+    /** The header's channel flags: a bit per timer channel the script ever
      * gives something to do. */
     private static int channelsUsed(EffectScript.Result script) {
         int acting = 0;
@@ -334,7 +345,7 @@ public final class Yx6Encoder {
         }
         int flags = 0;
         for (int c = 0; c < Yx6Format.CHANNELS; c++) {
-            if ((acting & (EffectScript.M_CHANNEL_1 << c)) != 0) {
+            if ((acting & (EffectScript.M_CHANNEL_0 << c)) != 0) {
                 flags |= Yx6Format.flagChannel(c);
             }
         }

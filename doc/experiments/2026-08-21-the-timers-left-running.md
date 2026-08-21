@@ -1,6 +1,6 @@
 # The timers left running: a regression with identical chip writes
 
-Format v6 made the player claim a timer only for a tick channel its tune
+Format v6 made the player claim a timer only for a channel its tune
 names. A tune with no effects names none, so `YX6_init` claimed nothing -
 and left TOS's timers exactly as it found them. Robbert heard it
 immediately on Cuddly Demos - Mainmenu: "something is off with the buzzer
@@ -11,7 +11,7 @@ not.
 ## What the instruments said
 
 The tune is 14 registers and nothing else - no digidrum, no SID, no
-sync-buzzer, so no tick channel and no timer. Its bass is the envelope:
+sync-buzzer, so no timer channel of its own and no timer claimed. Its bass is the envelope:
 shape $0A written **once** at frame 0, then voice C gated in and out 585
 times while the envelope period (42..63, so 124..186 Hz) carries the
 pitch.
@@ -41,8 +41,8 @@ None of that reaches the sound chip. It reaches everything around it.
 
 ## The fix, and whose job it is
 
-The player's job did not change: it claims a timer for each tick channel
-its tune names, and nothing else. Quiescing the machine is the **host's**
+The player's job did not change: it claims a timer for each channel its
+tune names, and nothing else. Quiescing the machine is the **host's**
 job, and the host is where the fix went. `YX6_player.S` - the takeover
 example every PRG is built from - already saved and cleared IERA, IERB,
 IMRA and IMRB. Killing the enable bits silences the interrupts but leaves

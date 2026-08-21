@@ -156,7 +156,7 @@ public static class Nt4
     /// </summary>
     /// <remarks>
     /// Public because a container is also how other formats embed an ST4
-    /// stream: a yx6 file holds up to forty-four of them.
+    /// stream: a yx6 file holds up to fifty of them.
     /// </remarks>
     /// <param name="result">The four streams to lay out.</param>
     /// <returns>The complete container, header first.</returns>

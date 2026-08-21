@@ -148,7 +148,10 @@ public final class Yx6 {
                       -o      Play once: pack no loop section
                       -nN     Ring size per stream, in bytes (default 960)
                       -cC     Values decoded per call, and the round-robin group
-                              size (default 24; needs C >= 18 and N mod C = 0)
+                              size (default 24; N mod C = 0, and C at
+                              least the streams the tune decodes: 17 with
+                              no timer channel, 21 for a YM tune, 25 for
+                              one that uses all four)
                       -kK     ST4 unit size: 1, 2 or 4 (default 2). An odd
                               tune length or loop frame is padded with safe
                               duplicate frames - inaudible - to fit the unit.
@@ -184,7 +187,11 @@ public final class Yx6 {
                                 boolean forcedMode, int drumHz, boolean sidResume,
                                 int startMin, int startSec, int startFrame,
                                 int endFrame, int frameCount) {
-        String problem = Yx6Format.checkShape(ringSize, chunk, Math.max(unit, 1));
+        // The floor only: how many streams a tune decodes depends on the
+        // channels it names, which the encoder learns when it compiles the
+        // script and checks again there.
+        String problem = Yx6Format.checkShape(ringSize, chunk, Math.max(unit, 1),
+                Yx6Format.STREAM_A0);
         if (!problem.isEmpty()) {
             throw error(problem);
         }
@@ -427,7 +434,8 @@ public final class Yx6 {
                         : "Plays frames 0-" + (result.loopFrame() - 1)
                                 + ", then loops from frame " + result.loopFrame()
                 : "Plays once, then stops");
-        String[] effectNames = {"M ", "X ", "A1", "P1", "A2", "P2", "A3", "P3"};
+        String[] effectNames = {"M ", "X ", "T ", "A0", "P0", "A1", "P1",
+                                "A2", "P2", "A3", "P3"};
         for (Yx6Encoder.Stream stream : result.streams()) {
             String name = stream.register() < Yx6Format.REGISTER_STREAMS
                     ? String.format("R%-2d", stream.register())
