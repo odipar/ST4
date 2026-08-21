@@ -429,9 +429,20 @@ series of writes.
 | the timers and the map onto them | `yx6_timer_a` to `yx6_timer_d`, `yx6_desc_0` to `yx6_desc_3`, `yx6_assign` |
 | the actions the script runs | `yx6_pcm`, `yx6_pcm_preempt`, `yx6_toggle_start`, `yx6_retrigger_start`, `yx6_retune`, `yx6_resume`, `yx6_hold`, `yx6_release` |
 | the frame write, the mixer | `yx6_wA`, `yx6_w7`, `yx6_wB`, `YX6_MIXER` |
+| a tune as the engine has one | `Tune` - the frame streams, the timer streams, the samples and the rate, and nothing a format would recognise |
 
 `Ym6Reader` and `YmEffects` keep the YM names on their input side: those
-are the names of the bytes.
+are the names of the bytes. So do `YmrReader` and `YmrEffects` on theirs.
+Each pair is a **front end**, each stops at a `Tune`, and neither is
+downstream of the other; everything past that point - `EffectScript`, the
+encoder, the player - has no way to ask which format a tune was read out
+of.
+
+The packages say the same thing: `org.ym6` is the YM front end and
+`org.ymr` the RhYMe one, and `org.yx6` holds the engine, the format and the
+tools that work on a `.yx6` file whatever made it. Each front end is
+compiled against the engine, and the engine against neither front end -
+which is the layering said in a way the compiler can check.
 
 ## If you know these ideas from elsewhere
 

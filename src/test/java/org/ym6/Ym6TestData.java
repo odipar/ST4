@@ -1,11 +1,11 @@
-package org.yx6;
+package org.ym6;
 
 import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.Random;
 
 /** Builds synthetic YM5!/YM6! dumps, so the tests need no distributable tune. */
-final class Ym6TestData {
+public final class Ym6TestData {
 
     private Ym6TestData() {}
 
@@ -15,7 +15,7 @@ final class Ym6TestData {
      * "unchanged", and effect bits set in the registers that carry them - so
      * masking has something to remove.
      */
-    static byte[][] registers(int frames) {
+    public static byte[][] registers(int frames) {
         var random = new Random(1234);
         byte[][] values = new byte[Ym6Reader.Song.YM_REGISTERS][frames];
         int[] period = {0, 0, 0};
@@ -54,12 +54,13 @@ final class Ym6TestData {
         return values;
     }
 
-    static byte[] file(byte[][] registers, int frames, boolean interleaved) {
+    public static byte[] file(byte[][] registers, int frames, boolean interleaved) {
         return file(registers, frames, interleaved, "YM6!", 50, 0, 0);
     }
 
-    static byte[] file(byte[][] registers, int frames, boolean interleaved, String format,
-                       int playerHz, int digidrums, int loopFrame) {
+    public static byte[] file(byte[][] registers, int frames, boolean interleaved,
+                              String format, int playerHz, int digidrums,
+                              int loopFrame) {
         var out = new ByteArrayOutputStream();
         out.writeBytes(format.getBytes(StandardCharsets.US_ASCII));
         out.writeBytes("LeOnArD!".getBytes(StandardCharsets.US_ASCII));

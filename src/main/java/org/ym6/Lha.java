@@ -1,4 +1,4 @@
-package org.yx6;
+package org.ym6;
 
 /**
  * Unpacks the LHA archives that distributed {@code .ym} files come wrapped

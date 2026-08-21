@@ -12,7 +12,7 @@
 # yx6/play.sh -h lists the lot. Press SPACE in the Hatari window to stop; the
 # program asks Hatari to quit on its way out, so the script returns.
 #
-# The work is org.yx6.Play's; this only finds the repo and the classes.
+# The work is org.ym6.Play's; this only finds the repo and the classes.
 # Needs rmac, hatari with a TOS image, and a compiled Java tree.
 #
 #   HATARI=/path/to/hatari TOS=/path/to/tos.img yx6/play.sh song.ym
@@ -20,4 +20,4 @@ set -e
 YX6_DIR=$(cd "$(dirname "$0")" && pwd)
 REPO=$(cd "$YX6_DIR/.." && pwd)
 [ -d "$REPO/target/classes" ] || (cd "$REPO" && mvn -q compile)
-exec java -ea -Dyx6.repo="$REPO" -cp "$REPO/target/classes" org.yx6.Play "$@"
+exec java -ea -Dyx6.repo="$REPO" -cp "$REPO/target/classes" org.ym6.Play "$@"

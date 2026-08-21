@@ -22,6 +22,8 @@ import static org.yx6.EffectScript.VERB_RELEASE;
 import static org.yx6.EffectScript.action;
 
 import org.junit.jupiter.api.Test;
+import org.ym6.Ym6Reader;
+import org.ym6.YmEffects;
 
 /**
  * The compiled effect script against the scenes the emulation rig plays -
@@ -43,11 +45,11 @@ final class EffectScriptTest {
     }
 
     private static EffectScript.Result compile(Ym6Reader.Song song, int loop) {
-        return EffectScript.compile(song, YmEffects.extract(song), loop, 1);
+        return EffectScript.compile(YmEffects.tune(song), loop, 1);
     }
 
     private static EffectScript.Result compileResume(Ym6Reader.Song song, int loop) {
-        return EffectScript.compile(song, YmEffects.extract(song), loop, 1, true);
+        return EffectScript.compile(YmEffects.tune(song), loop, 1, true);
     }
 
     /** The rig's scene, exactly: SID with a reload, a retune pair, drum
@@ -285,6 +287,107 @@ final class EffectScriptTest {
             assertEquals(0x09, r.r7force()[f] & 0x09, "stuck at " + f);
         }
         assertTrue(r.notes().stream().anyMatch(n -> n.contains("stays muted")));
+    }
+
+    // ------------------------------------------- a source that can say stop
+
+    /** The two dialects of {@link EffectScript.Semantics#channelEndsPcm},
+     * with the other two flags pinned so the tests below isolate that one:
+     * neither retriggers a held PCM code, neither forces the mixer, and only
+     * {@link #STOPS} lets a channel's own action end its sample. The YM trio
+     * sits on the {@link #RUNS_ON} side of this fork. */
+    private static final EffectScript.Semantics RUNS_ON =
+            new EffectScript.Semantics(false, false, false);
+    private static final EffectScript.Semantics STOPS =
+            new EffectScript.Semantics(false, false, true);
+
+    private static EffectScript.Result compile(Ym6Reader.Song song,
+                                               EffectScript.Semantics semantics) {
+        return EffectScript.compile(under(YmEffects.tune(song), semantics), -1, 1,
+                false, Yx6Format.DEFAULT_TIMERS);
+    }
+
+    /** The same tune under another source format's semantics: the streams a YM
+     * dump produced, told apart only by what the script is allowed to assume
+     * about how they were triggered and stopped. */
+    private static Tune under(Tune tune, EffectScript.Semantics semantics) {
+        return new Tune(tune.frames(), tune.frameRate(), tune.masterClock(),
+                tune.loopFrame(), tune.registers(), tune.codes(), tune.counts(),
+                tune.samples(), semantics, tune.name(), tune.author(),
+                tune.comment(), tune.notes());
+    }
+
+    /** A drum on voice A whose code arrives at frame 4 and is gone by frame 8,
+     * with 600 samples at 4*250 cycles: the computed window reaches frame 17,
+     * so everything between 8 and 17 is a decision and not a coincidence. */
+    private static Ym6Reader.Song longDrum(int silenced) {
+        int frames = 24;
+        byte[][] v = new byte[Ym6Reader.Song.YM_REGISTERS][frames];
+        for (int f = 4; f < silenced; f++) {
+            v[3][f] = 0x50;                     // drum voice A on slot 2
+            v[8][f] |= 1 << 5;                  // prescaler 1 (prediv 4)
+            v[15][f] = (byte) 250;
+        }
+        return song(frames, v, 0, new byte[][] {new byte[600]});
+    }
+
+    @Test
+    void aReleasedSampleRunsToItsMarkerOrStopsWhereTheSourceSaysSo() {
+        assertEquals(false, EffectScript.Semantics.YM.channelEndsPcm(),
+                "a YM dump has no way to say stop");
+
+        // A YM-shaped source: nothing acts when the code goes away, because
+        // nothing can - the marker tick is the only thing that ends a sample,
+        // and the gate reopens at the computed end.
+        EffectScript.Result runs = compile(longDrum(8), RUNS_ON);
+        assertEquals(action(VERB_START_PCM, 0, 1), runs.actions()[1][4] & 0xFF);
+        for (int f = 8; f < 17; f++) {
+            assertEquals(0, runs.m()[f] & 0xFF, "something acted at " + f);
+        }
+        assertTrue(runs.reopens().stream().anyMatch(x -> x[0] == 17 && x[1] == 0));
+
+        // The same code with a source that can say stop: the whole cut lands
+        // on the frame it says it. RELEASE with bit 0 clear stops the timer,
+        // and the gate goes with it - the player applies gates before the
+        // register burst, so the voice's own volume is back on that frame.
+        EffectScript.Result stops = compile(longDrum(8), STOPS);
+        assertEquals(action(VERB_RELEASE, 0, 0), stops.actions()[1][8] & 0xFF);
+        assertEquals(M_CHANNEL_1 | M_GATES, stops.m()[8] & 0xFF);
+        assertTrue(stops.reopens().stream().anyMatch(x -> x[0] == 8 && x[1] == 0));
+        for (int f = 9; f < 24; f++) {
+            assertEquals(0, stops.m()[f] & 0xFF, "something acted at " + f);
+        }
+    }
+
+    @Test
+    void aStreamArrivingOverTheChannelsOwnSampleTakesTheVoiceRatherThanWaiting() {
+        // The drum runs on slot 2 to frame 17; a SID takes the same slot and
+        // the same voice at frame 8, with no idle code between them, and is
+        // held past 17 so both dialects arm it and only the frame differs.
+        Ym6Reader.Song song = longDrum(8);
+        byte[][] v = song.registers();
+        for (int f = 8; f < 21; f++) {
+            v[3][f] = 0x10;                     // SID voice A, same slot
+            v[8][f] = (byte) ((v[8][f] & 0x1F) | (1 << 5));
+            v[15][f] = 90;
+        }
+
+        // v1's arbitration: a sample owns the volume register, so the SID
+        // clears itself and retries - for the sample's whole computed length.
+        EffectScript.Result runs = compile(song, RUNS_ON);
+        for (int f = 8; f < 17; f++) {
+            assertEquals(0, runs.m()[f] & 0xFF, "something acted at " + f);
+        }
+        assertEquals(action(VERB_START_TOGGLE, 0, 1), runs.actions()[1][17] & 0xFF);
+
+        // One timer runs both, so there was never anything to arbitrate: the
+        // square arms on the frame the source asked for it. The gate stays
+        // shut throughout - the sample wanted it shut and so does the square -
+        // so no reopen edge is recorded for a gate that never opened.
+        EffectScript.Result stops = compile(song, STOPS);
+        assertEquals(action(VERB_START_TOGGLE, 0, 1), stops.actions()[1][8] & 0xFF);
+        assertEquals(M_CHANNEL_1, stops.m()[8] & 0xFF);
+        assertTrue(stops.reopens().isEmpty(), stops.reopens().toString());
     }
 
     /** M is exact everywhere: a byte is nonzero exactly when something acts. */

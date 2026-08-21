@@ -1,10 +1,13 @@
-package org.yx6;
+package org.ym6;
 
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import org.yx6.MkPrg;
+import org.yx6.Tools;
+import org.yx6.Yx6Format;
 
 /**
  * Test drive: pack a tune, build a player around it, run it under Hatari.

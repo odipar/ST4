@@ -1,6 +1,7 @@
-package org.yx6;
+package org.ym6;
 
 import java.nio.charset.StandardCharsets;
+import org.yx6.Tune;
 
 /**
  * Reads a YM5!/YM6! register dump, as described by
@@ -10,7 +11,8 @@ import java.nio.charset.StandardCharsets;
  * language - digidrums, SID voices, effect slots, TP and TC - because those
  * are the names of the bytes it is reading, and calling them anything else
  * would misdescribe the file. The engine's vocabulary starts downstream, at
- * {@link YmEffects.Extraction}; {@code doc/terminology.md} maps the two.
+ * the {@link Tune} {@link YmEffects} builds out of this;
+ * {@code doc/terminology.md} maps the two.
  *
  * <p>The layout is a fixed header, optional extra data, the digidrum samples,
  * three NUL-terminated strings, and then the frames: either 16 vectors of one
@@ -23,7 +25,13 @@ import java.nio.charset.StandardCharsets;
  */
 public final class Ym6Reader {
 
-    /** One parsed tune. {@code registers[r][frame]} is R{@code r}'s raw value. */
+    /** One parsed tune, in the file's own terms and nobody else's: what the
+     *  header said, the frames as read, and the samples as stored.
+     *
+     *  <p>{@code registers[r][frame]} is R{@code r}'s raw value, all sixteen
+     *  of them - the two I/O ports included, because in this format they are
+     *  where an effect's timer count is filed and {@link YmEffects} has to
+     *  read them. Only fourteen go on to the engine. */
     public record Song(String format, int frames, int playerHz, long masterClock, long loopFrame,
                        boolean interleaved, long attributes, byte[][] drums, String name,
                        String author, String comment, byte[][] registers) {

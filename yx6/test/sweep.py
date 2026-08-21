@@ -263,7 +263,7 @@ def sweep(path):
     with tempfile.NamedTemporaryFile(suffix='.yx6', delete=False) as tf:
         yx6 = tf.name
     try:
-        out = subprocess.run(['java', '-cp', CLASSES, 'org.yx6.Yx6',
+        out = subprocess.run(['java', '-cp', CLASSES, 'org.ym6.Yx6',
                               '-f', '-k1', *PACK_OPTIONS, path, yx6],
                              capture_output=True, text=True)
         if out.returncode:

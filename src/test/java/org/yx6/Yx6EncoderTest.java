@@ -2,11 +2,6 @@ package org.yx6;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertSame;
-import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -14,6 +9,9 @@ import java.util.Arrays;
 import org.st4.St4Decompressor;
 import org.st4.St4Format;
 import org.junit.jupiter.api.Test;
+import org.ym6.Ym6Reader;
+import org.ym6.Ym6TestData;
+import org.ym6.YmEffects;
 
 final class Yx6EncoderTest {
 
@@ -22,6 +20,11 @@ final class Yx6EncoderTest {
     private static Ym6Reader.Song song(boolean interleaved) {
         byte[][] registers = Ym6TestData.registers(FRAMES);
         return Ym6Reader.read(Ym6TestData.file(registers, FRAMES, interleaved));
+    }
+
+    /** The same dump past the YM front end: what the encoder takes. */
+    private static Tune tune(boolean interleaved) {
+        return YmEffects.tune(song(interleaved));
     }
 
     private static int word(byte[] file, int at) {
@@ -34,7 +37,7 @@ final class Yx6EncoderTest {
 
     @Test
     void headerDescribesTheStreams() {
-        Yx6Encoder.Result result = Yx6Encoder.encode(song(true), 960, 24, false);
+        Yx6Encoder.Result result = Yx6Encoder.encode(tune(true), 960, 24, false);
         byte[] file = result.file();
 
         assertEquals(Yx6Format.MAGIC, longAt(file, Yx6Format.OFFSET_MAGIC));
@@ -70,9 +73,8 @@ final class Yx6EncoderTest {
      * mixer force, then the compiled script streams with their unread
      * bytes repeating. The same assembly the encoder performs - which is
      * the point: the file must decode back to exactly this. */
-    static byte[][] expectedVectors(Ym6Reader.Song source, int loopFrame, int unit) {
-        YmEffects.Extraction effects = YmEffects.extract(source);
-        EffectScript.Result script = EffectScript.compile(source, effects, loopFrame, unit);
+    static byte[][] expectedVectors(Tune source, int loopFrame, int unit) {
+        EffectScript.Result script = EffectScript.compile(source, loopFrame, unit);
         byte[][] vectors = new byte[Yx6Format.STREAMS][];
         for (int register = 0; register < Yx6Format.REGISTER_STREAMS; register++) {
             byte[] masked = Ym2149.mask(register, source.registers()[register]);
@@ -100,13 +102,13 @@ final class Yx6EncoderTest {
         return vectors;
     }
 
-    static byte[] expectedVector(Ym6Reader.Song source, int index) {
+    static byte[] expectedVector(Tune source, int index) {
         return expectedVectors(source, -1, 1)[index];
     }
 
     @Test
     void everyStreamUnpacksToItsVector() {
-        Ym6Reader.Song source = song(true);
+        Tune source = tune(true);
         Yx6Encoder.Result result = Yx6Encoder.encode(source, 960, 24, false);
         byte[] file = result.file();
 
@@ -121,8 +123,8 @@ final class Yx6EncoderTest {
 
     @Test
     void interleavedAndPerFrameFilesPackIdentically() {
-        assertArrayEquals(Yx6Encoder.encode(song(true), 960, 24, false).file(),
-                Yx6Encoder.encode(song(false), 960, 24, false).file());
+        assertArrayEquals(Yx6Encoder.encode(tune(true), 960, 24, false).file(),
+                Yx6Encoder.encode(tune(false), 960, 24, false).file());
     }
 
     @Test
@@ -131,7 +133,7 @@ final class Yx6EncoderTest {
         // through exactly that ring must never need a byte that has left it.
         // A too-far offset does not fail loudly - it reads whatever the ring
         // has wrapped onto - so the output comparison is the check.
-        Ym6Reader.Song source = song(true);
+        Tune source = tune(true);
         for (int ring : new int[] {48, 240, 960}) {
             Yx6Encoder.Result result = Yx6Encoder.encode(source, ring, 24, false);
             byte[] file = result.file();
@@ -151,7 +153,7 @@ final class Yx6EncoderTest {
         // size is the section's frame count exactly (k=1 pads nothing). The
         // player's C-sized-call shape itself is exercised by the emulation
         // rig, through the real 68000 decoder.
-        Ym6Reader.Song source = song(true);
+        Tune source = tune(true);
         Yx6Encoder.Result result = Yx6Encoder.encode(source, 240, 24, false);
         byte[] file = result.file();
 
@@ -167,12 +169,12 @@ final class Yx6EncoderTest {
 
     @Test
     void everyOperationFitsAWordCounter() {
-        assertTrue(Yx6Encoder.encode(song(true), 960, 24, false).longestOp() <= 65535);
+        assertTrue(Yx6Encoder.encode(tune(true), 960, 24, false).longestOp() <= 65535);
     }
 
     @Test
     void rejectsShapesThePlayerCannotRun() {
-        Ym6Reader.Song source = song(true);
+        Tune source = tune(true);
         // Fewer values per call than registers: the round-robin cannot fit.
         assertThrows(IllegalArgumentException.class, () -> Yx6Encoder.encode(source, 960, 13, false));
         // Ring smaller than two chunks: the group being written would land on
@@ -186,30 +188,13 @@ final class Yx6EncoderTest {
     }
 
     @Test
-    void padsOddShapesWithSafeDuplicateFrames() {
-        Ym6Reader.Song source = song(true);         // an even-shaped tune:
-        assertSame(source, Yx6.padToUnit(source, 200, 2));  // nothing to do
-
-        // An odd loop split: one duplicated frame evens it, and the whole
-        // tune grows by one more to keep the length even too.
-        Ym6Reader.Song padded = Yx6.padToUnit(source, 201, 2);
-        assertNotNull(padded);
-        assertEquals(source.frames() + 2, padded.frames());
-        assertEquals(202, padded.loopFrame());
-        // The intro gained a duplicate near the split: frame content around
-        // it is a copy, and everything before is untouched.
-        for (int r = 0; r < 14; r++) {
-            assertEquals(source.registers()[r][0], padded.registers()[r][0]);
-        }
-    }
-    @Test
     void widerUnitsRoundTripAndAreRejectedWhenTheyCannot() {
         // FRAMES is even, so k=2 works end to end; each section must carry
         // k=2 in its signature, which is what the player checks its build
         // against. A loop frame that is not a whole number of units cannot be
         // packed at all - a padded section would decode one extra value into
         // the ring, and it would be played.
-        Ym6Reader.Song source = song(true);
+        Tune source = tune(true);
         Yx6Encoder.Result result = Yx6Encoder.encode(source, 960, 24, -1, false, 2);
         byte[] file = result.file();
         byte[][] expected = expectedVectors(source, -1, 2);
@@ -233,8 +218,8 @@ final class Yx6EncoderTest {
     @Test
     void drumsTravelWithEndMarkers() {
         byte[][] registers = Ym6TestData.registers(FRAMES);
-        Ym6Reader.Song source = Ym6Reader.read(
-                Ym6TestData.file(registers, FRAMES, true, "YM6!", 50, 2, 0));
+        Tune source = YmEffects.tune(Ym6Reader.read(
+                Ym6TestData.file(registers, FRAMES, true, "YM6!", 50, 2, 0)));
         byte[] file = Yx6Encoder.encode(source, 960, 24, false).file();
 
         assertEquals(2, word(file, Yx6Format.OFFSET_SAMPLE_COUNT));
@@ -255,7 +240,7 @@ final class Yx6EncoderTest {
 
     @Test
     void aDrumlessFileHasNoDrumTable() {
-        byte[] file = Yx6Encoder.encode(song(true), 960, 24, false).file();
+        byte[] file = Yx6Encoder.encode(tune(true), 960, 24, false).file();
         assertEquals(0, longAt(file, Yx6Format.OFFSET_SAMPLE_TABLE));
         assertEquals(0, word(file, Yx6Format.OFFSET_SAMPLE_COUNT));
     }

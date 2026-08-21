@@ -1565,9 +1565,9 @@ yx6_program:
 
 ; -----------------------------------------------------------------------------
 ; yx6_gates: apply an absolute burst-gate state. Bit v of d0 mutes voice v:
-; the volume write's destination displacement flips to 0, so it lands on
-; the select register, where the very next select overrides it - no branch
-; ever enters the burst. The script computed every edge at pack time.
+; the write is overwritten with two nops, so the byte never reaches the chip
+; and no branch ever enters the burst. Opening it again copies the movep
+; back from a template. The script computed every edge at pack time.
 ; in: d0 bits 2-0 = the state, voices A/B/C; clobbers d0-d2/a1.
 ; -----------------------------------------------------------------------------
 yx6_gates:

@@ -202,7 +202,11 @@ The packer picks k = 2 by itself, padding odd shapes with safe duplicate
 frames. Loop points restart a stream mid-refill. The canonical build is an
 SNDH v2.2 container - subtunes, tags and all - with the runnable .PRG a
 thin shell around the same bytes; a whole set of tunes packs with one
-configuration in one call.
+configuration in one call. A second front end packs RhYMe's own `.YMR`
+register dumps into that same file - the two formats are the same idea with
+different bookkeeping, down to PWM, Sample and RTE being the toggle, PCM and
+retrigger streams under other names - and `yx6/rhyme.sh` test drives one the
+way `play.sh` test drives a `.ym`.
 
 ```sh
 mvn -q compile exec:exec@yx6 -Dargs="-f song.ym song.yx6"
@@ -247,7 +251,11 @@ ST1 — the ZX1 decoders this grew from, and the jx1 packer — is in
 [odipar/ST1](https://github.com/odipar/ST1). ST4 forked from it at
 `odipar/ST1@132aef0`; the shared emulator harness and the MC68000 cycle
 knowledge in the rigs are carried copies of that repository's, which remains
-authoritative for ST1's own timing tables.
+authoritative for ST1's own timing tables. So is
+[`org.jx1.Decompressor`](src/main/java/org/jx1/README.md), the ZX1 decoder the
+`.ymr` front end reads RhYMe's streams with: somebody else's format is worth
+reading with the implementation that already exists rather than a second one
+written to match it.
 
 ## License and attribution
 

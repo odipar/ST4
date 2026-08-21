@@ -1,17 +1,31 @@
-package org.yx6;
+package org.ym6;
+
+import org.yx6.EffectScript;
+import org.yx6.Tune;
+import org.yx6.Yx6Format;
 
 /**
- * Extracts the YM special effects, normalizing every dialect and every
- * unplayable code away at pack time - the player never sees an effect it
- * cannot run.
+ * The YM front end's far side: a {@link Ym6Reader.Song} in, a {@link Tune}
+ * out, with every dialect and every unplayable code normalized away on the
+ * journey - the player never sees an effect it cannot run.
  *
- * <p>This is where the vocabulary changes. On the way in the names are the
- * YM format's, because the bytes are its: effect slots, codes, TP and TC.
- * On the way out they are the engine's, and what leaves here as a pair of
- * bytes per frame becomes a TIMER STREAM - a series of values written to one
- * register between frames, at a rate a timer sets. {@code doc/terminology.md}
- * holds the mapping and the model; a digidrum is a PCM stream there, a SID
- * voice a toggle stream, a sync-buzzer a retrigger stream.
+ * <p>This is where the vocabulary changes, and the change is the whole
+ * reason the class exists. On the way in the names are the YM format's,
+ * because the bytes are its: effect slots, codes, TP and TC. On the way out
+ * they are the engine's, and what leaves here as a pair of bytes per frame
+ * is a TIMER STREAM - a series of values written to one register between
+ * frames, at a rate a timer sets. {@code doc/terminology.md} holds the
+ * mapping and the model; a digidrum is a PCM stream there, a SID voice a
+ * toggle stream, a sync-buzzer a retrigger stream.
+ *
+ * <p>{@link Extraction} is this front end's own report and stays behind
+ * with it. Its four drop counters are counts of YM effects that a YM
+ * dialect had to have normalized away, which is a sentence only a YM reader
+ * can say and only a YM packer's report has any use for; the {@link Tune}
+ * that {@link #tune} builds carries none of it. {@code org.ymr} is the
+ * sibling that does the same job for a RhYMe dump, and reading the two side
+ * by side is the quickest way to see which decisions belong to a format and
+ * which belong to the engine.
  *
  * <p>A YM6 frame carries up to two effect slots, each three fields smeared
  * across spare register bits: a code nibble (type in bits 7-6, voice+1 in
@@ -50,34 +64,68 @@ package org.yx6;
  */
 public final class YmEffects {
 
-    /** The four effect types, as they sit in code bits 7-6. In the
-     *  engine's words: SID is a toggle stream, DRUM a PCM stream, BUZZER a
-     *  retrigger stream, SINUS a wave stream (no corpus tune uses it). */
-    public static final int KIND_TOGGLE = 0x00;
-    public static final int KIND_PCM = 0x40;
-    public static final int KIND_CURVE = 0x80;
-    public static final int KIND_RETRIGGER = 0xC0;
+    /** The four effect types under the engine's names, since the code byte
+     *  they go into is the engine's: SID is a {@link Tune#KIND_TOGGLE},
+     *  DRUM a {@link Tune#KIND_PCM}, BUZZER a {@link Tune#KIND_RETRIGGER},
+     *  SINUS a {@link Tune#KIND_CURVE} (no corpus tune uses it). */
+    private static final int KIND_TOGGLE = Tune.KIND_TOGGLE;
+    private static final int KIND_PCM = Tune.KIND_PCM;
+    private static final int KIND_CURVE = Tune.KIND_CURVE;
+    private static final int KIND_RETRIGGER = Tune.KIND_RETRIGGER;
 
     /** The fastest tick rate a real player programs: SIDs and buzzers
      * above it are dropped, samples resampled under it. The CLI's -drumhz
      * option moves the drum ceiling. */
     public static final int MAX_TIMER_HZ = 25600;
 
-    /** The MFP timer clock and its prescaler table; index 0 stops the timer. */
-    public static final int MFP_CLOCK = 2457600;
-    static final int[] PREDIV = {0, 4, 10, 16, 50, 64, 100, 200};
-
-    /** What the reader's frames become: two byte pairs per frame naming
-     *  the timer streams to run, the converted samples, what was dropped,
-     *  and one note per resampled sample. This is the handover
-     *  point - past here the vocabulary is the engine's. */
-    public record Extraction(byte[] e1, byte[] t1, byte[] e2, byte[] t2,
+    /** What the reader's frames become, and what this extraction has to say
+     *  about the file it read: a code byte and a count byte per timer channel
+     *  per frame naming the timer streams to run, the converted samples, what
+     *  was dropped, and one note per resampled sample.
+     *
+     *  <p>The streams are indexed {@code [channel][frame]} rather than named
+     *  after the two YM effect slots, because the slots are the YM format's
+     *  count and the channels are the engine's: the file carries
+     *  {@link Yx6Format#CHANNELS} of them and a source with more than two
+     *  simultaneous streams has somewhere to put them. A YM tune fills the
+     *  first two and leaves the rest idle. {@link #e1()} and its three
+     *  companions stay behind under the slot names, for the packer and the
+     *  reports that still think in them.
+     *
+     *  <p>The four drop counters never leave this package. They
+     *  count frames whose effect the reference player would not have started,
+     *  and each is named after the thing that was not started - a Sinus-SID,
+     *  a drum with no sample - so they mean nothing to an engine that has
+     *  never heard of either. A packer's report is where they belong, and a
+     *  front end for a format with no dialects to normalize simply has no
+     *  such report to make. */
+    public record Extraction(byte[][] codes, byte[][] counts,
                              byte[][] samples, int inert, int tooFast, int sinus,
                              int missingDrum, java.util.List<String> notes) {
 
-        /** All four streams, in file order E1, T1, E2, T2. */
+        /** Timer channel 0's codes: the YM format's first effect slot. */
+        public byte[] e1() {
+            return codes[0];
+        }
+
+        /** Timer channel 0's counts. */
+        public byte[] t1() {
+            return counts[0];
+        }
+
+        /** Timer channel 1's codes: the YM format's second effect slot. */
+        public byte[] e2() {
+            return codes[1];
+        }
+
+        /** Timer channel 1's counts. */
+        public byte[] t2() {
+            return counts[1];
+        }
+
+        /** The two YM slots' streams, in file order E1, T1, E2, T2. */
         public byte[][] streams() {
-            return new byte[][] {e1, t1, e2, t2};
+            return new byte[][] {e1(), t1(), e2(), t2()};
         }
 
         public int dropped() {
@@ -111,6 +159,33 @@ public final class YmEffects {
         }
     }
 
+    /** A dump as the engine has it, at the standard rate ceiling. */
+    public static Tune tune(Ym6Reader.Song song) {
+        return tune(song, extract(song));
+    }
+
+    /**
+     * A dump as the engine has it, over an extraction already made - which is
+     * how a caller that wants both keeps the one it can report on.
+     *
+     * <p>Only the fourteen sound registers cross: R14 and R15 are the chip's
+     * I/O ports, which this format borrowed as effect data and which the
+     * extraction above has already read everything it needs out of. Nothing
+     * downstream packs them, and carrying them would only invite something to
+     * treat them as chip state. What does cross is the rest of the frame
+     * UNMASKED, effect bits and all, because the script still reads a PCM
+     * stream's sample number and a toggle stream's volume out of a voice's
+     * volume register - see {@link EffectScript} - and the encoder masks the
+     * frame streams itself on the way into the file.
+     */
+    public static Tune tune(Ym6Reader.Song song, Extraction fx) {
+        return new Tune(song.frames(), song.playerHz(), song.masterClock(),
+                (int) Math.min(song.loopFrame(), Integer.MAX_VALUE),
+                java.util.Arrays.copyOf(song.registers(), Yx6Format.REGISTER_STREAMS),
+                fx.codes(), fx.counts(), fx.samples(), EffectScript.Semantics.YM,
+                song.name(), song.author(), song.comment(), fx.notes());
+    }
+
     public static Extraction extract(Ym6Reader.Song song) {
         return extract(song, MAX_TIMER_HZ);
     }
@@ -119,10 +194,11 @@ public final class YmEffects {
         var effects = new YmEffects(song, drumHz);
         effects.downsample();
         int frames = song.frames();
-        byte[] e1 = new byte[frames];
-        byte[] t1 = new byte[frames];
-        byte[] e2 = new byte[frames];
-        byte[] t2 = new byte[frames];
+        // A YM frame carries two effect slots and no more, so only the first
+        // two channels are ever written here; the rest stay the all-zero
+        // streams of an idle channel.
+        byte[][] codes = new byte[Yx6Format.CHANNELS][frames];
+        byte[][] counts = new byte[Yx6Format.CHANNELS][frames];
         boolean ym6 = song.format().startsWith("YM6");
         for (int frame = 0; frame < frames; frame++) {
             long slot1;
@@ -141,12 +217,12 @@ public final class YmEffects {
                 slot2 = effects.validate(KIND_PCM | ((effects.register(3, frame) & 0x30)),
                         effects.register(8, frame) >> 5, effects.register(15, frame), frame);
             }
-            e1[frame] = (byte) (slot1 >> 8);
-            t1[frame] = (byte) slot1;
-            e2[frame] = (byte) (slot2 >> 8);
-            t2[frame] = (byte) slot2;
+            codes[0][frame] = (byte) (slot1 >> 8);
+            counts[0][frame] = (byte) slot1;
+            codes[1][frame] = (byte) (slot2 >> 8);
+            counts[1][frame] = (byte) slot2;
         }
-        return new Extraction(e1, t1, e2, t2, effects.samples, effects.inert,
+        return new Extraction(codes, counts, effects.samples, effects.inert,
                 effects.tooFast, effects.sinus, effects.missingDrum,
                 java.util.List.copyOf(effects.notes));
     }
@@ -173,7 +249,7 @@ public final class YmEffects {
                 continue;
             }
             int fastest = divisors.get(i).first();
-            if ((long) drumHz * fastest >= MFP_CLOCK) {
+            if ((long) drumHz * fastest >= Tune.MFP_CLOCK) {
                 continue;               // the fastest trigger fits already
             }
             int target = ceilingDivisor();
@@ -191,7 +267,7 @@ public final class YmEffects {
             if (!exact) {               // the old rescue: a power of two
                 n = 1;
                 d = 1;
-                while ((long) drumHz * fastest * n < MFP_CLOCK && n < 64) {
+                while ((long) drumHz * fastest * n < Tune.MFP_CLOCK && n < 64) {
                     n *= 2;
                 }
             }
@@ -201,8 +277,8 @@ public final class YmEffects {
             int outLength = Math.max(1, (int) ((long) source.length * d / n));
             samples[i] = resample(source, outLength);
             notes.add("drum " + i + " resampled "
-                    + MFP_CLOCK / fastest + " -> "
-                    + (long) MFP_CLOCK * d / ((long) fastest * n)
+                    + Tune.MFP_CLOCK / fastest + " -> "
+                    + (long) Tune.MFP_CLOCK * d / ((long) fastest * n)
                     + " Hz to fit " + drumHz + " Hz (-drumhz to change)");
         }
     }
@@ -213,34 +289,34 @@ public final class YmEffects {
         }
         prescaler &= 7;
         count &= 0xFF;
-        if (PREDIV[prescaler] == 0 || count == 0) {
+        if (Tune.prescaler(prescaler) == 0 || count == 0) {
             return;
         }
         int number = register(8 + ((code & 0x30) >> 4) - 1, frame) & 31;
         if (number >= samples.length) {
             return;
         }
-        divisors.get(number).add(PREDIV[prescaler] * count);
+        divisors.get(number).add(Tune.prescaler(prescaler) * count);
     }
 
     /** The smallest MFP-representable divisor whose rate is at or under
      *  the ceiling - the fastest way to play a rescued drum. */
     private int ceilingDivisor() {
-        int needed = (MFP_CLOCK + drumHz - 1) / drumHz;
+        int needed = (Tune.MFP_CLOCK + drumHz - 1) / drumHz;
         int best = Integer.MAX_VALUE;
-        for (int p = 1; p < PREDIV.length; p++) {
-            int count = (needed + PREDIV[p] - 1) / PREDIV[p];
-            if (count <= 255 && PREDIV[p] * count < best) {
-                best = PREDIV[p] * count;
+        for (int p = 1; p < Tune.PRESCALERS; p++) {
+            int count = (needed + Tune.prescaler(p) - 1) / Tune.prescaler(p);
+            if (count <= 255 && Tune.prescaler(p) * count < best) {
+                best = Tune.prescaler(p) * count;
             }
         }
         return best;
     }
 
     private static boolean representable(int divisor) {
-        for (int p = 1; p < PREDIV.length; p++) {
-            if (divisor % PREDIV[p] == 0) {
-                int count = divisor / PREDIV[p];
+        for (int p = 1; p < Tune.PRESCALERS; p++) {
+            if (divisor % Tune.prescaler(p) == 0) {
+                int count = divisor / Tune.prescaler(p);
                 if (count >= 1 && count <= 255) {
                     return true;
                 }
@@ -308,9 +384,9 @@ public final class YmEffects {
      * does.
      */
     private static long fit(int code, int divisor) {
-        for (int p = 1; p < PREDIV.length; p++) {
-            if (divisor % PREDIV[p] == 0) {
-                int count = divisor / PREDIV[p];
+        for (int p = 1; p < Tune.PRESCALERS; p++) {
+            if (divisor % Tune.prescaler(p) == 0) {
+                int count = divisor / Tune.prescaler(p);
                 if (count >= 1 && count <= 255) {
                     return ((long) ((code & 0xF0) | p) << 8) | count;
                 }
@@ -339,7 +415,7 @@ public final class YmEffects {
         }
         prescaler &= 7;
         count &= 0xFF;
-        if (PREDIV[prescaler] == 0 || count == 0) {
+        if (Tune.prescaler(prescaler) == 0 || count == 0) {
             inert++;                            // the reference player's no-op
             return 0;
         }
@@ -357,7 +433,7 @@ public final class YmEffects {
             // ratio path, but the power-of-two fallback keeps the branch
             // honest.
             if (num[number] > den[number]) {
-                long scaled = (long) PREDIV[prescaler] * count * num[number]
+                long scaled = (long) Tune.prescaler(prescaler) * count * num[number]
                         / den[number];
                 long fitted = fit(code, (int) scaled);
                 if (fitted == 0) {
@@ -366,7 +442,7 @@ public final class YmEffects {
                 return fitted;
             }
         }
-        int hz = MFP_CLOCK / (PREDIV[prescaler] * count);
+        int hz = Tune.MFP_CLOCK / (Tune.prescaler(prescaler) * count);
         if (hz > (type == KIND_PCM ? drumHz : MAX_TIMER_HZ)) {
             tooFast++;                  // samples use their own ceiling, so
             return 0;                   // -drumhz above 25600 works too

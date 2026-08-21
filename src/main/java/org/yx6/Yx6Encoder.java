@@ -10,10 +10,15 @@ import org.st4.St4Format;
 import org.st4.Units;
 
 /**
- * Turns a parsed YM tune into a {@code .yx6} file: fourteen register vectors,
- * masked down to what a plain YM2149 sees, plus the five compiled effect
- * script streams and the sample table, each vector packed as its own embedded
+ * Turns a {@link Tune} into a {@code .yx6} file: fourteen register vectors,
+ * masked down to what a plain YM2149 sees, plus the compiled effect script
+ * streams and the sample table, each vector packed as its own embedded
  * ST4 container.
+ *
+ * <p>Nothing here knows what file the tune was read out of, and nothing here
+ * can find out: a front end has already turned its own format into the
+ * engine's model and stopped. That is what lets a second front end be a peer
+ * of the first rather than a client of it.
  *
  * <p>Packing the registers separately is the whole point. A register's value
  * usually repeats from frame to frame, and a vector holds one register's values
@@ -42,9 +47,11 @@ public final class Yx6Encoder {
      * indices are registers, then M, A1, P1, A2, P2. */
     public record Stream(int register, boolean loop, int frames, int packedSize, int longestOp) {}
 
-    /** The finished file plus the per-stream numbers the CLI reports. */
+    /** The finished file plus the per-stream numbers the CLI reports; the
+     * tune is the one that was actually packed, which is the padded one
+     * where the shape needed padding. */
     public record Result(byte[] file, List<Stream> streams, int ringSize, int chunk,
-                         int loopFrame, boolean loops, int unit, YmEffects.Extraction effects,
+                         int loopFrame, boolean loops, int unit, Tune tune,
                          EffectScript.Result script) {
 
         public int packedSize() {
@@ -60,8 +67,8 @@ public final class Yx6Encoder {
     private Yx6Encoder() {}
 
     /** Packs a tune that plays once and stops. */
-    public static Result encode(Ym6Reader.Song song, int ringSize, int chunk) {
-        return encode(song, ringSize, chunk, -1, true);
+    public static Result encode(Tune tune, int ringSize, int chunk) {
+        return encode(tune, ringSize, chunk, -1, true);
     }
 
     /**
@@ -69,15 +76,15 @@ public final class Yx6Encoder {
      * when {@code loopFrame} is negative. A loop frame of 0 means the whole
      * tune is the loop.
      */
-    public static Result encode(Ym6Reader.Song song, int ringSize, int chunk,
+    public static Result encode(Tune tune, int ringSize, int chunk,
                                 int loopFrame) {
-        return encode(song, ringSize, chunk, loopFrame, true);
+        return encode(tune, ringSize, chunk, loopFrame, true);
     }
 
     /** A tune that plays once and stops, with the progress report turned off. */
-    public static Result encode(Ym6Reader.Song song, int ringSize, int chunk,
+    public static Result encode(Tune tune, int ringSize, int chunk,
                                 boolean progress) {
-        return encode(song, ringSize, chunk, -1, progress);
+        return encode(tune, ringSize, chunk, -1, progress);
     }
 
     /**
@@ -86,9 +93,9 @@ public final class Yx6Encoder {
      * progress through a stream rather than through the tune - worth watching
      * at a terminal, noise anywhere else.
      */
-    public static Result encode(Ym6Reader.Song song, int ringSize, int chunk,
+    public static Result encode(Tune tune, int ringSize, int chunk,
                                 int loopFrame, boolean progress) {
-        return encode(song, ringSize, chunk, loopFrame, progress, 1);
+        return encode(tune, ringSize, chunk, loopFrame, progress, 1);
     }
 
     /**
@@ -99,23 +106,9 @@ public final class Yx6Encoder {
      * {@code unit}: a padded section would decode one extra value into the
      * ring, and it would be played.
      */
-    public static Result encode(Ym6Reader.Song song, int ringSize, int chunk,
+    public static Result encode(Tune tune, int ringSize, int chunk,
                                 int loopFrame, boolean progress, int unit) {
-        return encode(song, ringSize, chunk, loopFrame, progress, unit,
-                YmEffects.MAX_TIMER_HZ);
-    }
-
-    /**
-     * As above, with the drum rate ceiling (the -drumhz flag): a sample whose
-     * triggers ask for a
-     * faster timer is downsampled to fit under it - see
-     * {@link YmEffects#extract(Ym6Reader.Song, int)}.
-     */
-    public static Result encode(Ym6Reader.Song song, int ringSize, int chunk,
-                                int loopFrame, boolean progress, int unit,
-                                int drumHz) {
-        return encode(song, ringSize, chunk, loopFrame, progress, unit, drumHz,
-                false);
+        return encode(tune, ringSize, chunk, loopFrame, progress, unit, false);
     }
 
     /**
@@ -124,17 +117,24 @@ public final class Yx6Encoder {
      * maxYMiser mask-and-resume semantics instead of the default ym2149-rs
      * phase-zero restarts - see {@link EffectScript#compile}.
      */
-    public static Result encode(Ym6Reader.Song song, int ringSize, int chunk,
+    public static Result encode(Tune tune, int ringSize, int chunk,
                                 int loopFrame, boolean progress, int unit,
-                                int drumHz, boolean sidResume) {
-        return encode(song, ringSize, chunk, loopFrame, progress, unit, drumHz,
+                                boolean sidResume) {
+        return encode(tune, ringSize, chunk, loopFrame, progress, unit,
                 sidResume, Yx6Format.DEFAULT_TIMERS);
     }
 
-    /** As above, with the channel-to-timer map the T stream carries. */
-    public static Result encode(Ym6Reader.Song song, int ringSize, int chunk,
-                                int loopFrame, boolean progress, int unit,
-                                int drumHz, boolean sidResume, int timerMap) {
+    /**
+     * The whole encoder, with the channel-to-timer map the T stream carries.
+     *
+     * <p>From this line down nothing knows which format the tune was read out
+     * of. The frame streams are the chip state whatever wrote it, the timer
+     * streams are already normalized, and how the source triggers and stops
+     * arrives with the tune as its {@link EffectScript.Semantics}.
+     */
+    public static Result encode(Tune tune, int ringSize, int chunk, int loopFrame,
+                                boolean progress, int unit, boolean sidResume,
+                                int timerMap) {
         // The floor first, on what every tune decodes; the exact check waits
         // for the script, since a tune that leaves channels idle decodes
         // fewer streams and may use a smaller chunk.
@@ -144,15 +144,15 @@ public final class Yx6Encoder {
             throw new IllegalArgumentException(problem);
         }
         boolean loops = loopFrame >= 0;
-        if (loops && loopFrame >= song.frames()) {
+        if (loops && loopFrame >= tune.frames()) {
             throw new IllegalArgumentException("loop frame " + loopFrame
-                    + " is not inside a tune of " + song.frames() + " frames");
+                    + " is not inside a tune of " + tune.frames() + " frames");
         }
         // Without a loop the intro covers everything, which is the same thing
         // as looping at the end - so the player needs only one rule.
-        if (song.frames() % unit != 0 || (loops ? loopFrame : 0) % unit != 0) {
-            throw new IllegalArgumentException("a tune of " + song.frames()
-                    + " frames splitting at " + (loops ? loopFrame : song.frames())
+        if (tune.frames() % unit != 0 || (loops ? loopFrame : 0) % unit != 0) {
+            throw new IllegalArgumentException("a tune of " + tune.frames()
+                    + " frames splitting at " + (loops ? loopFrame : tune.frames())
                     + " cannot be packed in " + unit + "-byte units: both must be"
                     + " multiples of " + unit);
         }
@@ -168,8 +168,7 @@ public final class Yx6Encoder {
         // stream does not consume repeat their predecessor - the event
         // optimizer packs a repeat to nothing, and the player never reads
         // them.
-        YmEffects.Extraction effects = YmEffects.extract(song, drumHz);
-        EffectScript.Result script = EffectScript.compile(song, effects,
+        EffectScript.Result script = EffectScript.compile(tune,
                 loops ? loopFrame : -1, unit, sidResume, timerMap);
         int channels = channelsUsed(script);
         problem = Yx6Format.checkShape(ringSize, chunk, unit,
@@ -181,7 +180,7 @@ public final class Yx6Encoder {
         int split = script.split();
         byte[][] vectors = new byte[Yx6Format.STREAMS][];
         for (int register = 0; register < Yx6Format.REGISTER_STREAMS; register++) {
-            byte[] source = Ym2149.mask(register, song.registers()[register]);
+            byte[] source = Ym2149.mask(register, tune.registers()[register]);
             byte[] played = new byte[frames];
             for (int p = 0; p < frames; p++) {
                 played[p] = source[script.source()[p]];
@@ -217,10 +216,10 @@ public final class Yx6Encoder {
                     offsetLimit, unit);
         }
 
-        byte[] file = build(song, ringSize, chunk, frames, split, loops, intro,
-                loop, effects.samples(), channels);
+        byte[] file = build(tune, ringSize, chunk, frames, split, loops, intro,
+                loop, tune.samples(), channels);
         return new Result(file, List.copyOf(streams), ringSize, chunk, split, loops, unit,
-                effects, script);
+                tune, script);
     }
 
     /**
@@ -272,7 +271,7 @@ public final class Yx6Encoder {
         return container;
     }
 
-    private static byte[] build(Ym6Reader.Song song, int ringSize, int chunk, int frames,
+    private static byte[] build(Tune tune, int ringSize, int chunk, int frames,
                                 int split, boolean loops, byte[][] intro, byte[][] loop,
                                 byte[][] samples, int channels) {
         // Containers carry alignment promises of their own - stream A and D
@@ -301,12 +300,12 @@ public final class Yx6Encoder {
         putWord(file, Yx6Format.OFFSET_FLAGS,
                 (loops ? Yx6Format.FLAG_LOOPS : 0) | channels);
         putLong(file, Yx6Format.OFFSET_FRAMES, frames);
-        putWord(file, Yx6Format.OFFSET_PLAYER_HZ, song.playerHz());
+        putWord(file, Yx6Format.OFFSET_PLAYER_HZ, tune.frameRate());
         putWord(file, Yx6Format.OFFSET_STREAM_COUNT, Yx6Format.STREAMS);
         putWord(file, Yx6Format.OFFSET_RING_SIZE, ringSize);
         putWord(file, Yx6Format.OFFSET_CHUNK, chunk);
         putLong(file, Yx6Format.OFFSET_LOOP_FRAME, split);
-        putLong(file, Yx6Format.OFFSET_MASTER_CLOCK, song.masterClock());
+        putLong(file, Yx6Format.OFFSET_MASTER_CLOCK, tune.masterClock());
         putLong(file, Yx6Format.OFFSET_SAMPLE_TABLE, sampleTable);
         putWord(file, Yx6Format.OFFSET_SAMPLE_COUNT, samples.length);
 

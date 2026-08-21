@@ -16,15 +16,15 @@ import java.util.List;
  * emits eight streams of prepared actions the player executes without
  * comparing anything against remembered state.
  *
- * <p>Names here are the YM format's, because the codes being compiled are:
- * a SID voice, a digidrum, a sync-buzzer, two effect channels. In the model
- * {@code doc/terminology.md} describes, all of these are TIMER STREAMS -
- * values written to one register between frames, at a rate a timer sets -
- * and what this class decides for each is exactly a stream's lifecycle:
- * start, hold, retune (a new rate, the same place in the cycle), release,
- * resume, and which stream preempts which when two want one register. The
- * streams it emits are script data, not register streams: their bytes
- * never reach the chip.
+ * <p>What it compiles is a {@link Tune} - the engine's own model, which a
+ * front end has already put its format's bytes into - so the names here are
+ * the engine's throughout. Every code on a timer channel is a TIMER STREAM,
+ * values written to one register between frames at a rate a timer sets, and
+ * what this class decides for each is exactly a stream's lifecycle: start,
+ * hold, retune (a new rate, the same place in the cycle), release, resume,
+ * and which stream preempts which when two want one register.
+ * {@code doc/terminology.md} is the dictionary. The streams it emits are
+ * script data, not frame streams: their bytes never reach the chip.
 
  * <p>The format carries four timer channels. A YM frame starts at most two
  * effects, so a YM tune uses two and the others' streams pack to nothing;
@@ -92,8 +92,8 @@ import java.util.List;
  * the player from the voice's own register ring (v1's mechanism), so none
  * of them needs a stream; the packer merely marks the frames. The ring
  * byte of a voice playing a sample is NOT sanitized: its frame write is
- * gated (it lands on the PSG
- * select register and the next select overrides it), so nothing edits the
+ * gated (yx6_gates has overwritten the write with two nops, so the byte
+ * never reaches the chip), so nothing edits the
  * ring at runtime and v1's whole borrow/patch/restore machinery has no v2
  * counterpart. R7 arrives with the disconnection of sample-playing voices
  * baked in ({@link Result#r7force}), which disconnects the voice.
@@ -111,6 +111,11 @@ import java.util.List;
  * frame of grace on top of that parks the voice at the sample's tail
  * volume, disconnected, 20ms longer than v1 - an audible click after
  * every sample.
+ *
+ * <p>A source that can end a sample itself ({@link Semantics#channelEndsPcm})
+ * has no such event to wait for: the end is a frame's own command, so the
+ * gate reopens on that frame and the voice's volume comes back out of that
+ * frame's register burst.
  *
  * <h2>The split rotation</h2>
  *
@@ -165,6 +170,49 @@ public final class EffectScript {
     }
 
     /**
+     * The three decisions the codes cannot make for themselves, because they
+     * follow from how the source format triggers, mixes and stops rather than
+     * from anything in the bytes.
+     *
+     * <p>YM is the reason all three exist. A YM frame carries no trigger: a
+     * digidrum is a code sitting in R1 or R3, repeated for as long as the
+     * dump wants it, so the reference player re-fires the sample on every
+     * one of those frames and the script has to compile the same stutter to
+     * sound the same. A format whose trigger is an explicit pop from a
+     * stream says start once and means it, and re-firing would chop its
+     * sample into frame-long pieces. Likewise a YM voice playing a sample is
+     * disconnected from the mixer for as long as it plays, because the
+     * PSG volume register IS the sample's output; a source that plays its
+     * samples through something else wants R7 left alone.
+     *
+     * <p>{@code channelEndsPcm} is the same asymmetry at the other end. A YM
+     * dump has no way to say STOP: the code simply stops being repeated, the
+     * sample runs to its marker, and until it does, a code arriving for the
+     * same voice waits its turn. A format whose commands are events can end a
+     * sample where it likes - and every one of those commands programs the one
+     * timer the sample is ticking on, so a stop, and equally a different
+     * effect configured on that channel, ends the sample on that frame rather
+     * than at the marker it will now never reach. Under this flag the script
+     * gives the voice up there: a release hard-stops the timer and hands the
+     * volume register back to the frame write, and an arriving toggle or
+     * retrigger stream simply takes the voice instead of retrying for the rest
+     * of the sample's computed length.
+     *
+     * <p>{@link #YM} is the trio a YM tune is packed with. A tune carries the
+     * set its own source implies, because the answer is a property of the
+     * format the codes were read out of and nothing later in the pipeline can
+     * work it out again.
+     */
+    public record Semantics(boolean pcmHoldRetriggers, boolean forceMixerOnPcm,
+                            boolean channelEndsPcm) {
+
+        /** The YM dialect: a held PCM code retriggers its sample every
+         * frame, a voice a sample owns is forced off the mixer, and nothing
+         * ends a sample but its own marker tick. */
+        public static final Semantics YM = new Semantics(true, true, false);
+    }
+
+    /**
      * The compiled script: {@code frames} played frames splitting at
      * {@code split}, {@code source[p]} naming the dump frame each played
      * frame shows, the script streams - M plus an action and a count byte
@@ -196,9 +244,9 @@ public final class EffectScript {
      * replicated for differential exactness). */
     private static final int STUCK = Integer.MAX_VALUE;
 
-    private static final int KIND_TOGGLE = YmEffects.KIND_TOGGLE;
-    private static final int KIND_PCM = YmEffects.KIND_PCM;
-    private static final int KIND_RETRIGGER = YmEffects.KIND_RETRIGGER;
+    private static final int KIND_TOGGLE = Tune.KIND_TOGGLE;
+    private static final int KIND_PCM = Tune.KIND_PCM;
+    private static final int KIND_RETRIGGER = Tune.KIND_RETRIGGER;
 
     /** One channel's remembered state - the v1 descriptor, field for field,
      * minus the machine addresses. */
@@ -220,12 +268,12 @@ public final class EffectScript {
         }
     }
 
-    private final Ym6Reader.Song song;
-    private final YmEffects.Extraction fx;
+    private final Tune tune;
     private final int loopFrame;
-    // Three channels exist in the format. A YM frame can only start two
-    // effects, so the third stays idle for every YM source and its two
-    // streams pack to nothing; it is here for sources that need it.
+    // One descriptor per timer channel the format carries. A YM frame can
+    // only start two effects, so the last two stay idle for every YM source
+    // and their streams pack to nothing; they are here for sources that
+    // need them, and the compiler walks all of them regardless.
     private final Channel[] channels = new Channel[Yx6Format.CHANNELS];
     private final int[] drumEnd = {-1, -1, -1};   // played frame the voice's
     private final int[] drumOwner = {-1, -1, -1}; // gate reopens; -1 = free
@@ -233,6 +281,7 @@ public final class EffectScript {
     private final List<int[]> reopens = new ArrayList<>();
     private final List<String> notes = new ArrayList<>();
     private boolean sidResume;          // the maxYMiser gap model
+    private final Semantics semantics;  // what the source format decides
 
     // The emission arrays, over the full simulated horizon; cut at the end.
     private final byte[] m;
@@ -244,11 +293,11 @@ public final class EffectScript {
     private final int horizon;
     private boolean stuckNoted;
 
-    private EffectScript(Ym6Reader.Song song, YmEffects.Extraction fx, int loopFrame) {
-        this.song = song;
-        this.fx = fx;
+    private EffectScript(Tune tune, int loopFrame) {
+        this.tune = tune;
         this.loopFrame = loopFrame;
-        int total = song.frames();
+        this.semantics = tune.semantics();
+        int total = tune.frames();
         boolean loops = loopFrame >= 0 && loopFrame < total;
         // Simulate far enough to compare three loop passes.
         horizon = loops ? total + 3 * (total - loopFrame) : total;
@@ -271,9 +320,8 @@ public final class EffectScript {
      * (after any CLI override), or negative for a play-once tune;
      * {@code unit} aligns the rotated split the way the encoder needs.
      */
-    public static Result compile(Ym6Reader.Song song, YmEffects.Extraction fx,
-                                 int loopFrame, int unit) {
-        return compile(song, fx, loopFrame, unit, false);
+    public static Result compile(Tune tune, int loopFrame, int unit) {
+        return compile(tune, loopFrame, unit, false);
     }
 
     /**
@@ -285,10 +333,9 @@ public final class EffectScript {
      * the model is purely which bytes this simulator emits, so it could
      * even change mid-song if anything ever knew where to switch.
      */
-    public static Result compile(Ym6Reader.Song song, YmEffects.Extraction fx,
-                                 int loopFrame, int unit, boolean sidResume) {
-        return compile(song, fx, loopFrame, unit, sidResume,
-                Yx6Format.DEFAULT_TIMERS);
+    public static Result compile(Tune tune, int loopFrame, int unit,
+                                 boolean sidResume) {
+        return compile(tune, loopFrame, unit, sidResume, Yx6Format.DEFAULT_TIMERS);
     }
 
     /**
@@ -297,18 +344,23 @@ public final class EffectScript {
      * tune is packed with. Naming a different timer changes nothing the
      * script decides - the channels are the same, and only which hardware
      * ticks them moves.
+     *
+     * <p>What the source format decides is not a parameter here at all: the
+     * tune carries its own {@link Semantics}, because the answer follows from
+     * the format the codes were read out of and travels with them. The codes
+     * arrive already normalized, and the semantics say only what the codes
+     * leave open.
      */
-    public static Result compile(Ym6Reader.Song song, YmEffects.Extraction fx,
-                                 int loopFrame, int unit, boolean sidResume,
-                                 int timerMap) {
-        EffectScript script = new EffectScript(song, fx, loopFrame);
+    public static Result compile(Tune tune, int loopFrame, int unit,
+                                 boolean sidResume, int timerMap) {
+        EffectScript script = new EffectScript(tune, loopFrame);
         script.sidResume = sidResume;
         java.util.Arrays.fill(script.timers, (byte) timerMap);
         return script.run(unit);
     }
 
     private Result run(int unit) {
-        int total = song.frames();
+        int total = tune.frames();
         boolean loops = loopFrame >= 0 && loopFrame < total;
         int cycle = loops ? total - loopFrame : 0;
 
@@ -385,14 +437,17 @@ public final class EffectScript {
 
     /** Everything two arrivals must agree on before sharing loop sections.
      * Sample ends compare as frames-remaining; the toggle's half is
-     * deliberately absent - phase free-runs in v1 too. */
+     * deliberately absent - phase free-runs in v1 too. Every channel is in
+     * here, in channel order: one a source never uses simply contributes its
+     * untouched initial state to both sides of every comparison. */
     private int[] snapshot(int frame) {
-        int[] s1 = channels[0].snapshot();
-        int[] s2 = channels[1].snapshot();
-        int[] out = new int[s1.length + s2.length + 7];
-        System.arraycopy(s1, 0, out, 0, s1.length);
-        System.arraycopy(s2, 0, out, s1.length, s2.length);
-        int at = s1.length + s2.length;
+        int width = channels[0].snapshot().length;
+        int[] out = new int[channels.length * width + 7];
+        int at = 0;
+        for (Channel channel : channels) {
+            System.arraycopy(channel.snapshot(), 0, out, at, width);
+            at += width;
+        }
         for (int v = 0; v < 3; v++) {
             out[at++] = drumOwner[v];
             out[at++] = drumEnd[v] < 0 ? -1
@@ -403,8 +458,10 @@ public final class EffectScript {
     }
 
     // -------------------------------------------------------------------------
-    // One played frame: expire sample windows, then channel A, then B -
-    // exactly the order the v1 player discovers the same events in.
+    // One played frame: expire sample windows, then every timer channel in
+    // turn, lowest first - exactly the order the v1 player discovers the same
+    // events in, and the order arbitration between two channels wanting one
+    // voice is decided by.
     // -------------------------------------------------------------------------
 
     private int gatesBefore;
@@ -421,12 +478,15 @@ public final class EffectScript {
             }
         }
 
-        channel(p, f, 0);
-        channel(p, f, 1);
+        for (int c = 0; c < channels.length; c++) {
+            channel(p, f, c);
+        }
 
-        for (int v = 0; v < 3; v++) {
-            if (drumOwner[v] >= 0) {    // the forced mixer, baked into R7
-                r7[p] |= (byte) (0x09 << v);
+        if (semantics.forceMixerOnPcm()) {
+            for (int v = 0; v < 3; v++) {
+                if (drumOwner[v] >= 0) {    // the forced mixer, baked into R7
+                    r7[p] |= (byte) (0x09 << v);
+                }
             }
         }
         if (gates != gatesBefore) {
@@ -437,8 +497,8 @@ public final class EffectScript {
     /** yx6_slot, transcribed: the labels in the comments are v1's. */
     private void channel(int p, int f, int index) {
         Channel channel = channels[index];
-        int code = (index == 0 ? fx.e1() : fx.e2())[f] & 0xFF;
-        int count = (index == 0 ? fx.t1() : fx.t2())[f] & 0xFF;
+        int code = tune.codes()[index][f] & 0xFF;
+        int count = tune.counts()[index][f] & 0xFF;
 
         if (code == channel.elast) {
             if (code == 0) {
@@ -469,24 +529,33 @@ public final class EffectScript {
     private void hold(int p, int f, int index, Channel channel, int code, int count) {
         int type = code & 0xC0;
         int voice = ((code >> 4) & 3) - 1;
-        if (type == KIND_PCM) {        // a held drum code retriggers every
+        // A source with no trigger but the code itself fires the sample again
+        // on every frame that repeats the code, with THAT frame's number; one
+        // whose trigger is an explicit pop said start once, and means it.
+        if (type == KIND_PCM && semantics.pcmHoldRetriggers()) {
             pcm(p, f, index, channel, code, count, voice, code);
-            return;                     // frame, with THAT frame's number
+            return;
         }
         int flags = 0;
         if (count != channel.tlast) {      // cmp.b CH_TLAST(a5),d1
             channel.tlast = count;
             flags |= HOLD_RELOAD;
         }
-        int value = parameter(f, voice);
-        if (type == KIND_TOGGLE) {         // .track: v1 repatched blindly
-            if (value != channel.vol) {
-                channel.vol = value;
-                flags |= HOLD_VOLUME;
+        // A PCM stream tracks no register - what it plays comes out of the
+        // sample, not off the chip - so a held one carries the reload and
+        // nothing else. Only a source that leaves samples playing gets here
+        // with one at all.
+        if (type != KIND_PCM) {
+            int value = parameter(f, voice);
+            if (type == KIND_TOGGLE) {         // .track: v1 repatched blindly
+                if (value != channel.vol) {
+                    channel.vol = value;
+                    flags |= HOLD_VOLUME;
+                }
+            } else if (value != channel.shape) {
+                channel.shape = value;
+                flags |= HOLD_SHAPE;
             }
-        } else if (value != channel.shape) {
-            channel.shape = value;
-            flags |= HOLD_SHAPE;
         }
         if (flags != 0) {
             emit(p, index, action(VERB_HOLD, voice, flags), count);
@@ -498,12 +567,32 @@ public final class EffectScript {
      * timer too, so the next arrival restarts at phase zero; the resume
      * model (maxYMiser) only masks the interrupt - the counter keeps
      * counting, the square's half stays frozen, and {@code masked} routes
-     * the next arrival through RESUME. A PCM stream finishes itself. */
+     * the next arrival through RESUME. A PCM stream finishes itself, unless
+     * the source can say stop. */
     private void released(int p, int index, Channel channel, int old) {
         int type = old & 0xC0;
         if (type == KIND_PCM) {
-            return;                     // timer left running: the marker ends it
-        }
+            if (!semantics.channelEndsPcm()) {
+                return;                 // timer left running: the marker ends it
+            }
+            // A source that says stop is obeyed on the frame it says it, and
+            // the whole cut lands there: RELEASE with bit 0 clear stops the
+            // timer outright (yx6_release), the voice stops being a sample's
+            // and its gate opens again. The player applies the frame's gate
+            // state BEFORE the register burst and the script's actions after
+            // it, so the frame write this reopens is THIS frame's - the
+            // voice's own volume is back on the chip in the same 20 ms the
+            // source asked for it, with no skew to correct for. What the
+            // burst cannot cover is the sliver between it and the release: a
+            // tick landing there writes one more sample byte over the volume
+            // just written, and it stands until the next frame. That is a
+            // fraction of a frame at a level the sample itself named, against
+            // a whole frame of a sample that should not be playing at all.
+            if (endOwnPcm(p, index, -1)) {
+                emit(p, index, action(VERB_RELEASE, 0, 0), 0);
+            }
+            return;                     // nothing left to stop: the code let go
+        }                               // on the frame the marker ended it
         cut(p, index, -1);
         if (type == KIND_TOGGLE) {
             openOld(old);               // bsr yx6_burst_open_old
@@ -518,6 +607,16 @@ public final class EffectScript {
 
     private void toggle(int p, int f, int index, Channel channel, int code, int count,
                      int voice, int old) {
+        // A sample this same channel is playing is not a rival for the voice:
+        // one timer runs both, so arming the square necessarily ends the
+        // sample, and there is nothing to wait for. Retrying instead would
+        // wait out the sample's whole computed length - the arbitration below
+        // is for a sample another channel owns, which is the only case a YM
+        // dump can produce. The voice's gate is left shut, because the square
+        // wants it shut too, and no reopen edge is recorded.
+        if (semantics.channelEndsPcm()) {
+            endOwnPcm(p, index, voice);
+        }
         if (drumOwner[voice] >= 0) {    // a PCM stream owns the volume register:
             channel.elast = 0;             // clr.b (a5) - retry next frame
             openOld(old);
@@ -613,6 +712,12 @@ public final class EffectScript {
 
     private void retrigger(int p, int f, int index, Channel channel, int code, int count,
                       int voice) {
+        // The same takeover the toggle arm does, with the opposite gate: a
+        // retrigger stream writes R13 and never a volume register, so the
+        // voice a sample was holding goes straight back to the frame write.
+        if (semantics.channelEndsPcm()) {
+            endOwnPcm(p, index, -1);
+        }
         cut(p, index, -1);
         channel.tlast = count;
         channel.masked = false;
@@ -652,9 +757,61 @@ public final class EffectScript {
         }
     }
 
-    /** The voice's parameter register byte, as the player reads it. */
+    /**
+     * The samples this channel still owns, ended here because the channel was
+     * told to do something else - the {@link Semantics#channelEndsPcm} rule.
+     * A channel has one timer, the sample was ticking on it, and whatever the
+     * source just asked for is about to program it: the marker tick that would
+     * have ended the sample can no longer run, so the end is now.
+     *
+     * <p>{@code taken} names the voice the arriving stream keeps for itself,
+     * or -1 when none does - the shape {@link #cut} uses for the same reason.
+     * Every other voice gets its burst gate back on this frame and an entry in
+     * {@code reopens}, because its volume register is the frame write's again;
+     * a voice a toggle stream is taking wants the gate shut, so its gate and
+     * its edge are that stream's to set, two lines further on.
+     *
+     * <p>Returns whether anything was actually taken away, which is how a
+     * release tells an early stop from a sample that had already finished: at
+     * the computed end the window has expired earlier in this same frame, the
+     * marker tick stopped the timer itself, and a RELEASE there would be a
+     * stream byte spent stopping a stopped timer.
+     */
+    private boolean endOwnPcm(int p, int index, int taken) {
+        boolean ended = false;
+        for (int v = 0; v < 3; v++) {
+            if (drumOwner[v] != index) {
+                continue;
+            }
+            drumOwner[v] = -1;
+            drumEnd[v] = -1;
+            ended = true;
+            if (v != taken) {
+                gates &= ~(1 << v);
+                reopens.add(new int[] {p, v});
+            }
+        }
+        return ended;
+    }
+
+    /**
+     * The voice's parameter register byte, as the player reads it.
+     *
+     * <p>R8 plus the voice is the voice's VOLUME register, and a toggle
+     * stream's set level, a retrigger stream's shape and a PCM stream's
+     * sample number are none of them a volume. They are there because that is
+     * YM6's filing convention - the format spends the spare bits of a
+     * register the effect is about to take over anyway - and they stay there
+     * because the player reads them from exactly this byte at run time, out
+     * of the register ring it is already holding, which is what saves the
+     * file a stream per parameter. So the byte has to carry the value
+     * whatever wrote it: a front end for a format that files its parameters
+     * somewhere else has to put them here, and {@code org.ymr} does.
+     * Changing where the shape comes from is a format revision, not a
+     * refactor.
+     */
     private int parameter(int f, int voice) {
-        return song.registers()[8 + voice][f] & 15;
+        return tune.registers()[8 + voice][f] & 15;
     }
 
     /**
@@ -666,12 +823,12 @@ public final class EffectScript {
      * held every voice muted 20ms past its drum: the click v1 never had.
      */
     private int duration(int f, int code, int count, int voice) {
-        int number = song.registers()[8 + voice][f] & 31;
-        long ticks = fx.samples()[number].length + 1L;
-        long divisor = (long) YmEffects.PREDIV[code & 7] * count;
-        long scaled = ticks * divisor * song.playerHz()
-                + YmEffects.MFP_CLOCK / 16;
-        return (int) ((scaled + YmEffects.MFP_CLOCK - 1) / YmEffects.MFP_CLOCK);
+        int number = tune.registers()[8 + voice][f] & 31;
+        long ticks = tune.samples()[number].length + 1L;
+        long divisor = (long) Tune.prescaler(code & 7) * count;
+        long scaled = ticks * divisor * tune.frameRate()
+                + Tune.MFP_CLOCK / 16;
+        return (int) ((scaled + Tune.MFP_CLOCK - 1) / Tune.MFP_CLOCK);
     }
 
     private void emit(int p, int index, int action, int count) {
