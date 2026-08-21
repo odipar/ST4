@@ -437,10 +437,19 @@ def run_effects(super_host: bool = False, perf: bool = False) -> str:
     sid_on = CODE + sym['yx6_toggle_a_on']
     sid_off = CODE + sym['yx6_toggle_a_off']
 
+    # A burst write is twelve bytes and ends in the movep that sends it;
+    # muting replaces that instruction with two nops, so the gate reads as
+    # the opcode itself against $4E71.
+    WRITE_SIZE, WRITE_MOVEP = 12, 8
+    movep_opcode = int.from_bytes(
+        player.uc.mem_read(CODE + sym['yx6_movep'], 2), 'big')
+
     def gate(voice):
-        """The voice's burst-gate displacement word: 2 open, 0 muted."""
-        at = CODE + sym['yx6_wB'] + 8 + 10 * voice
-        return int.from_bytes(player.uc.mem_read(at, 2), 'big')
+        """2 when the voice's burst write is open, 0 when it is muted -
+        the same two values the old displacement trick reported."""
+        at = CODE + sym['yx6_wB'] + WRITE_MOVEP + WRITE_SIZE * voice
+        word = int.from_bytes(player.uc.mem_read(at, 2), 'big')
+        return 2 if word == movep_opcode else 0 if word == 0x4E71 else -1
 
     acc = lambda: int.from_bytes(
         player.uc.mem_read(CODE + sym['yx6_perf_acc'], 2), 'big') \

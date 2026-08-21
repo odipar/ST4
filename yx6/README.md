@@ -320,10 +320,15 @@ bare loop), so the compare that would save a write costs about as much as the
 write.
 
 That burst of writes is what [doc/terminology.md](../doc/terminology.md)
-calls the **frame write**, and it runs with interrupts masked. Selecting a register and writing it are
-two bus cycles, and TOS's own handlers use the sound chip in between — its
-floppy motor timeout writes port A. Without the mask a write can land on
-whatever register the interrupt selected. It costs about 24 cycles a frame.
+calls the **frame write**, and it runs with **interrupts enabled**.
+Selecting a register and writing it are two bus cycles, and an interrupt
+between them would send the value to whatever register the interrupt
+selected — so each write is a single `movep.w`, which a 68000 cannot
+split, rather than a pair guarded by a mask. Ticks interleave with the
+burst and wait one instruction at worst, where the old mask held them off
+for about 500 cycles: longer than a tick period at the top of the range.
+[The note](../doc/experiments/2026-08-21-the-unmasked-burst.md) has the
+numbers.
 
 ## What it does not do
 
