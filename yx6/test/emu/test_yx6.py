@@ -957,6 +957,164 @@ def invoke_isr(player, address):
     return player._decode_writes()
 
 
+SHAPE_WIDTHS = [0, 2, 2, 2, 1, 1, 1, 1, 1, 2, 1, 1, 2, 1, 1, 2, 1, 1, 2, 1]
+
+
+def ymr_image(frames: int, pops: list, streams: dict, loop: int = 0) -> bytes:
+    """A .YMR v1.3 register dump with every stream stored uncompressed.
+
+    The .ymr front end is the only source that sets the shape-from-R13 flag,
+    so pinning the flag-set path needs a .YMR, and a hand-built one keeps the
+    scene small enough to reason about. A ring size of 0 is the format's own
+    "stored uncompressed", which is what lets this skip a ZX1 packer.
+
+    pops[frame] is the stream indices that frame pops, ascending, and streams
+    maps a stream index to its entries laid end to end.
+    """
+    command = bytearray()
+    for frame in range(frames):
+        command += bytes(sorted(pops[frame])) + b'\0'
+    present = dict(streams)
+    present[0] = bytes(command)
+
+    header = bytearray(b'YMR!')
+    header += (0x0103).to_bytes(2, 'big') + frames.to_bytes(4, 'big')
+    header += loop.to_bytes(4, 'big') + (50).to_bytes(2, 'big')
+    header += (0).to_bytes(2, 'big') + (2000000).to_bytes(4, 'big')
+    header += (20).to_bytes(2, 'big') + (0).to_bytes(4, 'big')
+
+    at = 268                                        # the map ends here; no samples
+    body = bytearray()
+    for stream in range(20):
+        data = present.get(stream)
+        if not data:
+            header += bytes(12)                     # offset 0: not in the file
+            continue
+        header += at.to_bytes(4, 'big') + (0).to_bytes(4, 'big')
+        header += (0).to_bytes(2, 'big') + (0).to_bytes(2, 'big')
+        body += data
+        at += len(data)
+    assert len(header) == 268, len(header)
+    return bytes(header + body)
+
+
+def pack_ymr(image: bytes, ring: int = 960, chunk: int = 24) -> bytes:
+    """The real .ymr packer, so the header flag is the one it really writes."""
+    SCRATCH.mkdir(exist_ok=True)
+    key = hashlib.sha1(image).hexdigest()[:12]
+    cached = SCRATCH / f'ymr-{key}-n{ring}-c{chunk}.yx6'
+    if not cached.exists():
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / 'tune.ymr'
+            source.write_bytes(image)
+            subprocess.run(['java', '-ea', '-cp', str(CLASSES), 'org.ymr.Ymr', '-f',
+                            f'-n{ring}', f'-c{chunk}', '-k1', str(source), str(cached)],
+                           check=True, capture_output=True)
+    return cached.read_bytes()
+
+
+def patched_shape(player, timer: str) -> int:
+    """The byte the retrigger tick will write to R13, out of the running
+    player's own code. It is a self-modified immediate inside the tick block,
+    so nothing short of reading the instruction says what the buzzer will
+    actually restart - and that is the whole of what this test is about."""
+    return player.uc.mem_read(CODE + player.symbols[f'yx6_retrigger_{timer}'] + 4, 1)[0]
+
+
+def run_shape_source() -> str:
+    """Where a retrigger stream reads the shape it restarts.
+
+    A sync-buzzer rewrites R13 with one shape at the timer's rate, and format
+    v8 lets the file say where that shape came from: YM6 keeps it in the low
+    nibble of the voice the channel names, and a .YMR keeps it with the
+    envelope, in R13 itself. The two are told apart here by making them
+    DISAGREE - a voice whose nibble is one value while R13 holds another -
+    and reading the tick's own patched immediate, which no chip write reveals
+    and no other rig looks at.
+    """
+    # The flag-clear path, which is every YM tune. A buzzer on voice B with
+    # R9's nibble at 11, and R13 never written at all: if the player were
+    # reading the shadow it would restart 8, the value a tune that has
+    # written no shape is taken to mean.
+    frames = 16
+    values = [bytearray(frames) for _ in range(16)]
+    for frame in range(frames):
+        values[7][frame] = 0x38
+        values[9][frame] = 0x0B                     # voice B's level, nibble 11
+        values[13][frame] = gen_ym.NO_ENVELOPE_CHANGE
+    for frame in range(4, 12):                      # sync-buzzer, voice B
+        values[1][frame] = 0xE0
+        values[6][frame] |= 6 << 5
+        values[14][frame] = 200
+    player = Player(pack(gen_ym.ym6_file(frames, values), 960, 24, 0, 1),
+                    workspace_size(960))
+    if player.init() != 0:
+        return 'shape source: YX6_init rejected the YM tune'
+    if player.uc.mem_read(player.work + 55, 1)[0] != 0:
+        return 'shape source: a YM tune set the shape-from-R13 flag'
+    for frame in range(6):
+        player.frame()
+    got = patched_shape(player, 'a')                # a YM tune's slot 1 is Timer A
+    if got != 11:
+        return (f'shape source: a YM buzzer restarts shape {got}, want 11 - the '
+                f'nibble of the voice it names')
+
+    # The flag-set path. R13 is popped to $0A on the very frame the RTE arms,
+    # while voice B's level is $0C: the burst writes R13 before the actions
+    # run, so the arm must take the NEW shape, 10, and not the 12 sitting in
+    # the volume nibble. Frame 3 then moves the shape under the running
+    # buzzer, which goes through the hold path rather than the arm.
+    pops = [[] for _ in range(8)]
+    pops[0] = [5, 7, 10, 14, 15]
+    pops[3] = [10]
+    image = ymr_image(8, pops, {
+        5: bytes([0x38]),                           # mixer
+        7: bytes([0x0C]),                           # voice B's level: nibble 12
+        10: bytes([0x0A, 0x04]),                    # the shapes: 10, then 4
+        14: bytes([3]),                             # Timer B runs an RTE
+        15: bytes([6, 200]),                        # prescaler 6, count 200
+    })
+    player = Player(pack_ymr(image), workspace_size(960))
+    if player.init() != 0:
+        return 'shape source: YX6_init rejected the .ymr tune'
+    if player.uc.mem_read(player.work + 55, 1)[0] == 0:
+        return 'shape source: a .ymr left the shape-from-R13 flag clear'
+    if player.uc.mem_read(player.work + 54, 1)[0] != 8:
+        return 'shape source: the shadow was not primed with 8'
+    player.frame()                                  # frame 0: R13 := 10, RTE arms
+    got = patched_shape(player, 'b')                # channel 1 of a .ymr is Timer B
+    if got != 10:
+        return (f'shape source: a .ymr buzzer arms on shape {got}, want 10 - R13 '
+                f'as this frame wrote it, not the 12 in the volume nibble')
+    for frame in range(1, 4):                       # frame 3 pops the shape to 4
+        player.frame()
+    got = patched_shape(player, 'b')
+    if got != 4:
+        return (f'shape source: a shape moving under a running buzzer left the '
+                f'tick on {got}, want 4 - the hold path reads R13 too')
+
+    # And an RTE that arms before the tune has written any shape at all: the
+    # spec says to assume 8, which is what RhYMe's own player primes. Voice
+    # C's level is 15 here, so the two sources cannot be confused.
+    pops = [[] for _ in range(8)]
+    pops[0] = [5, 8, 17, 18]
+    image = ymr_image(8, pops, {
+        5: bytes([0x38]),
+        8: bytes([0x1F]),                           # voice C: nibble 15
+        17: bytes([3]),                             # Timer D runs an RTE
+        18: bytes([6, 200]),
+    })
+    player = Player(pack_ymr(image), workspace_size(960))
+    if player.init() != 0:
+        return 'shape source: YX6_init rejected the unshaped .ymr tune'
+    player.frame()
+    got = patched_shape(player, 'd')                # channel 2 of a .ymr is Timer D
+    if got != 8:
+        return (f'shape source: an RTE armed before any shape restarts {got}, '
+                f'want 8 - the assumed shape, not voice C\'s nibble')
+    return ''
+
+
 def main() -> int:
     # frames, ring, chunk, label, loop frame (None = play once), passes, unit
     shapes = [
@@ -1004,6 +1162,13 @@ def main() -> int:
         failures += 1
     else:
         print('OK   the SNDH container       (subtunes, handback, re-init)')
+
+    problem = run_shape_source()
+    if problem:
+        print(f'FAIL {problem}')
+        failures += 1
+    else:
+        print('OK   the retrigger shape      (both sources, off the patched tick)')
 
     for super_host, perf in ((False, False), (True, False), (False, True)):
         problem = run_effects(super_host, perf)
