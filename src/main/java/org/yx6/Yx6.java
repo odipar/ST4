@@ -49,11 +49,12 @@ public final class Yx6 {
                 if (script.m()[f] == 0 && script.r7force()[f] == 0) {
                     continue;
                 }
-                StringBuilder line = new StringBuilder(
-                        String.format("%6d  M=%02X", f, script.m()[f] & 0xFF));
+                StringBuilder line = new StringBuilder(String.format(
+                        "%6d  M=%02X X=%02X T=%02X", f, script.m()[f] & 0xFF,
+                        script.x()[f] & 0xFF, script.timers()[f] & 0xFF));
                 for (int c = 0; c < script.actions().length; c++) {
-                    line.append(String.format(" A%d=%02X P%d=%3d", c + 1,
-                            script.actions()[c][f] & 0xFF, c + 1,
+                    line.append(String.format(" A%d=%02X P%d=%3d", c,
+                            script.actions()[c][f] & 0xFF, c,
                             script.counts()[c][f] & 0xFF));
                 }
                 System.out.printf("%s R7|=%02X%n", line,
@@ -78,6 +79,7 @@ public final class Yx6 {
         int endFrame = -1;
         int frameCount = -1;
         int drumHz = YmEffects.MAX_TIMER_HZ;
+        int timerMap = Yx6Format.DEFAULT_TIMERS;
         int i = 0;
         for (; i < args.length && args[i].startsWith("-"); i++) {
             switch (args[i]) {
@@ -85,7 +87,9 @@ public final class Yx6 {
                 case "-o" -> playOnce = true;
                 case "-sidresume" -> sidResume = true;
                 default -> {
-                    if (args[i].startsWith("-drumhz")) {
+                    if (args[i].startsWith("-timers")) {
+                        timerMap = parseTimers(args[i].substring(7));
+                    } else if (args[i].startsWith("-drumhz")) {
                         drumHz = parseNumber(args[i].substring(7));
                     } else if (args[i].startsWith("-startframe")) {
                         startFrame = parseNumber(args[i].substring(11));
@@ -130,7 +134,7 @@ public final class Yx6 {
                         .replaceAll("(?i)\\.ym$", "");
                 packOne(args[input], dir.resolve(stem + ".yx6").toString(),
                         ringSize, chunk, unit, loopFrame, playOnce, forcedMode,
-                        drumHz, sidResume, 0, 0, -1, -1, -1);
+                        drumHz, sidResume, timerMap, 0, 0, -1, -1, -1);
             }
             return;
         }
@@ -162,6 +166,13 @@ public final class Yx6 {
                       -drumhzH   The drum rate ceiling (default 25600): a drum
                               asking for a faster timer is downsampled to fit,
                               with a warning
+                      -timersT   Which MFP timer each channel runs on, one
+                              letter per channel from 0 up: -timersBC puts
+                              channel 0 on Timer B and channel 1 on Timer C.
+                              The default is AD, where a YM tune has always
+                              played. Timer C is the system's 200 Hz clock,
+                              so a tune that takes it stops that clock and
+                              cannot be hosted from a Timer C interrupt
                       -sidresume   The maxYMiser SID gap model: a released
                               SID's timer keeps counting and a re-arrival
                               resumes its phase. Default: the ym2149-rs
@@ -177,15 +188,61 @@ public final class Yx6 {
             return;
         }
         packOne(args[i], outputName, ringSize, chunk, unit, loopFrame, playOnce,
-                forcedMode, drumHz, sidResume, startMin, startSec, startFrame,
+                forcedMode, drumHz, sidResume, timerMap, startMin, startSec, startFrame,
                 endFrame, frameCount);
     }
 
     /** The whole pipeline for one tune: read, trim, pad, pack, write, report. */
+    /**
+     * {@code -timersABCD}: which MFP timer each channel runs on, one letter
+     * per channel from channel 0 up. Letters left off keep the default, so
+     * {@code -timersBC} moves the two channels a YM tune uses onto Timers B
+     * and C and leaves the rest alone. Two channels may not name the same
+     * timer.
+     */
+    private static int parseTimers(String spec) {
+        int map = Yx6Format.DEFAULT_TIMERS;
+        if (spec.isEmpty() || spec.length() > Yx6Format.CHANNELS) {
+            throw error("-timers takes one letter per channel, up to "
+                    + Yx6Format.CHANNELS + ": -timersBC, say");
+        }
+        boolean[] taken = new boolean[4];
+        int[] timers = new int[Yx6Format.CHANNELS];
+        java.util.Arrays.fill(timers, -1);
+        for (int channel = 0; channel < spec.length(); channel++) {
+            int timer = "ABCD".indexOf(Character.toUpperCase(spec.charAt(channel)));
+            if (timer < 0) {
+                throw error("-timers: '" + spec.charAt(channel)
+                        + "' is not one of the MFP's timers A, B, C or D");
+            }
+            if (taken[timer]) {
+                throw error("-timers: two channels cannot both run on Timer "
+                        + "ABCD".charAt(timer));
+            }
+            taken[timer] = true;
+            timers[channel] = timer;
+        }
+        // The channels the spec left out take the timers it did not, in
+        // order, so the map stays a permutation however short the spec is.
+        int spare = 0;
+        map = 0;
+        for (int channel = 0; channel < Yx6Format.CHANNELS; channel++) {
+            if (timers[channel] < 0) {
+                while (taken[spare]) {
+                    spare++;
+                }
+                taken[spare] = true;
+                timers[channel] = spare;
+            }
+            map |= timers[channel] << (2 * channel);
+        }
+        return map;
+    }
+
     private static void packOne(String inputName, String outputName, int ringSize,
                                 int chunk, int unit, int loopFrame, boolean playOnce,
                                 boolean forcedMode, int drumHz, boolean sidResume,
-                                int startMin, int startSec, int startFrame,
+                                int timerMap, int startMin, int startSec, int startFrame,
                                 int endFrame, int frameCount) {
         // The floor only: how many streams a tune decodes depends on the
         // channels it names, which the encoder learns when it compiles the
@@ -295,7 +352,7 @@ public final class Yx6 {
         Yx6Encoder.Result result;
         try {
             result = Yx6Encoder.encode(song, ringSize, chunk, loopFrame, true, unit,
-                    drumHz, sidResume);
+                    drumHz, sidResume, timerMap);
         } catch (IllegalArgumentException e) {
             // The encoder always says what it rejected, but getMessage() is
             // @Nullable, so give it something to fall back on.
@@ -448,10 +505,14 @@ public final class Yx6 {
                 raw, result.packedSize(), 100.0 * result.packedSize() / raw, result.file().length);
         int flags = ((result.file()[Yx6Format.OFFSET_FLAGS] & 0xFF) << 8)
                 | (result.file()[Yx6Format.OFFSET_FLAGS + 1] & 0xFF);
-        System.out.printf("Player needs %d bytes of ring plus its state,"
-                        + " and decodes %d of the %d streams%n",
-                Yx6Format.STREAMS * result.ringSize(),
-                Yx6Format.liveStreams(flags), Yx6Format.STREAMS);
+        // The chunk is a slot count: one stream refilled per call, so it has
+        // to cover the streams this tune DECODES, not all the format defines.
+        int live = Yx6Format.liveStreams(flags);
+        System.out.printf("Player needs %d bytes of ring plus its state, and"
+                        + " decodes %d of the %d streams - one refill a call,"
+                        + " so C=%d covers them with %d slots idle%n",
+                Yx6Format.STREAMS * result.ringSize(), live, Yx6Format.STREAMS,
+                result.chunk(), result.chunk() - live);
         for (String note : result.script().notes()) {
             System.out.println(note);
         }
