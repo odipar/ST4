@@ -41,7 +41,7 @@ Attribution
   OpenAI Codex.
 * The YM6 register-dump format is by Arnaud Carré (Leonard/Oxygene); YX6 reads
   it and is inspired by Steve Clarets' MinYMiser player. The LHA depacker in
-  org.yx6 is ported from the ST-Sound library's LZH code by Arnaud Carré,
+  org.ym6 is ported from the ST-Sound library's LZH code by Arnaud Carré,
   itself based on LZH code by Haruhiko Okumura (1991) and Kerwin F. Medina
   (1996).
 

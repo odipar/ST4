@@ -11,10 +11,10 @@
 #
 #   yx6/ym_sndh.sh -t"Mad Max" maxset.sndh stormlord3.ym lastv8.ym
 #
-# The work is org.yx6.YmSndh's; this only finds the repo and the classes.
+# The work is org.ym6.YmSndh's; this only finds the repo and the classes.
 # Needs rmac on PATH.
 set -e
 YX6_DIR=$(cd "$(dirname "$0")" && pwd)
 REPO=$(cd "$YX6_DIR/.." && pwd)
 [ -d "$REPO/target/classes" ] || (cd "$REPO" && mvn -q compile)
-exec java -ea -Dyx6.repo="$REPO" -cp "$REPO/target/classes" org.yx6.YmSndh "$@"
+exec java -ea -Dyx6.repo="$REPO" -cp "$REPO/target/classes" org.ym6.YmSndh "$@"

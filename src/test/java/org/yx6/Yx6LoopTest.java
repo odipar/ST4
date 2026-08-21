@@ -10,27 +10,32 @@ import java.util.Arrays;
 import org.st4.St4Decompressor;
 import org.st4.St4Format;
 import org.junit.jupiter.api.Test;
+import org.ym6.Ym6Reader;
+import org.ym6.Ym6TestData;
+import org.ym6.YmEffects;
 
 /** The loop split: two sets of streams, and what the player is promised. */
 final class Yx6LoopTest {
 
     private static final int FRAMES = 900;
 
-    private static Ym6Reader.Song song(int loopFrame) {
+    private static Tune song(int loopFrame) {
         byte[][] registers = Ym6TestData.registers(FRAMES);
-        return Ym6Reader.read(Ym6TestData.file(registers, FRAMES, true, "YM6!", 50, 0, loopFrame));
+        return YmEffects.tune(Ym6Reader.read(
+                Ym6TestData.file(registers, FRAMES, true, "YM6!", 50, 0, loopFrame)));
     }
 
     /** The same tune with its effect codes silenced: the register-section
      * properties below are about the split itself, and a held effect
      * crossing the wrap would rotate it. */
-    private static Ym6Reader.Song quiet(int loopFrame) {
+    private static Tune quiet(int loopFrame) {
         byte[][] registers = Ym6TestData.registers(FRAMES);
         for (int frame = 0; frame < FRAMES; frame++) {
             registers[1][frame] &= ~0x30;       // no slot-1 code
             registers[3][frame] &= ~0x30;       // no slot-2 voice bits
         }
-        return Ym6Reader.read(Ym6TestData.file(registers, FRAMES, true, "YM6!", 50, 0, loopFrame));
+        return YmEffects.tune(Ym6Reader.read(
+                Ym6TestData.file(registers, FRAMES, true, "YM6!", 50, 0, loopFrame)));
     }
 
     private static int word(byte[] file, int at) {
@@ -65,7 +70,7 @@ final class Yx6LoopTest {
     @Test
     void eachSectionUnpacksToItsOwnSliceOfTheRegister() {
         int loop = 397;                             // not a multiple of the chunk
-        Ym6Reader.Song source = song(loop);
+        Tune source = song(loop);
         Yx6Encoder.Result result = Yx6Encoder.encode(source, 960, 24, loop, false);
         byte[] file = result.file();
 
@@ -148,7 +153,7 @@ final class Yx6LoopTest {
 
     @Test
     void rejectsALoopFrameOutsideTheTune() {
-        Ym6Reader.Song source = song(0);
+        Tune source = song(0);
         assertThrows(IllegalArgumentException.class,
                 () -> Yx6Encoder.encode(source, 960, 24, FRAMES, false));
         assertThrows(IllegalArgumentException.class,

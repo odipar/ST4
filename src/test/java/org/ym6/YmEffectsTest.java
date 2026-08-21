@@ -1,4 +1,4 @@
-package org.yx6;
+package org.ym6;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;

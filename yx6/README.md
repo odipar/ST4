@@ -11,29 +11,40 @@ It grew inside the ST1 project and moved here with it; it plays the fourteen
 standard YM2149 registers, loops, and plays the YM6 special effects: SID
 voice, digidrum and sync-buzzer run on timer channels exactly as the
 original replay routines ran them, compiled at pack time out of either YM
-dialect. The format has four timer channels and the file says which MFP
-timer each runs on, one stream carrying the map; the player claims only
-the channels a tune names — a YM tune names two, so the other timers stay
+dialect — or, through a second front end, out of RhYMe's own `.YMR` register
+dump, which is the same idea with different bookkeeping. The format has four
+timer channels and the file says which MFP timer each runs on, one stream
+carrying the map; the player claims only the channels a tune names — a YM
+tune names two and a converted `.ymr` three, so the timers left over stay
 the host's. [EFFECTS.md](EFFECTS.md) is the design; sinus-SID
 is the one effect deliberately left unplayed, in the good company of every
 other player including the format author's.
 
 | Piece | What it is |
 |---|---|
-| [`org.yx6.Yx6`](../src/main/java/org/yx6/Yx6.java) | the packer: YM5!/YM6! in, `.yx6` out - one tune or a whole set |
+| [`org.ym6.Yx6`](../src/main/java/org/ym6/Yx6.java) | the packer: YM5!/YM6! in, `.yx6` out - one tune or a whole set |
+| [`org.ymr.Ymr`](../src/main/java/org/ymr/Ymr.java) | the second packer: RhYMe YMR! in, the same `.yx6` out - one tune or a whole set |
+| [`Ym6Reader`](../src/main/java/org/ym6/Ym6Reader.java) + [`YmEffects`](../src/main/java/org/ym6/YmEffects.java) | one boundary: YM's frames and effect slots in, a `Tune` out |
+| [`YmrReader`](../src/main/java/org/ymr/YmrReader.java) + [`YmrEffects`](../src/main/java/org/ymr/YmrEffects.java) | the other, a peer and not a client: .YMR's streams and pops in, the same `Tune` out |
+| [`Tune`](../src/main/java/org/yx6/Tune.java) | what a front end hands over and the engine works on: frame streams, timer streams, samples, rate - no format anywhere in it |
 | [YX6.S](YX6.S) | the player library, 2,002 bytes plus ST4_wrap's 292 |
 | [YX6_sndh.S](YX6_sndh.S) + [`MkSndh`](../src/main/java/org/yx6/MkSndh.java) | the canonical container: an SNDH v2.2 file, subtunes included |
-| [`YmSndh`](../src/main/java/org/yx6/YmSndh.java) | `.ym` dumps straight to one SNDH, packer flags and all |
+| [`YmSndh`](../src/main/java/org/ym6/YmSndh.java) | `.ym` dumps straight to one SNDH, packer flags and all |
 | [YX6_player.S](YX6_player.S) + [`MkPrg`](../src/main/java/org/yx6/MkPrg.java) | a thin TOS shell around those same SNDH bytes |
-| [`Play`](../src/main/java/org/yx6/Play.java) | one command: pack a `.ym`, build it, play it under Hatari |
+| [`Play`](../src/main/java/org/ym6/Play.java) | one command: pack a `.ym`, build it, play it under Hatari |
+| [`RhymePlay`](../src/main/java/org/ymr/RhymePlay.java) + [rhyme.sh](rhyme.sh) | one command: pack a `.ymr`, build it, play it under Hatari |
 
-The four build tools are Java; `mksndh.sh`, `ym_sndh.sh`, `mkprg.sh` and
-`play.sh` are four-line wrappers that find the repository and the compiled
-classes, so every command below is spelled the way it always was. Reading a
-`.yx6` header, validating that a set shares one configuration, generating the
-SNDH tags and driving rmac are all in [`org.yx6`](../src/main/java/org/yx6)
-alongside the packer, which the front ends call in process rather than
-through another JVM.
+The five build tools are Java; `mksndh.sh`, `ym_sndh.sh`, `mkprg.sh`,
+`play.sh` and `rhyme.sh` are four-line wrappers that find the repository and
+the compiled classes, so every command below is spelled the way it always was.
+Reading a `.yx6` header, validating that a set shares one configuration,
+generating the SNDH tags and driving rmac are all in
+[`org.yx6`](../src/main/java/org/yx6) with the engine and the format,
+because none of them can tell a `.yx6` packed from a `.ym` from one packed
+from a `.ymr`. The `.ym` packer and everything that reads a YM header are in
+[`org.ym6`](../src/main/java/org/ym6), the `.ymr` side in
+[`org.ymr`](../src/main/java/org/ymr), and both call the shared tools in
+process rather than through another JVM.
 
 **Unit sizes.** `yx6 -kK` (and `play.sh -kK`) packs the register sections at
 ST4 units of 1, 2 or 4 bytes: wider units hand the decoder half or a quarter
@@ -103,6 +114,65 @@ is an estimate (10-cycle quanta, fixed per-tick costs), and it is free
 when off: the default build is byte-identical to one made before the
 option existed.
 
+## Playing a RhYMe .ymr
+
+RhYMe's own register dump is a `.YMR`, and
+[`org.ymr.Ymr`](../src/main/java/org/ymr/Ymr.java) packs one into the same
+`.yx6` the YM packer writes. [rhyme.sh](rhyme.sh) test drives it the way
+[play.sh](play.sh) test drives a `.ym`:
+
+```sh
+yx6/rhyme.sh song.ymr                 # 960-byte rings, 24 values per call
+yx6/rhyme.sh -n2048 -c32 song.ymr     # longer calls: cheaper on average
+yx6/rhyme.sh -l0 song.ymr             # loop from the start, header or no
+yx6/rhyme.sh -o song.ymr              # play once and stop
+yx6/rhyme.sh -min13 -sec52 song.ymr   # trim: start deep in a long tune
+yx6/rhyme.sh -startframe41403 -frames1729 song.ymr
+yx6/rhyme.sh -perf song.ymr           # the raster monitor
+yx6/rhyme.sh -nomask song.ymr         # drop the frame write's interrupt mask
+yx6/rhyme.sh one.ymr two.ymr          # a set: number keys pick the subtune
+```
+
+`rhyme.sh -h` lists the lot. The flags mean what they mean on `play.sh`, the
+work directory is named the same `<name>-n<ring>-c<chunk>/` way, and SPACE in
+the Hatari window still stops it — someone who has test driven a `.ym` has
+nothing new to learn. Two things differ, and both come from the format rather
+than from the tool. A `.YMR` carries no title, no author and no comment — it
+stores streams and a command stream, not credits — so each file's own stem is
+its subtune name and the SNDH's composer is left absent rather than invented;
+and the packer's per-stream table is left on the screen, which the `.ym` front
+ends filter out - a build script on its way to an SNDH does not want a screen
+of ratios per tune, and a test drive is the one moment you do. A set
+still has to share one frame rate, since one player build is called at one
+rate, and `rhyme.sh` checks before it packs anything - which for a `.YMR`
+costs a full read of each dump, there being no way into one but from the
+start.
+
+There is no `ymr.sh`: the packer is a plain class, and everything downstream
+of a packed file is format-blind, so the containers are built by the same
+tools as any other `.yx6`.
+
+```sh
+java -ea -cp target/classes org.ymr.Ymr -f song.ymr song.yx6
+yx6/mkprg.sh SONG.PRG song.yx6                      # -> SONG.PRG, as ever
+java -ea -cp target/classes org.ymr.Ymr -f one.ymr two.ymr build/  # a set
+yx6/mksndh.sh -t"My Set" myset.sndh build/*.yx6     # -> subtunes 1..2
+```
+
+`ymr` takes the packer flags `yx6` takes — `-f -o -nN -cC -kK -lF` and the
+trim window — and drops the three that are YM arguments. There is no
+`-timers`, because the .YMR spec binds each timer to a voice and a flag that
+let a caller break it would only produce a file that plays the wrong voices;
+no `-drumhz`, because a YM digidrum carries the rate it was sampled at and can
+be resampled to fit a ceiling, while a .YMR sample is a stream of levels whose
+rate is whatever its timer is programmed to on the frame it plays, so there is
+nothing to resample it against; and no `-sidresume`, because the phase model
+it selects is a YM argument — RhYMe's PWM restarts at its loud half whenever
+the effect is configured, which is the default model already. `-script` dumps
+the compiled effect script instead of packing, one line per frame anything
+acts on, which is the quickest way to see that a channel started the effect it
+should.
+
 ## The SNDH container
 
 The canonical build of the player is an **SNDH v2.2 file** - the Atari ST's
@@ -111,7 +181,7 @@ bytes. [mksndh.sh](mksndh.sh) assembles [YX6_sndh.S](YX6_sndh.S) around one
 or more `.yx6` files:
 
 ```sh
-java ... org.yx6.Yx6 -f one.ym two.ym three.ym build/   # a set, one config
+java ... org.ym6.Yx6 -f one.ym two.ym three.ym build/   # a set, one config
 yx6/mksndh.sh -t"My Set" myset.sndh build/*.yx6         # -> subtunes 1..3
 yx6/mkprg.sh MYSET.PRG build/*.yx6                      # the same, runnable
 yx6/ym_sndh.sh -t"My Set" myset.sndh one.ym two.ym      # both steps in one
@@ -330,6 +400,260 @@ it for about 500 cycles — longer than a tick period at the top of the
 range. [The note](../doc/experiments/2026-08-21-the-unmasked-burst.md)
 has the numbers on both.
 
+## What the conversion is
+
+A `.YMR` and a `.yx6` are the same idea with different bookkeeping. Both
+stream a YM2149 register dump past a 68000 through small rings, refilled a
+byte or two per frame, so the music never exists in memory as a whole; both
+give every stream a ring that is the whole of its memory; both are packed
+against that ring so no back-reference can reach outside it. The lineage is
+literally shared — a .YMR's streams are ZX1, which is what ST4 grew out of,
+which is why [`org.ymr.Zx1`](../src/main/java/org/ymr/Zx1.java) reads them
+through the [vendored jx1 decoder](../src/main/java/org/jx1/README.md) rather
+than a second implementation of a format that already has one.
+
+What differs is what a frame costs. A .YMR stores one entry per CHANGE and a
+command stream saying which streams each frame POPS, so a held note costs
+nothing after the frame it arrives on — and no frame can be reached except by
+replaying every frame before it. A `.yx6` stores one value per frame per
+stream and lets ST4 find the repetition, which is why a frame is a read from
+each ring and no bookkeeping at all. So the conversion's shape is:
+[`YmrReader`](../src/main/java/org/ymr/YmrReader.java) replays the command
+stream once, from the start, and hands on the flat per-frame view. The pops
+become frames.
+
+The effect vocabularies then line up one to one, and not by coincidence: both
+formats hang the same three tricks off an MFP timer, and each pair is the same
+effect for the same reason.
+
+* **A RhYMe PWM is a toggle stream** — what YM calls a SID voice. Both write
+  one voice's volume register from a timer interrupt at audio rate,
+  alternating a level with zero, and neither touches the mixer for it, so the
+  values chop whatever the voice's own generators are doing rather than
+  replacing it. Both take the loud level from what the song last set on that
+  voice: RhYMe's handler toggles between the shadow volume and zero, and the
+  toggle tick reads its level out of `R(8+voice)`. Same effect, same
+  parameter, same place — which is why the converter writes nothing at all
+  for a PWM.
+* **A RhYMe Sample is a PCM stream** — a digidrum. Both walk a block of 4-bit
+  levels into the voice's volume register, one byte a tick, at whatever rate
+  the timer is programmed to, and both hand the register back to the song when
+  the block runs out. RhYMe's exporter has already folded its samples down to
+  the levels the PSG's volume register takes, which is exactly what a
+  yx6 sample table holds, so the bytes cross unchanged: they need a table
+  entry and an end marker and nothing else. A YM digidrum arrives 8-bit and
+  has to be folded; this is the one thing a .YMR hands over that needs no work
+  at all.
+* **A RhYMe RTE is a retrigger stream** — a sync-buzzer. Both rewrite R13
+  from a timer interrupt, and the values say nothing: writing R13 sends the
+  envelope generator back to the start of its shape, so the envelope becomes
+  the waveform and the timer's rate becomes its pitch. The one difference is
+  where the shape comes from — RhYMe's handler keeps the player's own copy of
+  it, the retrigger tick reads it out of the voice's volume register — which
+  is why this is the single effect the converter has to write something for.
+
+Two more correspondences are worth naming, because between them they are why
+the register vector needs so little done to it: the first is why nothing has
+to be translated, the second is why the two parameters that must be written
+can be.
+
+**R13 and the `$FF` marker.** A .YMR frame that does not pop
+`envelope_shape` must not write R13: the pop IS the retrigger, so writing the
+last shape again would restart the envelope on every frame of a held note. No
+shape value can mean "nothing", so the reader marks such a frame with `$FF` —
+and `$FF` is precisely what **Writing the chip** above means by it, the value
+on which the player skips the register entirely. Two formats reached one
+convention from one constraint, so the register vector is handed straight on.
+
+**The shadow volume and the burst gate.** The .YMR spec suppresses the frame
+write to a volume register owned by a running PWM or Sample — the value goes
+to the player's shadow and never to the chip, so the frame write cannot fight
+the effect's own timer-rate writes — and says nothing of the sort about an
+RTE, which writes R13 and leaves the voice's volume to the song. That is the
+`.yx6` burst gate exactly: M's gate mask, one bit per voice, which a toggle
+arm and a PCM arm set and a retrigger arm does not. It is also what makes the
+converter's two smuggled parameters possible and unequal. A PCM stream's
+sample number can sit in the volume byte because the gate is shut over it —
+`yx6_gates` has overwritten that write with two `nop`s, so it does not reach
+the chip at all — while an RTE's shape has to sit
+in the low nibble of a byte the frame write really does deliver, and is free
+only where the voice's envelope-mode bit is set — which is the only
+configuration in which a sync-buzzer is audible at all, so a song that means
+its RTE has already set it.
+
+One engine reads both dialects, and three flags say which. A held PCM code
+does not retrigger, because a .YMR's trigger is a pop and not the code's
+continued presence — that is what stops a sustained sample being chopped into
+frame-long pieces, where a YM dump's held drum code fires again every frame.
+A voice playing a sample keeps its mixer bits, because RhYMe's player never
+touches R7 for an effect: the mixer is the song's, and a song that wants its
+sample clean has already disconnected the voice itself, where a YM drum's
+voice is forced off the mixer for it. And a channel's own commands end the
+sample running on it — an effect pop of 0 stops the timer, an effect pop of
+anything else reprograms the one timer the sample was ticking on — where in a
+YM dump nothing ends a sample but its own marker tick. The one thing that
+needed inventing is the other half of "a pop is an event": the script acts
+where a code byte CHANGES, so bit 3 of the code is flipped on every sample
+trigger, and two pops of one sample at one rate become two different codes
+and two starts.
+
+`signals-grouped.ymr` is 9,984 frames at 50 Hz with a PWM on voice A, a
+sync-buzzer on voice B and a PWM on voice C — three effects at once, which two
+fixed channels could not have carried, and which is the case the four-channel
+generalisation and the T stream were built for. Packed with the default shape,
+
+```sh
+java -ea -cp target/classes org.ymr.Ymr -f signals-grouped.ymr doc.yx6
+```
+
+reports 249,600 bytes of register and script data packed into 12,444 (5.0%)
+in a 13,852-byte file, 25 rings of 960 bytes, decoding 23 of the 25 streams so
+that one of the default `C`=24's slots is idle; the tune loops from its start,
+and the encoder rotated the split forward 96 frames so the effect state at the
+wrap matches its first arrival. 5,312 of those 12,444 packed bytes are the
+eleven script streams, which the `.YMR` — 10,488 bytes — does not carry at
+all: RhYMe's player reconciles its three timers every frame from what popped,
+and this one replays decisions taken at pack time. That is the bookkeeping
+difference paid in bytes, and what it buys is the flat frame.
+
+### What a .ymr gives up
+
+Everything not on this list is exact, and
+[test/ymr_sweep.py](test/ymr_sweep.py) is what says so: it replays a converted
+tune on the real player and compares every write `YX6_play` makes to the sound
+chip, plus which MFP timers it claimed, against its own decoder and replay of
+the .YMR image. It walks 1,200 frames of a long tune, and the whole of one —
+the rotation frames and the wrap included — with `YMR_FRAME_CAP` raised;
+`signals-grouped.ymr` passes both. Two things it does not establish: it packs
+at `-k1`, so the played frames are the .YMR's own and the padding the default
+`-k2` may insert is never walked, and it does not compare what a timer was
+PROGRAMMED to — that is the directed effect test's, and it is the dimension
+the two rate rows below are about.
+
+| What changes | What it costs | Reported |
+|---|---|---|
+| A sample numbered past the 32nd | the sample is dropped, and so is every trigger of it | yes |
+| A sample past 65535 bytes | everything after its 65535th, so the length fits a word | yes |
+| A sample looped from past its own end | it is played once instead | yes |
+| A looped sample | its loop region is unrolled towards 8 KB and stops there | yes |
+| A sample byte above the 4-bit levels | masked, since bit 7 is what ends a PCM stream | yes |
+| A rate pop that moves the prescaler | the timer period in flight, truncated | no — it is every such pop |
+| …under a running sample | the sample restarts on that frame | yes |
+| An RTE frame with the voice on a plain level, the nibble not already the shape | that frame at the level the shape's number names | yes |
+| A sample the song stops early | one sample byte, held until the next frame | no — the window is sub-frame |
+| A PWM or RTE re-configured with nothing changed | nothing is emitted at all | no — RhYMe's exporter cannot write one |
+
+The seven that are counted are named once per sample or once per channel
+rather than reported a frame at a time, because a song 9,984 frames long can
+break one rule on a thousand of them and still only be doing one thing wrong.
+The three that are not are the three there is nothing to say about: one is
+every prescaler move any song makes, one is shorter than the frame it happens
+in, and the last cannot arise from a file RhYMe wrote.
+
+A rate pop that moves only the COUNTER is on none of these lines, because it
+costs nothing at all: it leaves the code byte where it was, so it compiles to
+a HOLD carrying the reload flag, and `yx6_hold` writes the count to a timer it
+never stops — the same live reload RhYMe does, verb for verb. That is worth
+saying because it is the ordinary case rather than the lucky one: a pitch
+slide is made of these. On `signals-grouped.ymr` the compiled script carries
+3,827 live reloads against 325 verbs that stop a timer to reprogram it — and
+313 of those 325 are prescaler moves under a running RTE, which is what a
+verb census misses, since START_RETRIGGER is also what a fresh arm emits.
+
+* **Three timers bound to voices, against four channels and a map.** A .YMR
+  names Timer A, Timer B and Timer D, and the spec fixes which voice each one
+  drives — A to A, B to B, D to C — so the binding is normative and not the
+  converter's to choose. A `.yx6` has four timer channels and a stream saying
+  which MFP timer each runs on, so the converter simply writes that binding
+  into T: channels 0, 1 and 2 take Timers A, B and D, and the fourth channel,
+  which no .YMR fills, takes the Timer C nobody asked for, which keeps the map
+  a permutation and costs nothing — the header never flags an idle channel and
+  the player claims no timer for it. So a `.ymr` tune leaves Timer C, the
+  system's 200 Hz clock, alone, and does take Timer B wherever it runs an
+  effect there, which the YM packer's default map keeps free for rasters.
+  Three channels means the player decodes 23 streams, so `C` must be at least
+  23: the default 24 clears it by one slot, and more buys headroom no `.ymr`
+  can use.
+* **Thirty-two samples, where a .YMR may carry 65535.** A yx6 sample number
+  is the five bits the script reads out of a volume register, so everything
+  past the cap is dropped and a trigger of a dropped one is reported. A yx6
+  sample table entry holds its length in a word, too, so anything past 65535
+  bytes is cut to fit. The .YMR spec caps a sample at 65536, so a file that
+  keeps to it loses exactly the one byte; nothing in the reader enforces that
+  ceiling, and a file that breaks it loses whatever it is over by.
+* **A PCM tick has no loop.** It walks forward and stops on the first byte
+  with bit 7 set, which is the whole of its end condition and the reason it
+  costs no compare per tick. So a looped sample is unrolled instead — its
+  loop region written out again as many whole times as fit under 8 KB, about
+  ten seconds of an 800 Hz drum loop and about a fifth of a second of a 40 kHz
+  one — and a song that holds the loop longer than the unrolled copy lasts
+  hears it stop. Whole regions only, so a sample already at the ceiling, or
+  one whose region will not fit under it, is unrolled no times at all and the
+  note says so. The voice does not stick there: the script reopens its gate
+  at the computed end and the frame write puts the song's own volume back,
+  which is what a .YMR player does when a one-shot sample runs out.
+* **No verb moves a prescaler under a running timer.** RhYMe pops a rate on
+  its own to slide a pitch: control register, then data register, the timer
+  never stopped, so a running PWM keeps its phase and a running sample its
+  place and only the rate moves. Half of that survives the conversion intact.
+  A .YMR rate entry is a prescaler and a counter, only the prescaler is in the
+  code byte, and a pop that moves the counter alone therefore leaves the code
+  where it was: the script emits a HOLD carrying the reload flag, and
+  `yx6_hold` writes the new count to a timer it never stops — RhYMe's own live
+  reload, verb for verb. That is what a pitch slide is made of, and it costs
+  nothing. A pop that moves the PRESCALER cannot be said that way: it changes
+  the code byte, so it compiles to a program verb, and every verb that carries
+  a rate goes through `yx6_program`, which stops the timer, loads the count and
+  runs it again. The period in flight is truncated whichever verb it is, which
+  is why a prescaler change under a running RTE compiles to a plain
+  START_RETRIGGER and nothing gentler is invented for it. Under a running
+  SAMPLE it costs more: the new code byte is one the script can only read as a
+  new trigger, so the sample restarts there, and the conversion counts it. This
+  is a gap in the `.yx6` ABI rather than anything the converter chose, and no
+  gentler verb would close it, since they all truncate the same period.
+* **A sample the song stops early is stopped a sliver late.** A .YMR can end
+  a sample before its data runs out — an effect pop of 0, or a different
+  effect arriving on the same timer, which is the same voice, since a .YMR
+  binds each timer to one — and the conversion obeys it on the frame it is
+  said. Where the frame hands the voice back, it hands it back at once: the
+  timer is stopped on that frame — by a RELEASE where the song popped 0, by
+  the arriving verb's own `yx6_program` where an RTE took the channel — the
+  voice stops being the sample's, and its gate reopens. The player applies a
+  frame's gate state BEFORE the
+  register burst and the script's actions after it, so the frame write this
+  reopens is that same frame's, and the voice's own volume is on the chip
+  inside the 20 ms the song asked for it with no skew to correct. Where the
+  frame hands the voice to a PWM instead, the gate stays shut, because the
+  square wants it shut too, and the song's volume is not due back at all.
+  What the ordering cannot cover is the sliver between the burst and the
+  action: a tick landing in it writes one more sample byte over the volume
+  just written, and that byte stands until the next frame. It is one wrong
+  level for most of one frame, against the whole frames of a sample that
+  should not be playing at all. No ordering of the verbs closes it either:
+  the actions sit after the burst so their varying cost cannot jitter the
+  register writes, which is a promise worth more than this sliver costs.
+* **An RTE's shape costs a volume nibble.** The retrigger tick is patched
+  with what it finds in `R(8+voice) & 15` on every frame the code is armed,
+  so declining to write the shape is not declining to have it read. The
+  frames where that costs anything are the arm frames and essentially only
+  those — the voice is still on a plain level, and the song puts it on the
+  envelope from the frame after, which is where it has to be for the buzzer
+  to be heard at all — so the price is one 20 ms frame at whatever level the
+  shape's number happens to name. The conversion counts them: on
+  `signals-grouped.ymr`, 227 frames of 9,984.
+
+Everything else the conversion has to change, it counts and names rather than
+reporting a frame at a time, because a song 9,984 frames long can break one
+rule on a thousand of them and still only be doing one thing wrong: an effect
+type in the 4-255 the spec reserves, dropped rather than guessed at, since
+RhYMe's own player falls through to PWM for anything it does not recognise and
+a wrong guess is a wrong sound; a timer configured with a prescaler or counter
+of 0, the MFP's stopped state, which arms nothing; a sample index with no
+block behind it; and a sample trigger landing on the loop frame with the code
+the song's last frame already ends on, which the wrap swallows, since coming
+round from the end the code has not changed and the script acts on codes that
+change.
+
 ## What it does not do
 
 * **Sinus-SID.** Never seen in a dump, and never implemented by any player -
@@ -400,9 +724,10 @@ is the YM file's.
 ## Tests
 
 ```sh
-mvn test                                  # the packer: format, effects, shapes
+mvn test                                  # the packers: formats, effects, shapes
 python3 yx6/test/emu/test_yx6.py          # the player, against the YM data
 python3 yx6/test/sweep.py songs/*.ym      # a whole collection, differentially
+python3 yx6/test/ymr_sweep.py song.ymr    # the same, against the .YMR data
 HATARI=... TOS=... yx6/test/run.sh        # the player, on emulated hardware
 ```
 
@@ -429,6 +754,20 @@ write against the YM data frame by frame - loop crossing included - one
 status line per tune. The whole 544-tune jatari collection verifies clean
 with it; the honest limits (effect-owned volume registers and R7 are
 excluded, long tunes play their first 1200 frames) are in its header.
+
+[test/ymr_sweep.py](test/ymr_sweep.py) does the same for the `.ymr` front end,
+and has to work harder to be worth anything: the truth side is an INDEPENDENT
+model of the .YMR image written from the format spec - its own ZX1 decoder,
+its own stream map walk, its own replay of the command stream - because the
+Java reader and the 68000 player must not be able to cancel each other's bugs
+out. It checks R13 as an EVENT rather than a value, since the .YMR writes it
+on a frame that pops `envelope_shape` and on no other; it checks the volume
+registers against the gate, a voice running a PWM or a Sample having to be
+absent from that frame's writes and a voice running an RTE exact; and it
+checks that the player claims exactly the timers the tune names - A, B and D,
+never C. What it cannot see is what the tick handlers write, since it calls
+`YX6_play` and nothing else; that side is the directed effect test's. Its
+header names the rest.
 
 [test/run.sh](test/run.sh) goes further than emulation can: it plays a looping
 tune on the emulated chip and **reads all fourteen registers back off the YM2149

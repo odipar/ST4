@@ -1,0 +1,695 @@
+package org.ymr;
+
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
+import org.yx6.EffectScript;
+import org.yx6.Tune;
+import org.yx6.Yx6Format;
+
+/**
+ * Turns a parsed .YMR into a {@link Tune}: the engine's own model, with a
+ * frame stream per register and a timer stream per channel.
+ *
+ * <p>This is where the vocabulary changes, and it is the only place in
+ * {@code org.ymr} that says a word of the engine's language. On the way in the
+ * names are .YMR's, because the values are its: streams, pops, Timer A/B/D,
+ * PWM, RTE, Sample. On the way out they are the engine's - a PWM becomes a
+ * TOGGLE STREAM, a Sample a PCM STREAM, an RTE a RETRIGGER STREAM, and each
+ * runs on one of the format's four TIMER CHANNELS. {@code doc/terminology.md}
+ * maps the two. {@link org.ym6.YmEffects} is the PEER that does the same job
+ * for a YM dump - it hands over the same {@link Tune} and neither front end
+ * is downstream of the other - and reading the two side by side is the
+ * quickest way to see which decisions belong to a format and which belong to
+ * the engine.
+ *
+ * <h2>The binding</h2>
+ *
+ * <p>A .YMR names its timers rather than its voices, and the spec's Timer
+ * Effects table fixes which voice each one drives: Timer A drives voice A,
+ * Timer B voice B, and Timer D - not C, which the format leaves to the host's
+ * 200 Hz clock - drives voice C. That binding is normative, so it is a
+ * constant here rather than an option: channel 0 takes Timer A, channel 1
+ * Timer B, channel 2 Timer D, and the fourth channel, which no .YMR fills,
+ * takes the Timer C nobody asked for. {@link #TIMERS} is that map in the T
+ * stream's own two-bits-a-channel encoding, ready for the encoder.
+ *
+ * <h2>The code byte</h2>
+ *
+ * <p>Each channel's per-frame code byte is built exactly as
+ * {@link org.ym6.YmEffects} builds it - kind in bits 7-6, voice plus one in
+ * bits 5-4, MFP prescaler index in bits 2-0, and zero for an idle channel -
+ * with the count byte carrying the MFP timer's data register. That leaves bit
+ * 3 unspoken for, and a .YMR needs it.
+ *
+ * <p>In a YM dump an effect is a code sitting in a register, and a digidrum
+ * fires again on every frame that repeats it. In a .YMR an effect is state and
+ * a trigger is an event: popping {@code timer_*_sample} restarts the sample
+ * whether or not the index changed, and a sample nobody pops keeps playing.
+ * The two halves of that are handled in two places. {@link EffectScript} is
+ * told, through {@link EffectScript.Semantics}, that a held PCM code does not
+ * retrigger - which is what stops a sustained sample being chopped into
+ * frame-long pieces. And because the script acts when a code byte CHANGES, an
+ * explicit re-trigger has to change one: bit 3 flips on every trigger, so two
+ * pops of the same sample at the same rate produce two different codes and the
+ * script starts the sample twice. Nothing else reads that bit - the script
+ * takes the kind from bits 7-6, the voice from bits 5-4 and the prescaler from
+ * {@code code & 7}, compares whole codes for equality, and tests {@code code !=
+ * 0} for idleness, which a trigger bit alone can never fake because it is only
+ * ever set on a code that already names a kind and a voice.
+ *
+ * <p>The end of a sample is an event too. A .YMR can say stop - an effect pop of
+ * 0 - and can hand the channel to a different effect while a sample is still
+ * playing, and both mean the sample ends on that frame, because both program the
+ * one timer it is ticking on. The script is told that as well, through the same
+ * semantics, and the code byte carries it the plain way: a stop is the idle code
+ * 0 and a new effect is a new code, so no bit has to be invented for either.
+ *
+ * <h2>What the script still reads off the chip</h2>
+ *
+ * <p>The compiler reads three of a stream's parameters out of the voice's own
+ * volume register rather than out of a stream of their own, because that is
+ * where the player finds them at run time: a PCM stream's sample number from
+ * {@code R(8+voice) & 31}, a toggle stream's volume and a retrigger stream's
+ * shape from {@code R(8+voice) & 15}. A front end has to present them there,
+ * and this one does:
+ *
+ * <ul>
+ *   <li>A PWM needs nothing written. RhYMe's PWM handler toggles the voice
+ *       between the shadow volume and zero at the timer's rate, and the shadow
+ *       volume is what {@code volume_a}/{@code b}/{@code c} already popped into
+ *       that register - so the toggle stream's volume is already in place.</li>
+ *   <li>A Sample's index is written over the volume byte on every frame the
+ *       PCM code is armed. That is invisible: the script mutes the voice's
+ *       burst gate for the whole time a sample owns it, and {@code yx6_gates}
+ *       mutes a write by overwriting it with two {@code nop}s, so the byte
+ *       never reaches the chip. It is also load-bearing - the script recomputes a
+ *       sample's length wherever its code changes, so the index has to be
+ *       readable on every one of those frames and not only on the first.</li>
+ *   <li>An RTE's shape is written into the LOW NIBBLE of the volume byte on
+ *       every frame the retrigger code is armed. RhYMe's RTE handler rewrites
+ *       R13 with the player's own copy of the envelope shape; yx6's retrigger
+ *       tick does the same thing but reads the shape out of the voice's volume
+ *       register, so the two have to be brought together, and the volume
+ *       nibble is the only place to put it.</li>
+ * </ul>
+ *
+ * <p>Overwriting a volume nibble is FREE precisely when the register's bit 4,
+ * the envelope-mode bit, is set: the chip then takes the voice's level from the
+ * envelope generator and ignores the nibble entirely. That is also the only
+ * configuration in which a sync-buzzer is audible at all, so a song that means
+ * its RTE has already set it. The nibble is written whether or not the bit is,
+ * though, because the script does not offer the choice: it reads
+ * {@code R(8+voice)} on every frame the retrigger code is armed and patches the
+ * retrigger tick with what it finds, so declining to write is not declining to
+ * be read. It only feeds the buzzer a volume as a shape - at audio rate, for as
+ * long as the effect runs, which is the louder mistake by a wide margin.
+ *
+ * <p>The frames where the nibble is not free are the ARM frames and essentially
+ * only those. An RTE is armed while the voice is still on a plain level and the
+ * song puts it on the envelope from the frame after, which is where it has to be
+ * for the buzzer to be heard at all; on every one of those later frames the
+ * write costs nothing. So what the shape actually costs is one 20 ms frame at
+ * whatever level its number happens to name, on a voice the very next frame
+ * hands to the envelope generator. {@link Tune#notes()} counts the frames
+ * where the byte actually moves - not the frames where bit 4 happens to be
+ * clear, most of which write back the level that was already there - and says
+ * what they cost.
+ *
+ * <h2>What a .YMR asks for and a .yx6 cannot give</h2>
+ *
+ * <p>Three things are converted rather than carried, and each leaves a note.
+ * The format allows 65535 samples and a yx6 sample number is five bits, so
+ * everything past {@link Yx6Format#MAX_SAMPLES} is dropped and a trigger of a
+ * dropped one is reported. A yx6 PCM tick has no loop - it walks forward and
+ * stops on an end marker - so a looped sample's loop region is written out
+ * again and again until the sample reaches {@link #DEFAULT_UNROLL} bytes, and
+ * a song that holds the loop longer than that hears it stop. And a rate pop
+ * that moves a running sample's prescaler is a live reprogram in RhYMe but a
+ * new code byte here, which the script can only read as a new trigger, so the
+ * sample restarts at that frame.
+ *
+ * <p>That last one is the visible face of a limit in the .yx6 ABI rather than
+ * anything this converter chose, and the limit is narrower than it first looks.
+ * RhYMe reprograms a RUNNING timer: control register, then data register, the
+ * timer never stopped, so the effect keeps its place and only its rate moves.
+ * Half of that a yx6 verb does do. A .YMR rate entry is a prescaler and a
+ * counter, only the prescaler is in the code byte, and a pop that moves the
+ * counter alone therefore leaves the code where it was: it compiles to a HOLD
+ * carrying the reload flag, and {@code yx6_hold} writes the new count to a
+ * timer it never stops. That is RhYMe's live reload exactly, and it is what a
+ * pitch slide is made of, so the ordinary case costs nothing.
+ *
+ * <p>What no verb can say is the other half. A pop that moves the PRESCALER
+ * changes the code byte, so it compiles to a program verb, and every verb that
+ * carries a rate goes through {@code yx6_program}, which stops the timer, loads
+ * the count and runs it again, so the period in flight is truncated whichever
+ * verb is used - and that is why a prescaler change under a running RTE
+ * compiles to a plain START_RETRIGGER and no gentler verb is invented for it.
+ * Against START_RETRIGGER, a RETUNE would save one vector write and one patch
+ * of a shape the arm has to get right anyway; it would cost the same stream
+ * bytes, truncate the same period, and sound the same. The gap that is
+ * actually audible - a rate that moves without disturbing the effect under it -
+ * is one no verb in the format can close, so it is named here rather than
+ * papered over.
+ *
+ * <p>One thing is knowingly not handled. A frame that pops the effect stream
+ * with the type already running, at the same rate and the same sample, is a
+ * re-configure: RhYMe restarts the timer for it, which puts a PWM's phase back
+ * to zero and re-primes an RTE's shape. Here it produces a code byte identical
+ * to the last one, and the script acts on a code that CHANGED, so nothing is
+ * emitted. RhYMe's own exporter cannot write that frame - its stream set
+ * suppresses an effect pop that repeats the type - so only a .YMR from some
+ * other writer reaches it, and what such a file loses is one truncated timer
+ * period and, for a PWM, a phase discontinuity of one tick in a frame twenty
+ * milliseconds long. Making the code differ would mean flipping the trigger bit
+ * on every configure and not only on a sample's, which would compile a file
+ * that pops redundantly every frame into a full restart every frame - real
+ * stream bytes and a hard phase reset at frame rate, bought for a difference at
+ * the edge of hearing. The trigger bit stays a sample's alone.
+ */
+public final class YmrEffects {
+
+    /** Timer channels a .YMR fills: one per timer the format gives effects. */
+    public static final int CHANNELS = YmrReader.TIMER_COUNT;
+
+    /**
+     * The channel-to-timer map the T stream carries, two bits a channel.
+     *
+     * <p>It is the spec's normative binding and nothing else: channel 0 on
+     * Timer A, 1 on B, 2 on D. The fourth channel no .YMR fills takes Timer C,
+     * which keeps the map a permutation and costs nothing, since the header
+     * never flags a channel the tune leaves idle and the player claims no
+     * timer for it.
+     */
+    public static final int TIMERS = Yx6Format.TIMER_A
+            | (Yx6Format.TIMER_B << 2)
+            | (Yx6Format.TIMER_D << 4)
+            | (Yx6Format.TIMER_C << 6);
+
+    /**
+     * What the script has to be told about .YMR, in its own words.
+     *
+     * <p>A held PCM code does not retrigger, because a .YMR's trigger is a pop
+     * and not the code's continued presence. A voice playing a sample keeps its
+     * mixer bits, because RhYMe's player never touches R7 for an effect: the
+     * mixer is the song's, written by the {@code mixer} stream like any other
+     * register, and a song that wants its sample clean has already disconnected
+     * the voice itself. And a channel's own commands end the sample running on
+     * it: an effect pop of 0 routes to {@code _ymr_stop_channel}, which stops
+     * the timer, forgets the effect and the sample and writes the voice's
+     * volume back out of the shadow, and an effect pop of anything else
+     * reprograms the one timer the sample was ticking on. Either way the sample
+     * ends on that frame, so the script must not leave it running to its marker.
+     */
+    public static final EffectScript.Semantics SEMANTICS =
+            new EffectScript.Semantics(false, false, true);
+
+    /** Code bit 3: flipped on every sample trigger, so that two pops of one
+     * index at one rate are two different code bytes and the script starts the
+     * sample twice. See this class's javadoc for why the bit is free. */
+    public static final int TRIGGER = 0x08;
+
+    /** How far a looped sample is unrolled before it is left to stop. Eight
+     * kilobytes is about ten seconds of a 800 Hz drum loop and about a fifth
+     * of a second of a 40 kHz one; past that the file grows faster than the
+     * loop is likely to be held. */
+    public static final int DEFAULT_UNROLL = 8192;
+
+    /** A yx6 sample table entry stores its length in a word, so no sample -
+     * unrolled or not - may pass this. */
+    private static final int MAX_SAMPLE_BYTES = 65535;
+
+    /** Bit 4 of a volume register: the voice takes its level from the envelope
+     * generator, and the volume nibble is ignored. */
+    private static final int ENVELOPE_MODE = 0x10;
+
+    /** The shape an RTE retriggers before the song has ever popped one -
+     * {@code ENV_SHAPE_INIT} in the RhYMe player, and a value the spec names. */
+    private static final int SHAPE_BEFORE_ANY_POP = 0x08;
+
+    /** R13, the envelope shape, and R8, the first of the three volume
+     * registers a timer effect's parameter is read out of. */
+    private static final int R_ENVELOPE_SHAPE = 13;
+    private static final int R_VOLUME_A = 8;
+
+    /** The largest sample number a yx6 PCM action can name, from the five bits
+     * the script reads it out of. */
+    private static final int SAMPLES = Yx6Format.MAX_SAMPLES;
+
+    private final YmrReader.Song source;
+    private final String name;
+    private final int unrollLimit;
+    private final int frames;
+    private final byte[][] registers;
+    private final byte[][] codes = new byte[CHANNELS][];
+    private final byte[][] counts = new byte[CHANNELS][];
+    private final byte[][] samples;
+    private final int[] shapes;
+    private final List<String> notes = new ArrayList<>();
+
+    // What each channel had to have changed, counted rather than reported a
+    // frame at a time: a song 9984 frames long can break one rule on a
+    // thousand of them and still only be doing one thing wrong.
+    private final int[] reservedEffect = new int[CHANNELS];
+    private final int[] reservedType = new int[CHANNELS];
+    private final int[] stoppedTimer = new int[CHANNELS];
+    private final int[] plainVolumeRte = new int[CHANNELS];
+    private final int[] missingSample = new int[CHANNELS];
+    private final int[] cappedSample = new int[CHANNELS];
+    private final int[] rateRestart = new int[CHANNELS];
+    private final boolean[] triggersAtLoop = new boolean[CHANNELS];
+
+    private YmrEffects(YmrReader.Song source, String name, int unrollLimit) {
+        this.source = source;
+        this.name = name;
+        this.unrollLimit = unrollLimit;
+        this.frames = source.frameCount();
+        this.registers = new byte[YmrReader.REGISTER_COUNT][];
+        this.samples = prepareSamples();
+        this.shapes = new int[frames];
+    }
+
+    /** Converts a song, unrolling looped samples to {@link #DEFAULT_UNROLL}. */
+    public static Tune convert(YmrReader.Song song, String name) {
+        return convert(song, name, DEFAULT_UNROLL);
+    }
+
+    /**
+     * As above, with the ceiling a looped sample is unrolled to.
+     *
+     * @param name what to call the song. A .YMR carries no metadata at all -
+     *             no title, no author, no comment - so the caller's file stem
+     *             is the only name there is, and the other two come out empty.
+     */
+    public static Tune convert(YmrReader.Song song, String name, int unrollLimit) {
+        return new YmrEffects(song, name, unrollLimit).run();
+    }
+
+    private Tune run() {
+        for (int r = 0; r < YmrReader.REGISTER_COUNT; r++) {
+            registers[r] = source.registers()[r].clone();
+        }
+        trackShapes();
+        for (int channel = 0; channel < CHANNELS; channel++) {
+            walk(channel);
+        }
+        reportChannels();
+        reportLostLoopTriggers();
+
+        // A .YMR carries no metadata at all, so the author and the comment
+        // come out empty and the caller's file stem is the only name there is.
+        return new Tune(frames, source.frameRate(), source.ymClock(),
+                source.loops() ? source.loopFrame() : frames,
+                registers, codes, counts, samples, SEMANTICS,
+                name, "", "", notes);
+    }
+
+    // ------------------------------------------------------------- the samples
+
+    /**
+     * The sample blocks as the file stores them, capped and unrolled.
+     *
+     * <p>Nothing is converted on the way: RhYMe's exporter has already reduced
+     * every sample to the 4-bit levels the PSG's volume register takes, which
+     * is what lets its timer ISR write a byte straight to the chip with no
+     * table in between - and what makes this the one thing a .YMR hands over
+     * that needs no work at all. A YM digidrum arrives 8-bit and its own
+     * front end has to fold it down; here the bytes are the levels.
+     */
+    private byte[][] prepareSamples() {
+        List<YmrReader.Sample> blocks = source.samples();
+        int keep = Math.min(blocks.size(), SAMPLES);
+        if (blocks.size() > keep) {
+            note("samples " + keep + ".." + (blocks.size() - 1) + " dropped: a yx6 sample"
+                    + " number is the five bits the script reads out of a volume"
+                    + " register, so the format carries " + SAMPLES + " and this song has "
+                    + blocks.size());
+        }
+        byte[][] prepared = new byte[keep][];
+        for (int index = 0; index < keep; index++) {
+            prepared[index] = prepare(index, blocks.get(index));
+        }
+        return prepared;
+    }
+
+    /**
+     * One sample block, with its loop written out.
+     *
+     * <p>A yx6 PCM stream has no loop to give: its tick handler walks forward
+     * and stops on the first byte with bit 7 set, which is the whole of its
+     * end condition and the reason it costs no compare. So a looped sample is
+     * unrolled instead - the loop region repeated until the sample reaches the
+     * ceiling - and what a song loses is the tail of a note held longer than
+     * the unrolled copy lasts. The voice does not stick there: the script
+     * reopens its gate at the computed end and the frame write puts the
+     * shadow volume back, which is what a .YMR player does when a one-shot
+     * sample runs out.
+     */
+    private byte[] prepare(int index, YmrReader.Sample block) {
+        byte[] data = levels(index, block.data());
+        if (data.length > MAX_SAMPLE_BYTES) {
+            // The format allows a sample of 65536 bytes and a yx6 sample table
+            // entry holds its length in a word, so the very largest a .YMR may
+            // carry is one byte too long to describe.
+            note("sample " + index + " is " + data.length + " bytes, past the "
+                    + MAX_SAMPLE_BYTES + " a yx6 sample table entry's word-sized length"
+                    + " can name: cut to fit");
+            data = Arrays.copyOf(data, MAX_SAMPLE_BYTES);
+        }
+        if (!block.looped()) {
+            return data;
+        }
+        int start = block.loopStart();
+        if (start >= data.length) {
+            note("sample " + index + " is marked looped from " + start + ", which is past"
+                    + " its " + data.length + " bytes: played once instead");
+            return data;
+        }
+        int region = data.length - start;
+        int ceiling = Math.min(unrollLimit, MAX_SAMPLE_BYTES);
+        int repeats = data.length >= ceiling ? 0 : (ceiling - data.length) / region;
+        byte[] unrolled = Arrays.copyOf(data, data.length + repeats * region);
+        for (int copy = 0; copy < repeats; copy++) {
+            System.arraycopy(data, start, unrolled,
+                    data.length + copy * region, region);
+        }
+        note("sample " + index + " loops from " + start + " and a PCM stream cannot: its"
+                + " loop was written out " + repeats + " more time"
+                + (repeats == 1 ? "" : "s")
+                + ", " + data.length + " -> " + unrolled.length + " bytes, and the voice"
+                + " comes back to its frame volume after that");
+        return unrolled;
+    }
+
+    /**
+     * The block's bytes, with anything above a 4-bit level masked away. The
+     * exporter writes 0..15 and nothing else, but a byte with bit 7 set would
+     * be read by the PCM tick as the end marker and cut the sample there, so
+     * this is worth the one pass it costs.
+     */
+    private byte[] levels(int index, byte[] data) {
+        byte[] out = data.clone();
+        int wrong = 0;
+        for (int i = 0; i < out.length; i++) {
+            if ((out[i] & 0xFF) > 15) {
+                out[i] = (byte) (out[i] & 15);
+                wrong++;
+            }
+        }
+        if (wrong > 0) {
+            note("sample " + index + " carries " + wrong + " byte" + (wrong == 1 ? "" : "s")
+                    + " above the 4-bit level the format defines; masked, since a byte"
+                    + " with bit 7 set is what ends a PCM stream");
+        }
+        return out;
+    }
+
+    // -------------------------------------------------------------- the shapes
+
+    /**
+     * The envelope shape in force on every frame - the player's own copy of
+     * R13, which is not the same thing as the register vector.
+     *
+     * <p>R13 is the one register a .YMR frame may decline to write, and the
+     * reader marks a frame that did not pop it with
+     * {@link YmrReader#NO_ENVELOPE_SHAPE}. An RTE retriggers whatever shape
+     * was last set, though, so the value it wants is the last one popped
+     * rather than this frame's marker - and before the song has popped one at
+     * all, the spec says to assume $08, which is what RhYMe's player primes
+     * its shadow with.
+     */
+    private void trackShapes() {
+        int shape = SHAPE_BEFORE_ANY_POP;
+        for (int frame = 0; frame < frames; frame++) {
+            int written = registers[R_ENVELOPE_SHAPE][frame] & 0xFF;
+            if (written != YmrReader.NO_ENVELOPE_SHAPE) {
+                shape = written;
+            }
+            shapes[frame] = shape & 15;
+        }
+    }
+
+    // ------------------------------------------------------------- the streams
+
+    /**
+     * One channel's whole timeline, replayed the way {@code _ymr_process_tmr}
+     * reconciles it once a frame's commands have been read.
+     *
+     * <p>The rule is entirely about pops, because a value that did not pop did
+     * not change: popping the effect stream with something in it CONFIGURES
+     * the timer - which restarts a sample even when the index it names is the
+     * one already playing - popping it with 0 stops the timer, popping the
+     * sample stream restarts the sample on a timer that is already running,
+     * and a rate pop on its own reprograms the prescaler and counter without
+     * disturbing anything, so a pitch slide does not restart a sample or reset
+     * a PWM's phase. A frame that pops none of the three changes nothing at
+     * all.
+     */
+    private void walk(int channel) {
+        int voice = channel;                    // the binding; see TIMERS
+        codes[channel] = new byte[frames];
+        counts[channel] = new byte[frames];
+
+        int running = YmrReader.TimerFrame.NONE;
+        int prescaler = 0;
+        int counter = 0;
+        int sample = 0;
+        int trigger = 0;                        // the code's bit 3, flipped per trigger
+        int armedTo = 0;                        // frame the armed PCM code goes quiet on
+        int last = 0;
+        int loop = loopFrame();
+        List<YmrReader.TimerFrame> timer = source.timer(channel);
+
+        for (int frame = 0; frame < frames; frame++) {
+            YmrReader.TimerFrame want = timer.get(frame);
+            boolean configure = false;
+            if (want.effectPopped()) {
+                if (want.effect() == YmrReader.TimerFrame.NONE) {
+                    running = YmrReader.TimerFrame.NONE;
+                } else {
+                    configure = true;
+                }
+            } else if (running != YmrReader.TimerFrame.NONE && want.samplePopped()) {
+                configure = true;
+            }
+            boolean started = false;
+            if (configure) {
+                running = want.effect();
+                prescaler = want.prescaler();
+                counter = want.counter();
+                sample = want.sample();
+                started = running == YmrReader.TimerFrame.SAMPLE;
+                if (started) {
+                    trigger ^= TRIGGER;
+                }
+            } else if (running != YmrReader.TimerFrame.NONE && want.ratePopped()) {
+                prescaler = want.prescaler();
+                counter = want.counter();
+            }
+
+            int code = code(channel, voice, running, prescaler, counter, sample,
+                    trigger, started, frame, armedTo);
+            if ((code & 0xC0) == Tune.KIND_PCM && code != last) {
+                // The script starts a sample wherever a PCM code changes,
+                // however the change came about, so this is where the window
+                // opens - and where a rate pop that moved the prescaler has to
+                // own up to having restarted the sample it was sliding.
+                if (!started) {
+                    rateRestart[channel]++;
+                }
+                if (frame == loop) {
+                    triggersAtLoop[channel] = true;
+                }
+                armedTo = frame + armed(sample, prescaler, counter);
+            }
+            last = code;
+            codes[channel][frame] = (byte) code;
+            counts[channel][frame] = (byte) (code == 0 ? 0 : counter);
+            parameter(channel, voice, code, frame, sample);
+        }
+    }
+
+    /**
+     * The code byte for one frame, or 0 for a channel with nothing to run.
+     *
+     * <p>Three things put a channel back to idle whatever its streams say. A
+     * reserved effect type is one this converter will not guess at: RhYMe's
+     * own player falls through to PWM for anything it does not recognise, but
+     * the spec reserves 4-255 and a wrong guess is a wrong sound. A prescaler
+     * index of 0 is the MFP's stopped state and a counter of 0 leaves nothing
+     * to count down, so a timer configured with either never ticks. And a
+     * sample whose block is not in the file - or was dropped past the cap -
+     * has nothing to play.
+     */
+    private int code(int channel, int voice, int running, int prescaler, int counter,
+                     int sample, int trigger, boolean started, int frame, int armedTo) {
+        if (running == YmrReader.TimerFrame.NONE) {
+            return 0;
+        }
+        int kind = switch (running) {
+            case YmrReader.TimerFrame.PWM -> Tune.KIND_TOGGLE;
+            case YmrReader.TimerFrame.SAMPLE -> Tune.KIND_PCM;
+            case YmrReader.TimerFrame.RTE -> Tune.KIND_RETRIGGER;
+            default -> -1;
+        };
+        if (kind < 0) {
+            reservedEffect[channel]++;
+            reservedType[channel] = running;
+            return 0;
+        }
+        if (Tune.prescaler(prescaler & 7) == 0 || counter == 0) {
+            stoppedTimer[channel]++;
+            return 0;
+        }
+        int head = kind | ((voice + 1) << 4) | (prescaler & 7);
+        if (kind != Tune.KIND_PCM) {
+            return head;
+        }
+        if (sample >= samples.length) {
+            if (started) {
+                if (sample < source.samples().size()) {
+                    cappedSample[channel]++;
+                } else {
+                    missingSample[channel]++;
+                }
+            }
+            return 0;
+        }
+        // A sample that has played out leaves the channel idle rather than
+        // holding a code nothing acts on: the script releases a PCM channel
+        // without emitting anything at all - the marker tick is what ended it -
+        // and letting the code go frees the volume register's frame write,
+        // which is where the voice's own volume comes back from.
+        return started || frame < armedTo ? head | trigger : 0;
+    }
+
+    /**
+     * The parameter the script will read for this frame's code out of the
+     * voice's volume register - a PCM stream's sample number, or a retrigger
+     * stream's envelope shape. A toggle stream's volume is already there.
+     */
+    private void parameter(int channel, int voice, int code, int frame, int sample) {
+        if (code == 0) {
+            return;
+        }
+        int register = R_VOLUME_A + voice;
+        int kind = code & 0xC0;
+        if (kind == Tune.KIND_PCM) {
+            registers[register][frame] = (byte) sample;
+        } else if (kind == Tune.KIND_RETRIGGER) {
+            int volume = registers[register][frame] & 0xFF;
+            // The shape goes in whatever bit 4 says, because the script reads
+            // this byte whatever bit 4 says: see this class's javadoc. What is
+            // worth counting is the frames where that costs something, which
+            // is neither "bit 4 is clear" nor "the nibble differs" but both -
+            // a voice on the envelope generator does not hear its nibble, and
+            // a nibble that already holds the shape does not move.
+            if ((volume & ENVELOPE_MODE) == 0 && (volume & 15) != shapes[frame]) {
+                plainVolumeRte[channel]++;
+            }
+            registers[register][frame] = (byte) ((volume & ~15) | shapes[frame]);
+        }
+    }
+
+    /**
+     * How many frames a sample armed with this rate stays armed for.
+     *
+     * <p>This is {@code EffectScript.duration}'s arithmetic, deliberately
+     * repeated: the two have to agree on the frame the voice comes back, and
+     * they are computing it from the same four numbers - the sample's length
+     * plus its end marker, the timer divisor, the frame rate, and the
+     * sixteenth of a frame the trigger action itself runs into. If they
+     * disagree the code would still be armed on the frame the gate reopens,
+     * and the sample number sitting in the volume register would be written to
+     * the chip as a volume.
+     */
+    private int armed(int sample, int prescaler, int counter) {
+        long ticks = samples[sample].length + 1L;
+        long divisor = (long) Tune.prescaler(prescaler & 7) * counter;
+        long scaled = ticks * divisor * source.frameRate() + Tune.MFP_CLOCK / 16;
+        return (int) ((scaled + Tune.MFP_CLOCK - 1) / Tune.MFP_CLOCK);
+    }
+
+    private int loopFrame() {
+        return source.loops() ? source.loopFrame() : -1;
+    }
+
+    // --------------------------------------------------------------- the notes
+
+    private void note(String what) {
+        notes.add(what);
+    }
+
+    /** One line per channel per thing that channel had to have changed. */
+    private void reportChannels() {
+        for (int channel = 0; channel < CHANNELS; channel++) {
+            String timer = "Timer " + "ABD".charAt(channel);
+            String voice = "voice " + (char) ('A' + channel);
+            if (reservedEffect[channel] > 0) {
+                note(timer + " runs effect type " + reservedType[channel] + " on "
+                        + frameCount(reservedEffect[channel]) + ", which version 1.3"
+                        + " reserves: dropped rather than guessed at");
+            }
+            if (stoppedTimer[channel] > 0) {
+                note(timer + " is configured with a prescaler or counter of 0 on "
+                        + frameCount(stoppedTimer[channel]) + ", which is the MFP's"
+                        + " stopped state: nothing was armed there");
+            }
+            if (missingSample[channel] > 0) {
+                note(timer + " triggers a sample with no block behind it "
+                        + times(missingSample[channel]) + ": nothing plays");
+            }
+            if (cappedSample[channel] > 0) {
+                note(timer + " triggers a sample past the " + SAMPLES + " this format"
+                        + " carries " + times(cappedSample[channel]) + ": nothing plays");
+            }
+            if (plainVolumeRte[channel] > 0) {
+                note(timer + "'s RTE takes the volume nibble of " + voice + " on "
+                        + frameCount(plainVolumeRte[channel]) + " where the voice is"
+                        + " still on a plain level and the shape is not the level:"
+                        + " the buzzer needs its shape more than those frames need"
+                        + " their volume, so each one plays at the level the shape's"
+                        + " number happens to name until the envelope takes the voice");
+            }
+            if (rateRestart[channel] > 0) {
+                note(timer + " moves a running sample's prescaler "
+                        + times(rateRestart[channel]) + ": RhYMe reprograms the timer live,"
+                        + " and a yx6 PCM stream has no verb for that, so the sample"
+                        + " restarts there");
+            }
+        }
+    }
+
+    /**
+     * A trigger on the loop frame that the last frame's code already carries
+     * is a trigger the wrap swallows: the script acts on a code that CHANGED,
+     * and coming round from the end of the song this one does not. Within the
+     * song bit 3 rules that out, because it flips on every trigger; across the
+     * wrap the two frames are only neighbours by accident and nothing can make
+     * them differ.
+     */
+    private void reportLostLoopTriggers() {
+        int loop = loopFrame();
+        if (loop < 0 || frames < 2) {
+            return;
+        }
+        for (int channel = 0; channel < CHANNELS; channel++) {
+            if (triggersAtLoop[channel]
+                    && codes[channel][loop] == codes[channel][frames - 1]) {
+                note("Timer " + "ABD".charAt(channel) + " triggers a sample on loop frame "
+                        + loop + " with the same code the song's last frame ends on, so"
+                        + " the trigger is heard on the first pass and not on the ones"
+                        + " after");
+            }
+        }
+    }
+
+    private static String frameCount(int count) {
+        return count + " frame" + (count == 1 ? "" : "s");
+    }
+
+    private static String times(int count) {
+        return count == 1 ? "once" : count + " times";
+    }
+}

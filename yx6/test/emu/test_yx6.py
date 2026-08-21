@@ -144,7 +144,7 @@ def pack(tune: bytes, ring: int, chunk: int, loop, unit: int = 1,
         with tempfile.TemporaryDirectory() as directory:
             source = Path(directory) / 'tune.ym'
             source.write_bytes(tune)
-            subprocess.run(['java', '-ea', '-cp', str(CLASSES), 'org.yx6.Yx6', '-f',
+            subprocess.run(['java', '-ea', '-cp', str(CLASSES), 'org.ym6.Yx6', '-f',
                             f'-n{ring}', f'-c{chunk}', f'-k{unit}', option,
                             *extra, str(source), str(cached)],
                            check=True, capture_output=True)

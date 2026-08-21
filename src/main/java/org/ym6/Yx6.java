@@ -1,9 +1,14 @@
-package org.yx6;
+package org.ym6;
 
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.function.IntPredicate;
 import org.jspecify.annotations.Nullable;
+import org.yx6.EffectScript;
+import org.yx6.Tune;
+import org.yx6.Yx6Encoder;
+import org.yx6.Yx6Format;
 
 /**
  * Command-line YM to yx6 packer: reads a YM5!/YM6! register dump and writes a
@@ -12,6 +17,13 @@ import org.jspecify.annotations.Nullable;
  * <p>The player covers the fourteen standard YM2149 registers and the YM
  * special effects - digidrums, SID voices, the sync-buzzer - extracted into
  * their own streams; only the never-implemented sinus-SID is dropped.
+ *
+ * <p>The class is named after the format it writes rather than the one it
+ * reads, which reads oddly beside {@code org.ymr.Ymr} in the package next
+ * door. It stays that way because the name is published: the pom's
+ * {@code exec:exec@yx6} profile, {@code yx6/README.md} and the Python test
+ * rigs all spell it out on a command line, and a rename would break every
+ * one of them to settle a matter of taste.
  */
 public final class Yx6 {
 
@@ -42,8 +54,8 @@ public final class Yx6 {
                 throw error(args[1] + ": " + e.getMessage());
             }
             int loop = (int) Math.min(song.loopFrame(), Integer.MAX_VALUE);
-            EffectScript.Result script = EffectScript.compile(song,
-                    YmEffects.extract(song), loop < song.frames() ? loop : 0, 1);
+            EffectScript.Result script = EffectScript.compile(YmEffects.tune(song),
+                    loop < song.frames() ? loop : 0, 1);
             System.out.printf("%d frames, split %d%n", script.frames(), script.split());
             for (int f = 0; f < script.frames(); f++) {
                 if (script.m()[f] == 0 && script.r7force()[f] == 0) {
@@ -318,6 +330,15 @@ public final class Yx6 {
             loopFrame = -1;
         }
 
+        // The boundary: from here on the tune is the engine's, and the dump is
+        // kept only for what the report and the padding rule have to say about
+        // the FILE - its dialect, its strings, where its effect codes sit. The
+        // extraction happens here rather than inside the encoder because its
+        // drop counters are a statement about the file, and padding, which
+        // comes next, invents frames the file never had.
+        YmEffects.Extraction effects = YmEffects.extract(song, drumHz);
+        Tune tune = YmEffects.tune(song, effects);
+
         // The default unit is 2, measured a few percent cheaper per frame for
         // little ratio. A tune whose length or loop frame is odd is PADDED to
         // the shape: a duplicated frame holds the chip state one tick longer,
@@ -326,11 +347,11 @@ public final class Yx6 {
         // frame and says what it did. An explicit -kK pads the same way and
         // fails loudly only when no safe frame exists.
         if (unit == 0 && chunk % 2 == 0) {
-            Ym6Reader.Song padded = padToUnit(song, loopFrame, 2);
+            Tune padded = padToUnit(song, tune, loopFrame, 2);
             if (padded != null) {
-                if (padded != song) {
-                    song = padded;
-                    loopFrame = loopFrame > 0 ? (int) song.loopFrame() : loopFrame;
+                if (padded != tune) {
+                    tune = padded;
+                    loopFrame = loopFrame > 0 ? tune.loopFrame() : loopFrame;
                 }
                 unit = 2;
             } else {
@@ -342,17 +363,17 @@ public final class Yx6 {
         } else if (unit == 0) {
             unit = 1;
         } else if (unit > 1) {
-            Ym6Reader.Song padded = padToUnit(song, loopFrame, unit);
-            if (padded != null && padded != song) {
-                song = padded;
-                loopFrame = loopFrame > 0 ? (int) song.loopFrame() : loopFrame;
+            Tune padded = padToUnit(song, tune, loopFrame, unit);
+            if (padded != null && padded != tune) {
+                tune = padded;
+                loopFrame = loopFrame > 0 ? tune.loopFrame() : loopFrame;
             }
         }
 
         Yx6Encoder.Result result;
         try {
-            result = Yx6Encoder.encode(song, ringSize, chunk, loopFrame, true, unit,
-                    drumHz, sidResume, timerMap);
+            result = Yx6Encoder.encode(tune, ringSize, chunk, loopFrame, true, unit,
+                    sidResume, timerMap);
         } catch (IllegalArgumentException e) {
             // The encoder always says what it rejected, but getMessage() is
             // @Nullable, so give it something to fall back on.
@@ -365,95 +386,64 @@ public final class Yx6 {
             throw error("Cannot write output file " + outputName);
         }
 
-        report(song, result);
+        report(song, effects, result);
     }
 
     /**
-     * Pads the tune so its length and loop split are whole {@code unit}s, by
-     * duplicating safe frames: one that neither writes R13 nor triggers a
-     * drum can hold the chip state one tick longer without being heard. The
-     * split is evened by duplicating a safe frame inside the intro, the
-     * length by duplicating one at the tail. Returns the song itself when
-     * the shape already fits, the padded song otherwise - or null when no
-     * safe frame exists within 64 frames of a boundary that needs one.
+     * Pads the tune to whole {@code unit}s, with the YM dump's own idea of
+     * which frame may be duplicated: {@link Tune#padToUnit} does the work and
+     * this says what is safe. The mechanism is the engine's because a frame is
+     * a column across every stream and stretching one and not the others would
+     * put the effects a frame out; the rule is the dump's because only a YM
+     * reader can see a drum trigger in R1 or R3.
+     *
+     * <p>Returns the tune itself when the shape already fits, the padded tune
+     * otherwise - or null when no safe frame exists near a boundary that needs
+     * one, which is the caller's cue to drop to {@code -k1}.
      */
-    static Ym6Reader.@Nullable Song padToUnit(Ym6Reader.Song song, int loopFrame, int unit) {
-        int split = loopFrame > 0 ? loopFrame : 0;
-        int splitPad = split > 0 ? (unit - split % unit) % unit : 0;
-        int frames = song.frames() + splitPad;
-        int endPad = (unit - frames % unit) % unit;
-        if (splitPad == 0 && endPad == 0) {
-            return song;
+    static @Nullable Tune padToUnit(Ym6Reader.Song song, Tune tune, int loopFrame,
+                                    int unit) {
+        Tune padded = Tune.padToUnit(tune, loopFrame, unit, safeToDuplicate(song));
+        if (padded != null && padded != tune) {
+            int added = padded.frames() - tune.frames();
+            System.out.printf("Padded %d frame%s (duplicates of safe frames) so the "
+                    + "shape is whole %d-byte units%n", added, added == 1 ? "" : "s",
+                    unit);
         }
-        int atSplit = splitPad > 0 ? safeFrame(song, split - 1, 0) : -1;
-        if (splitPad > 0 && atSplit < 0) {
-            return null;
-        }
-        int atEnd = endPad > 0 ? safeFrame(song, song.frames() - 1,
-                Math.max(split, song.frames() - 64)) : -1;
-        if (endPad > 0 && atEnd < 0) {
-            return null;
-        }
-        int total = song.frames() + splitPad + endPad;
-        byte[][] out = new byte[song.registers().length][];
-        for (int r = 0; r < out.length; r++) {
-            byte[] v = song.registers()[r];
-            byte[] cut = new byte[total];
-            int at = 0;
-            for (int f = 0; f < song.frames(); f++) {
-                cut[at++] = v[f];
-                if (f == atSplit) {
-                    for (int d = 0; d < splitPad; d++) {
-                        cut[at++] = v[f];
-                    }
-                }
-                if (f == atEnd) {
-                    for (int d = 0; d < endPad; d++) {
-                        cut[at++] = v[f];
-                    }
-                }
-            }
-            out[r] = cut;
-        }
-        long loop = split > 0 ? split + splitPad : song.loopFrame();
-        System.out.printf("Padded %d frame%s (duplicates of safe frames) so the "
-                + "shape is whole %d-byte units%n", splitPad + endPad,
-                splitPad + endPad == 1 ? "" : "s", unit);
-        return new Ym6Reader.Song(song.format(), total, song.playerHz(),
-                song.masterClock(), loop, song.interleaved(), song.attributes(),
-                song.drums(), song.name(), song.author(), song.comment(), out);
+        return padded;
     }
 
     /**
-     * The nearest frame at or before {@code from} (not before {@code floor})
-     * that is safe to duplicate: R13 quiet, no drum code in either slot's
-     * effect field - a duplicated drum code would trigger the drum again.
+     * Which frames of this dump may be duplicated without being heard: R13
+     * quiet, and no drum code in either slot's effect field - a duplicated
+     * drum code would trigger the drum again. The test is on the RAW dump
+     * rather than on the extracted codes, because a code the extraction
+     * dropped is still a code the frame's registers carry, and the tune plays
+     * the same either way while the frames near the boundary are cheap.
      */
-    private static int safeFrame(Ym6Reader.Song song, int from, int floor) {
+    private static IntPredicate safeToDuplicate(Ym6Reader.Song song) {
         byte[][] r = song.registers();
         boolean ym6 = song.format().startsWith("YM6");
-        for (int f = from; f >= Math.max(floor, from - 63); f--) {
+        return f -> {
             if ((r[13][f] & 0xFF) != 0xFF) {
-                continue;                       // this frame restarts the
+                return false;                   // this frame restarts the
             }                                   // envelope: not twice
             int c1 = r[1][f] & 0xF0;
             int c3 = r[3][f] & 0xF0;
             boolean drum = ym6 ? (c1 & 0xC0) == 0x40 && (c1 & 0x30) != 0
                     || (c3 & 0xC0) == 0x40 && (c3 & 0x30) != 0
                     : (c3 & 0x30) != 0;
-            if (!drum) {
-                return f;
-            }
-        }
-        return -1;
+            return !drum;
+        };
     }
 
-    private static void report(Ym6Reader.Song song, Yx6Encoder.Result result) {
+    private static void report(Ym6Reader.Song song, YmEffects.Extraction effects,
+                               Yx6Encoder.Result result) {
+        Tune tune = result.tune();
         System.out.printf("%s: %s%s%s%n", song.format(),
                 song.name().isBlank() ? "(untitled)" : song.name(),
                 song.author().isBlank() ? "" : " by " + song.author(),
                 song.interleaved() ? "" : " (de-interleaved)");
-        YmEffects.Extraction effects = result.effects();
         if (effects.samples().length > 0) {
             int bytes = 0;
             for (byte[] sample : effects.samples()) {
@@ -480,10 +470,11 @@ public final class Yx6 {
             System.out.println("Warning: " + note);
         }
 
-        int raw = song.frames() * Yx6Format.STREAMS;    // registers and effects alike
+        int raw = tune.frames() * Yx6Format.STREAMS;    // registers and effects alike
         System.out.printf("%d frames at %d Hz (%d:%02d), %d rings of %d bytes, %d per call%n",
-                song.frames(), song.playerHz(),
-                song.frames() / song.playerHz() / 60, song.frames() / song.playerHz() % 60,
+                tune.frames(), tune.frameRate(),
+                tune.frames() / tune.frameRate() / 60,
+                tune.frames() / tune.frameRate() % 60,
                 Yx6Format.STREAMS, result.ringSize(), result.chunk());
         System.out.println(result.loops()
                 ? result.loopFrame() == 0
