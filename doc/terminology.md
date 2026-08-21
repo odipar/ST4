@@ -152,14 +152,17 @@ that speed is.
 ### Where a tick comes from
 
 The timers are in the MFP, whose full name is MC68901. It has four,
-named A to D. YX6 takes A and D, so two tick streams can run at once.
-B and C belong to the system, driving video sync and the 200-a-second
-clock the operating system counts on. A future YX6 format
-allows three, and no more, because one timer has to stay with the
-system.
+named A to D. Timer C belongs to the system: it drives the
+200-a-second clock the operating system counts on, so it always stays
+where it is.
 
-One timer, plus whatever stream runs on it, is a **tick channel**. YX6
-calls its two A and B.
+A **tick channel** is one place a tick stream can run. YX6 has three,
+numbered 1 to 3, and a tune says which of them it uses. Which timer runs
+a channel is the player's choice, not the format's: this player uses
+Timer A for channel 1, Timer D for channel 2 and Timer B for channel 3,
+and claims a timer only for a channel a tune names. A YM file never needs
+more than two, because a YM frame can start at most two effects, so Timer
+B - the one a demo wants for raster work - normally stays free.
 
 The MFP has its own clock at 2,457,600 a second, separate from the
 YM2149's 2 million and unrelated to it. A timer divides that twice: by a
@@ -398,7 +401,7 @@ Names from the hardware, which belong to neither format:
 | Atari ST | YX6 |
 |---|---|
 | VBL, the vertical blank | the usual source of the **frame clock** |
-| MFP timer A and D | the clocks behind **tick channels** A and B |
+| MFP timer A, D and B | the clocks this player puts behind **tick channels** 1, 2 and 3 |
 | the MFP's prescaler and data register | **prescaler** and **timer count** |
 
 Names YX6 itself used before this file, and one from elsewhere:
@@ -471,7 +474,7 @@ chiptune player writes down an answer.
 | **volume** | a voice's loudness, 0 to 15, or a flag meaning "follow the envelope" |
 | **routing** | which generators reach a voice: tone, noise, both or neither |
 | **period** | how long a generator takes per cycle. Bigger period, lower pitch |
-| **timer** | MFP hardware counting down to an interrupt. Four exist; YX6 uses two |
+| **timer** | MFP hardware counting down to an interrupt. Four exist; YX6 uses one per **tick channel** a tune names |
 | **prescaler, timer count** | the two divisors that set a tick rate |
 
 **The model**
@@ -495,7 +498,7 @@ chiptune player writes down an answer.
 | **frame clock, control rate** | 50 a second usually. How often the deciding code runs |
 | **tick clock, audio rate** | 48 to 25,600 a second. How often a sound-shaping write lands |
 | **YM2149 clock** | 2,000,000 a second. Runs the generators; software has no access to it |
-| **tick channel** | one timer plus the stream on it. Two in use, A and B; three allowed |
+| **tick channel** | one place a tick stream can run, numbered 1 to 3. The player gives each a timer |
 | **volume stream** | a tick stream writing a voice's volume. Three of the four are one |
 | **phase** | where a stream is inside its own cycle |
 | **phase policy** | what happens to phase across a stop: free-running, or zero-restart |

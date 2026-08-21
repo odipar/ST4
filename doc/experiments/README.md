@@ -20,3 +20,4 @@ after the decline - the door left open.
 | 2026-08-20 | [the Synergy Credits hunt](2026-08-20-synergy-credits-sid-phase.md) | diagnosed and fixed - a phase bug every write-level instrument called correct |
 | 2026-08-20 | [the drum reopen click](2026-08-20-drum-reopen-click.md) | diagnosed and fixed - one cautionary +1 frame in the packer, a click after every digidrum; differentials must compare event timing, and the capture chain must be validated before the player |
 | 2026-08-20 | [the CoS dump audit](2026-08-20-cos-dump-audit.md) | dump vs original replay - melody exact to 0.00 semitones, drum samples replaced by the converter; en route, the drum rescue became a windowed-sinc resample to the ceiling |
+| 2026-08-21 | [the timers left running](2026-08-21-the-timers-left-running.md) | diagnosed and fixed - identical chip writes, different machine: the host must stop the timers the player does not claim |

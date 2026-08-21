@@ -39,7 +39,11 @@ final class Yx6EncoderTest {
 
         assertEquals(Yx6Format.MAGIC, longAt(file, Yx6Format.OFFSET_MAGIC));
         assertEquals(Yx6Format.VERSION, word(file, Yx6Format.OFFSET_VERSION));
-        assertEquals(0, word(file, Yx6Format.OFFSET_FLAGS), "a play-once tune does not loop");
+        assertEquals(0, word(file, Yx6Format.OFFSET_FLAGS) & Yx6Format.FLAG_LOOPS,
+                "a play-once tune does not loop");
+        assertEquals(0, word(file, Yx6Format.OFFSET_FLAGS) & Yx6Format.flagChannel(2),
+                "a YM frame starts at most two effects, so no YM tune ever asks"
+                        + " for the third tick channel - and the host keeps its timer");
         assertEquals(FRAMES, longAt(file, Yx6Format.OFFSET_LOOP_FRAME),
                 "a play-once tune loops at its end");
         assertEquals(FRAMES, longAt(file, Yx6Format.OFFSET_FRAMES));
@@ -61,7 +65,7 @@ final class Yx6EncoderTest {
         assertTrue(file.length - expected < 4, "nothing after the last section but padding");
     }
 
-    /** All nineteen vectors as the encoder should build them: registers
+    /** Every vector as the encoder should build them: registers
      * source-mapped through the split rotation with R7 carrying the baked
      * mixer force, then the compiled script streams with their unread
      * bytes repeating. The same assembly the encoder performs - which is
@@ -84,14 +88,14 @@ final class Yx6EncoderTest {
             vectors[register] = played;
         }
         vectors[Yx6Format.STREAM_M] = script.m();
-        vectors[Yx6Format.STREAM_A1] = Yx6Encoder.carry(script.a1(), script.m(),
-                EffectScript.M_SLOT1, null);
-        vectors[Yx6Format.STREAM_P1] = Yx6Encoder.carry(script.p1(), script.m(),
-                EffectScript.M_SLOT1, script.a1());
-        vectors[Yx6Format.STREAM_A2] = Yx6Encoder.carry(script.a2(), script.m(),
-                EffectScript.M_SLOT2, null);
-        vectors[Yx6Format.STREAM_P2] = Yx6Encoder.carry(script.p2(), script.m(),
-                EffectScript.M_SLOT2, script.a2());
+        vectors[Yx6Format.STREAM_X] = script.x();
+        for (int c = 0; c < Yx6Format.CHANNELS; c++) {
+            int acts = EffectScript.M_CHANNEL_1 << c;
+            vectors[Yx6Format.STREAM_A1 + 2 * c] =
+                    Yx6Encoder.carry(script.actions()[c], script.m(), acts, null);
+            vectors[Yx6Format.STREAM_P1 + 2 * c] = Yx6Encoder.carry(
+                    script.counts()[c], script.m(), acts, script.actions()[c]);
+        }
         return vectors;
     }
 

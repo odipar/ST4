@@ -69,9 +69,12 @@ and its companion case study.
 
 Format v5 replaced the E/T streams and the player's interpreting effect
 stage with the **compiled effect script**: `EffectScript.java` replays every
-rule in this document over the whole timeline at pack time and emits five
+rule in this document over the whole timeline at pack time and emits
 streams of prepared actions — M (what acts this frame; zero almost always),
-A1/P1 and A2/P2 (each slot's action byte and timer count). The player's
+X (the operand an action byte has no room for) and, per tick channel, an
+A/P pair (its action byte and timer count). Format v6 made that three
+channels; a YM frame starts at most two effects, so a YM tune uses two and
+the third's streams pack to nothing. The player's
 handlers copy prepared values into the timers and the tick handlers'
 operands and compare nothing; the voice disconnection of section 4
 arrives baked into the R7 stream, the ring is never edited (the
@@ -94,8 +97,8 @@ mechanism and the budgets still read true.
 > Sections 1 to 6 describe the **v4** shape, where each slot had a control
 > stream and a timer-count stream, E1/T1 and E2/T2. They stay because the
 > rules are still the specification the pack-time simulator implements.
-> The **v5** file replaced those four streams with five of script data,
-> M A1 P1 A2 P2, as section 0 describes and as the container table in
+> The **v6** file replaces those four streams with eight of script data,
+> M X A1 P1 A2 P2 A3 P3, as section 0 describes and as the container table in
 > [README.md](README.md) lays out. Where these sections say "the player
 > decides", read "the packer resolved it, and wrote the answer down".
 
@@ -175,7 +178,7 @@ Survey of 516 local YM files plus the research corpus:
   TP=TC=0 (all must be no-ops, per ST-Sound's `if (prediv*count)` guard),
   and files exist with effect codes set but zero drums in the file.
 
-## 3. The file: yx6 format v4 (superseded by v5)
+## 3. The file: yx6 format v4 (superseded by v5, then v6)
 
 ```
 header as v3 through the master clock, then:
@@ -277,9 +280,9 @@ the hard way - a rig test now packs a pattern that a later match copies
 across a sanitized byte's position, and fails if the byte is not returned.) Idle cost: with the stage inlined
 into YX6_play and each slot gated on E | E-last, an idle frame pays two ring
 pops and two zero tests, ~140 cycles measured from the tables; a running
-drum adds the r7 borrow. One channel machine serves both, aimed by a
-descriptor - last code and count, timer registers, the slot's tick-handler
-block - so the two timers' only remaining difference is data. The tick
+drum adds the r7 borrow. One channel machine serves them all, aimed by a
+descriptor - timer registers, the claim, the channel's tick-handler block -
+so the timers' only remaining difference is data. The tick
 handlers sign off with an immediate byte write to the in-service register
 (it ignores written ones), and a host that never runs user-mode code can
 build with YX6_SUPER_HOST=1 to park the PCM tick's a0 in the USP, 16
@@ -311,21 +314,33 @@ free-runs, which is the original sound.
 
 ## 5. Timers and interrupts
 
-**Channel A → Timer A** (vector $134, control $FFFA19, data $FFFA1F,
-bit 5 of IERA/IMRA/ISRA at $FFFA07/13/0F). **Channel B → Timer D**
+A **tick channel** is what the format names; a timer is what this player
+runs one on. The map lives in one table, `yx6_desc_1` to `yx6_desc_3`, and
+nothing outside it knows which timer serves which channel:
+
+**Channel 1 → Timer A** (vector $134, control $FFFA19, data $FFFA1F,
+bit 5 of IERA/IMRA/ISRA at $FFFA07/13/0F). **Channel 2 → Timer D**
 (vector $110, the low
 nibble of TCDCR $FFFA1D — always read-modify-write, so Timer C's nibble
-is preserved — data $FFFA25, bit 4 of the B registers). This is maxYMiser's
-proven allocation minus its Timer B: **Timer B stays free for raster code**,
-Timer C stays TOS's 200 Hz, and Timer D's only casualty is RS232 baud. The
-YM6 TP value is written verbatim to the control register; T to the data
-register.
+is preserved — data $FFFA25, bit 4 of the B registers). **Channel 3 →
+Timer B** (vector $120, control $FFFA1B, data $FFFA21, bit 0 of the A
+registers). This is maxYMiser's proven allocation, with its Timer B
+reached for last and only on demand: the header names the channels a tune
+uses, `YX6_init` claims a timer for each, and everything else is left
+alone. No YM tune names the third, so **Timer B stays free for raster
+code** unless a tune genuinely needs it — and a tune that does cannot
+share a host with raster work. Timer C stays TOS's 200 Hz, and Timer D's
+only casualty is RS232 baud. The YM6 TP value is written verbatim to the
+control register; T to the data register.
 
 Facts the engine leans on, all verified:
 
 - The whole MFP interrupts at 68000 level 6, so effect ISRs never nest and
-  a PSG select/write pair inside an ISR is atomic against the other timer by
-  construction. The frame burst already runs at $2700, and EmuTOS guards its
+  a PSG select/write pair inside an ISR is atomic against the other timers
+  by construction. (The player then drops to level 5 after the pair, on
+  purpose, so a higher-priority timer's tick need not wait a whole tick —
+  the MFP serves its A bank first, which orders the three Timer A, Timer
+  B, Timer D.) The frame burst already runs at $2700, and EmuTOS guards its
   own PSG port-A access the same way — no new races exist anywhere.
 - TOS runs the MFP in software end-of-interrupt mode (VR = $48): every ISR
   ends with the one `bclr` of its in-service bit (20 cycles). maxYMiser
@@ -419,7 +434,9 @@ player frame — comfortable for a player, worth documenting for demo hosts.
 4. Measure, listen, and only then settle whether Sinus-SID (a sine table
    through the drum engine) ever earns its bytes.
 
-Settled by the research: Timer A + Timer D (B stays for rasters), SEI kept
+Settled by the research: Timer A + Timer D for the two channels a YM tune
+uses, Timer B for the third and only when a tune names it (so B stays for
+rasters otherwise), SEI kept
 (AEI as a host option), drums stored PSG-ready with bit-7 end markers, park
 at $D, TP changes always stop+reload, invalid effects are dropped at
 pack time.

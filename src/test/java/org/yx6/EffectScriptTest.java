@@ -10,8 +10,8 @@ import static org.yx6.EffectScript.VERB_RESUME;
 import static org.yx6.EffectScript.HOLD_VOLUME;
 import static org.yx6.EffectScript.M_GATES;
 import static org.yx6.EffectScript.M_GATE_SHIFT;
-import static org.yx6.EffectScript.M_SLOT1;
-import static org.yx6.EffectScript.M_SLOT2;
+import static org.yx6.EffectScript.M_CHANNEL_1;
+import static org.yx6.EffectScript.M_CHANNEL_2;
 import static org.yx6.EffectScript.VERB_START_RETRIGGER;
 import static org.yx6.EffectScript.VERB_START_PCM;
 import static org.yx6.EffectScript.VERB_START_PCM_PREEMPT;
@@ -105,13 +105,13 @@ final class EffectScriptTest {
     private static void expect(EffectScript.Result r, int frame, int m,
                                int a1, int p1, int a2, int p2) {
         assertEquals(m, r.m()[frame] & 0xFF, "M at frame " + frame);
-        if ((m & M_SLOT1) != 0) {
-            assertEquals(a1, r.a1()[frame] & 0xFF, "A1 at frame " + frame);
-            assertEquals(p1, r.p1()[frame] & 0xFF, "P1 at frame " + frame);
+        if ((m & M_CHANNEL_1) != 0) {
+            assertEquals(a1, r.actions()[0][frame] & 0xFF, "A1 at frame " + frame);
+            assertEquals(p1, r.counts()[0][frame] & 0xFF, "P1 at frame " + frame);
         }
-        if ((m & M_SLOT2) != 0) {
-            assertEquals(a2, r.a2()[frame] & 0xFF, "A2 at frame " + frame);
-            assertEquals(p2, r.p2()[frame] & 0xFF, "P2 at frame " + frame);
+        if ((m & M_CHANNEL_2) != 0) {
+            assertEquals(a2, r.actions()[1][frame] & 0xFF, "A2 at frame " + frame);
+            assertEquals(p2, r.counts()[1][frame] & 0xFF, "P2 at frame " + frame);
         }
     }
 
@@ -124,63 +124,63 @@ final class EffectScriptTest {
         for (int f = 0; f < 5; f++) {
             expect(r, f, 0, 0, 0, 0, 0);
         }
-        expect(r, 5, M_SLOT1 | M_GATES | (1 << M_GATE_SHIFT),
+        expect(r, 5, M_CHANNEL_1 | M_GATES | (1 << M_GATE_SHIFT),
                 action(VERB_START_TOGGLE, 0, 1), 100, 0, 0);
         for (int f = 6; f <= 14; f++) {         // held: the slide emits a
             if (f % 2 == 0) {                   // volume track exactly on
-                expect(r, f, M_SLOT1,           // the frames it changes; P
+                expect(r, f, M_CHANNEL_1,           // the frames it changes; P
                         action(VERB_HOLD, 0, HOLD_VOLUME), 100, 0, 0);
             } else {
                 expect(r, f, 0, 0, 0, 0, 0);
             }
         }
-        expect(r, 15, M_SLOT1,                  // the count reload and the
+        expect(r, 15, M_CHANNEL_1,                  // the count reload and the
                 action(VERB_HOLD, 0, HOLD_RELOAD | HOLD_VOLUME), 80, 0, 0);
         for (int f = 16; f <= 20; f++) {
             expect(r, f, 0, 0, 0, 0, 0);
         }
-        expect(r, 21, M_SLOT1 | M_GATES, action(VERB_RELEASE, 0, 0), 0, 0, 0);
+        expect(r, 21, M_CHANNEL_1 | M_GATES, action(VERB_RELEASE, 0, 0), 0, 0, 0);
 
         // The default (ym2149-rs) gap model: a re-arrival is a full START -
         // phase zero, one silent period, then the loud half.
-        expect(r, 22, M_SLOT1 | M_GATES | (1 << M_GATE_SHIFT),
+        expect(r, 22, M_CHANNEL_1 | M_GATES | (1 << M_GATE_SHIFT),
                 action(VERB_START_TOGGLE, 0, 1), 90, 0, 0);
         expect(r, 23, 0, 0, 0, 0, 0);
         expect(r, 24, 0, 0, 0, 0, 0);
-        expect(r, 25, M_SLOT1, action(VERB_RETUNE, 0, 2), 90, 0, 0);
+        expect(r, 25, M_CHANNEL_1, action(VERB_RETUNE, 0, 2), 90, 0, 0);
         expect(r, 26, 0, 0, 0, 0, 0);
-        expect(r, 27, M_SLOT1 | M_GATES, action(VERB_RELEASE, 0, 0), 0, 0, 0);
+        expect(r, 27, M_CHANNEL_1 | M_GATES, action(VERB_RELEASE, 0, 0), 0, 0, 0);
 
         // The drum: trigger, retrigger with that frame's number, computed
         // end. Sample 0 has 2 values + marker at 4*122: well inside the
         // retrigger's own frame, so the reopen lands on the next boundary.
-        expect(r, 30, M_SLOT2 | M_GATES | (4 << M_GATE_SHIFT),
+        expect(r, 30, M_CHANNEL_2 | M_GATES | (4 << M_GATE_SHIFT),
                 0, 0, action(VERB_START_PCM, 2, 1), 122);
-        expect(r, 31, M_SLOT2, 0, 0, action(VERB_START_PCM, 2, 1), 122);
+        expect(r, 31, M_CHANNEL_2, 0, 0, action(VERB_START_PCM, 2, 1), 122);
         assertEquals(0x24, r.r7force()[31] & 0xFF, "voice C forced while owned");
         expect(r, 32, M_GATES, 0, 0, 0, 0);     // the frame-aligned reopen
         assertEquals(0, r.r7force()[32] & 0xFF);
         expect(r, 33, 0, 0, 0, 0, 0);
         assertTrue(r.reopens().stream().anyMatch(x -> x[0] == 32 && x[1] == 2));
 
-        expect(r, 40, M_SLOT1, action(VERB_START_RETRIGGER, 1, 6), 200, 0, 0);
+        expect(r, 40, M_CHANNEL_1, action(VERB_START_RETRIGGER, 1, 6), 200, 0, 0);
         expect(r, 41, 0, 0, 0, 0, 0);
         expect(r, 42, 0, 0, 0, 0, 0);
-        expect(r, 43, M_SLOT1, action(VERB_RELEASE, 0, 0), 0, 0, 0);
+        expect(r, 43, M_CHANNEL_1, action(VERB_RELEASE, 0, 0), 0, 0, 0);
 
         // Arbitration: the takeover drum stops the SID's timer first, holds
         // the voice's gate (no mask change - it was already closed), and
         // the suppressed SID re-starts when the window ends.
-        expect(r, 45, M_SLOT2 | M_GATES | (2 << M_GATE_SHIFT),
+        expect(r, 45, M_CHANNEL_2 | M_GATES | (2 << M_GATE_SHIFT),
                 0, 0, action(VERB_START_TOGGLE, 1, 1), 90);
-        expect(r, 48, M_SLOT1, action(VERB_START_PCM_PREEMPT, 1, 1), 60, 0, 0);
+        expect(r, 48, M_CHANNEL_1, action(VERB_START_PCM_PREEMPT, 1, 1), 60, 0, 0);
         assertEquals(0x12, r.r7force()[48] & 0xFF, "voice B forced");
-        expect(r, 49, M_SLOT2, 0, 0, action(VERB_START_TOGGLE, 1, 1), 90);
+        expect(r, 49, M_CHANNEL_2, 0, 0, action(VERB_START_TOGGLE, 1, 1), 90);
         assertEquals(0, r.r7force()[49] & 0xFF, "mixer free from the reopen");
         expect(r, 50, 0, 0, 0, 0, 0);
         expect(r, 51, 0, 0, 0, 0, 0);
         expect(r, 52, 0, 0, 0, 0, 0);
-        expect(r, 53, M_SLOT2 | M_GATES, 0, 0, action(VERB_RELEASE, 0, 0), 0);
+        expect(r, 53, M_CHANNEL_2 | M_GATES, 0, 0, action(VERB_RELEASE, 0, 0), 0);
     }
 
     /** The -sidresume gap model on the same scene: releases mask, the
@@ -189,14 +189,14 @@ final class EffectScriptTest {
     @Test
     void theResumeModelMasksAndResumes() {
         EffectScript.Result r = compileResume(rigScene(), -1);
-        expect(r, 21, M_SLOT1 | M_GATES, action(VERB_RELEASE, 0, RELEASE_MASK),
+        expect(r, 21, M_CHANNEL_1 | M_GATES, action(VERB_RELEASE, 0, RELEASE_MASK),
                 0, 0, 0);
-        expect(r, 22, M_SLOT1 | M_GATES | (1 << M_GATE_SHIFT),
+        expect(r, 22, M_CHANNEL_1 | M_GATES | (1 << M_GATE_SHIFT),
                 action(VERB_RESUME, 0, RESUME_RELOAD), 90, 0, 0);
-        expect(r, 27, M_SLOT1 | M_GATES, action(VERB_RELEASE, 0, RELEASE_MASK),
+        expect(r, 27, M_CHANNEL_1 | M_GATES, action(VERB_RELEASE, 0, RELEASE_MASK),
                 0, 0, 0);
-        expect(r, 49, M_SLOT2, 0, 0, action(VERB_START_TOGGLE, 1, 1), 90);
-        expect(r, 53, M_SLOT2 | M_GATES, 0, 0,
+        expect(r, 49, M_CHANNEL_2, 0, 0, action(VERB_START_TOGGLE, 1, 1), 90);
+        expect(r, 53, M_CHANNEL_2 | M_GATES, 0, 0,
                 action(VERB_RELEASE, 0, RELEASE_MASK), 0);
     }
 
@@ -262,7 +262,7 @@ final class EffectScriptTest {
         EffectScript.Result r = compile(song(frames, v, 0, new byte[0][]), -1);
         assertEquals(16, r.frames());
         assertEquals(16, r.split());
-        assertEquals(action(VERB_START_TOGGLE, 0, 1), r.a1()[12] & 0xFF);
+        assertEquals(action(VERB_START_TOGGLE, 0, 1), r.actions()[0][12] & 0xFF);
     }
 
     /** The stuck-flag quirk, replicated: a buzzer arming over its own
@@ -280,7 +280,7 @@ final class EffectScriptTest {
         v[15][6] = 100;
         v[9][6] = 5;
         EffectScript.Result r = compile(song(frames, v, 0, new byte[][] {drum}), -1);
-        assertEquals(action(VERB_START_RETRIGGER, 1, 6), r.a2()[6] & 0xFF);
+        assertEquals(action(VERB_START_RETRIGGER, 1, 6), r.actions()[1][6] & 0xFF);
         for (int f = 6; f < frames; f++) {      // voice A never frees
             assertEquals(0x09, r.r7force()[f] & 0x09, "stuck at " + f);
         }
@@ -293,13 +293,13 @@ final class EffectScriptTest {
         EffectScript.Result r = compile(rigScene(), -1);
         for (int f = 0; f < r.frames(); f++) {
             int mm = r.m()[f] & 0xFF;
-            if ((mm & M_SLOT1) != 0) {
-                assertTrue((r.a1()[f] & 0xFF) != 0, "A1 empty at " + f);
+            if ((mm & M_CHANNEL_1) != 0) {
+                assertTrue((r.actions()[0][f] & 0xFF) != 0, "A1 empty at " + f);
             }
-            if ((mm & M_SLOT2) != 0) {
-                assertTrue((r.a2()[f] & 0xFF) != 0, "A2 empty at " + f);
+            if ((mm & M_CHANNEL_2) != 0) {
+                assertTrue((r.actions()[1][f] & 0xFF) != 0, "A2 empty at " + f);
             }
-            assertEquals(0, mm & 0xC0, "reserved bits at " + f);
+            assertEquals(0, mm & 0x80, "reserved bits at " + f);
         }
     }
 
