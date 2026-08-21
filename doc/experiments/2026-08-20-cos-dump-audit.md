@@ -37,7 +37,7 @@ Timer A EOIs settled it: fully timer-driven.
 * **Drum timing: exact.** The original plays ~658/782-sample hits at
   9,910 Hz (Timer A, TDR 62, /4) - 66-79 ms. The dump's drums are the
   same durations at three times the sample count and three times the
-  rate (1,972 = 657 x 3 at 29,257 Hz). Pitch and length survive.
+  rate (1,972 = 657 x 3 at 29,257 Hz). Pitch and length are preserved.
 * **Drum content: replaced.** The original's samples are nearly binary
   - two thirds 0s and 15s, a bright buzzing waveform. The dump's are
   smooth full-range data; aligned correlation ~0.1. The converter

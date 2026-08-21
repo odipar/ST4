@@ -32,7 +32,7 @@ St4EventOptimizer at ring-equivalent windows.
   format's 32,512-byte offset reach caps the match window at 290 frames.
 
 **Verdict.** Declined. The select immediate plus a straight RAM-to-chip
-byte is the floor for values that live one byte per ring. What the question
+byte is the floor for values stored one byte per ring. What the question
 did surface: the displacement patch (init writes each register's k*N into
 the burst once; N capped at 2520 so 13*N fits a signed word) - adopted,
 99 to 96 harness ticks.

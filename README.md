@@ -117,9 +117,10 @@ straight into what comes next, and literals and longer runs take a counted
 one. Measured on real streams, that is 12–14% fewer cycles for ST4_wrap in a
 small-budget streaming loop, 3–5% in bulk, with no case slower.
 
-State lives in registers: `a0`, `a2`, `a4`, `a5` walk the four streams, `a1`
+State is held in registers: `a0`, `a2`, `a4`, `a5` walk the four streams, `a1`
 writes, `d0.w` holds the bit queue and `d1`/`d2` the counters. Only `a6`, `d6`
-and `d7` survive a call untouched. The destination, stream B and the ring size
+and `d7` are preserved across a call. The destination, stream B and the
+ring size
 must be whole units, so a wide move never lands on an odd address. Each file
 documents its exact contract and numbered assumptions.
 
@@ -143,7 +144,7 @@ stores. `-kK` picks the unit size, `-mN` limits how far back matches may
 reach, and `-lN` splits long matches — the default already fits the 68000
 decoders.
 
-Three optimizers choose the blocks, all held to each other by tests:
+Three optimizers select the blocks, all held to each other by tests:
 
 - **St4Optimizer** — the readable reference. It tries every choice at every
   position and keeps the cheapest.
@@ -232,7 +233,7 @@ idea that is not worth its complexity never has to be measured twice.
 
 ## ST1
 
-ST1 — the ZX1 decoders this grew from, and the jx1 packer — lives in
+ST1 — the ZX1 decoders this grew from, and the jx1 packer — is in
 [odipar/ST1](https://github.com/odipar/ST1). ST4 forked from it at
 `odipar/ST1@132aef0`; the shared emulator harness and the MC68000 cycle
 knowledge in the rigs are carried copies of that repository's, which remains

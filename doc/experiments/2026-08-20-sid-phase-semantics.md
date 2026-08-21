@@ -6,7 +6,7 @@ maxYMiser's replay source, TAO's own driver (disassembled from the SNDH
 archive), sc68, psgplay, AtariAudio and Hatari's MFP models, and a
 pattern-scan of 5,896 depacked SNDH files.
 
-## The hardware ground truth (MC68901, all four MFP models agree)
+## The hardware ground truth (MC68901, all four MFP models match)
 
 - Stopping a timer preserves its main counter; only residual prescaler
   count is lost. Timers RESUME.
@@ -62,7 +62,7 @@ RETUNE keeps the installed half.
 
 Both gap models are now ordinary stream verbs the player always carries:
 verb 0 is the maxYMiser RESUME and STOP grew a mask flag. The packer
-chooses per tune - `-sidresume` selects the mask/resume model, the
+is set per tune - `-sidresume` selects the mask/resume model, the
 ym2149-rs restarts are the default - and since the choice is per emitted
 byte, a future packer could even switch models mid-song; nothing in the
 format forbids it. The Synergy originals (SidSound Designer, binary-only)

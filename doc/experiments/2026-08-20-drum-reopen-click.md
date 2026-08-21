@@ -123,7 +123,7 @@ loop-split rotation all derive from the same number.
 ## Verification
 
 * Java suite and the emulation rig green (goldens that encoded the old
-  late reopen live in **three places** and all moved one frame: the
+  late reopen sit in **three places** and all moved one frame: the
   `EffectScriptTest` rig scene and rotation test, `test_yx6.py`
   `run_effects` frames 32/33 and 49/50, and the class javadoc's
   frame-alignment section).

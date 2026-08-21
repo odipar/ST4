@@ -27,8 +27,13 @@ two are wiring the ST borrowed for its joystick and printer ports.
 Writing a register is the only way software changes anything, and each
 register holds its value until written again.
 
-Those registers steer five **generators**, the parts that actually make
-signal:
+A **signal** is a series of values with a rate: a square wave, a run of
+noise, a sample. Everything audible here is one. Two things make them -
+the chip's generators, on their own, and the software, by writing
+registers.
+
+Those registers steer five **generators**, each making a signal of its
+own:
 
 - three **tone generators**. Each is a counter that flips its output
   every time it runs out, making a square wave.
@@ -49,7 +54,8 @@ about 434 Hz, the same note from the envelope generator instead.
 
 The YM2149 has three **voices**, A, B and C. Each has a **volume** (0 to
 15, or a flag meaning "follow the envelope") and a **routing** setting,
-which decides what reaches it: tone, noise, both or neither.
+which determines which generator signals reach it: tone, noise, both or
+neither. The volume scales whatever arrives.
 
 One register does more than hold a value, and it matters later. Writing
 the envelope shape also sends the envelope generator back to the start
@@ -67,10 +73,10 @@ register the values land in; a **source**, where the values come from;
 and a **rate**, how often one arrives.
 
 Sources differ. Some streams read from the packed tune, and those are
-the music. One reads a stored sample. Others make values up as they go,
-flipping between two numbers or walking a curve. The YM2149 cannot tell
-the difference. Values arrive at a register, and it does not care who
-chose them.
+the music. One reads a stored sample. Others compute their values as they run,
+flipping between two numbers or computing a curve. The YM2149 has no way
+to distinguish them. Values arrive at a register, and the source of each
+makes no difference to what the chip does with it.
 
 Not everything here is a stream. A generator runs by itself and nothing
 feeds it. A register is where a stream ends. A stored sample is a source
@@ -114,14 +120,14 @@ register**. Only the speed changes.
                             v
                   voice A    voice B    voice C
                             |
-             volume (R8-R10) scales it, or follows the envelope
+            volume (R8-R10) scales that signal, or follows the envelope
                             |
                             v
                           output
 
 ### How fast is a frame?
 
-Whatever the tune says. The rate is fixed for a whole tune, but tunes
+It is a property of the tune, fixed for the whole of it, and tunes
 differ:
 
 - **50 a second** is usual, because the easiest place to call a player
@@ -129,12 +135,12 @@ differ:
   comes once per drawn screen. YX6 is tested against a **corpus** of
   544 YM files, 543 of them readable, and every one runs at 50.
 - **60 a second** on machines with 60 Hz screens.
-- **200 a second** where a composer wants finer control: four times the
+- **200 a second** for finer control: four times the
   detail in arpeggios, volume shapes and pitch slides. This one is not
   the screen but a timer, in the **MFP**. That is the ST's support chip,
   opened up in the next section. Usually it is the MFP's timer C, which
   the operating system already runs at 200.
-- **Anything else** a composer chose. 25, 100 and 150 all exist. The
+- **Anything else** a composer set. 25, 100 and 150 all exist. The
   rate belongs to the song rather than to the file carrying it: the
   music was written to be stepped at that speed, and stepping it at any
   other speed plays it wrong.
@@ -145,7 +151,7 @@ that speed is.
 
 ### Where a tick comes from
 
-The timers live in the MFP, whose full name is MC68901. It has four,
+The timers are in the MFP, whose full name is MC68901. It has four,
 named A to D. YX6 takes A and D, so two tick streams can run at once.
 B and C belong to the system, driving video sync and the 200-a-second
 clock the operating system counts on. A future YX6 format
@@ -168,13 +174,13 @@ are just divisors. A generator's *counter*, above, is a different
 thing.)
 
 So the slowest rate is 2,457,600 / (200 x 255) = 48 a second, and the
-fastest 2,457,600 / 4 = 614,400. YX6 refuses anything above 25,600: the
+fastest 2,457,600 / 4 = 614,400. YX6 rejects anything above 25,600: the
 processor is a 68000 at 8 MHz, and at that speed the interrupt alone
-eats a quarter of it. For scale, 69 tunes in the corpus play samples,
-mostly between 5,000 and 6,100 a second. Only two ask for more than
+occupies a quarter of it. For scale, 69 tunes in the corpus play
+samples, mostly between 5,000 and 6,100 a second. Only two encode a rate above
 25,600, and both are conversions from another machine.
 
-### Where the two clocks meet
+### Conflicts between the two clocks
 
 When the player is called, it takes the next value from each frame
 stream and writes them to the YM2149 one after another. That burst of
@@ -184,21 +190,23 @@ How much it writes is a choice. YX6 writes all fourteen registers every
 frame, because a write to the YM2149 costs about what the comparison to
 avoid it would cost, so checking what changed saves nothing. Two
 registers are exceptions: the envelope shape is left alone on frames
-that do not want a restart, and a voice's volume is skipped while a tick
-stream owns it. Other players decide differently. A **tracker**, the
-program a composer writes music in, plays its own song format and writes
-only what changed, because it knows what changed. A YM file does not
-carry that knowledge. It stores a full row of values every frame and
-says nothing about which of them are new.
+where a restart would be wrong, and a voice's volume is skipped while a
+tick stream holds it. Other players are built differently. A **tracker**,
+the program a composer writes music in, plays its own song format and
+writes
+only the registers that changed, because its own format records that. A
+YM file carries no such record. It stores a full row of values every
+frame, with nothing to mark which of them are new.
 
-Most hard bugs live where the frame write meets a tick:
+Most hard bugs come from a tick landing during a frame write, or from
+both writing the same register:
 
 - **tearing**. A tick lands in the middle of the frame write and a
-  value reaches the wrong register. Cured by turning interrupts off for
-  the duration.
-- **contention**. The frame write and a tick stream want the same
-  register. Cured by giving the register an owner, and skipping it in
-  the frame write.
+  value reaches the wrong register. Prevented by turning interrupts off
+  for the duration.
+- **contention**. The frame write and a tick stream target the same
+  register. Prevented by giving the register an owner, and skipping it
+  in the frame write.
 - **quantisation**. Something happens between frames, but only the next
   frame can act on it. One extra frame of delay was an audible click.
 - **phase**. A stream's place in its own cycle: which sample it is on,
@@ -216,7 +224,8 @@ but it works the same for any sound.
 
 **SID voice**. Named after the Commodore 64's sound chip, whose sound
 it resembles. It works nothing like it: it switches a voice's volume
-between loud and off very fast, chopping the tone.
+between loud and off very fast, chopping the signal already coming out of
+it.
 
 **buzzer**. The envelope generator used to make a note rather than a
 volume shape. A repeating shape and a short period run fast enough to be
@@ -243,9 +252,9 @@ sinus SID is. Three differences separate them:
 
 | YM5/YM6 | YX6 | the series | repeats? | the voice | rate |
 |---|---|---|---|---|---|
-| digidrum | **PCM stream** | a stored sample, any length | **no**, plays once and ends | **disconnected**: routed to no generator, so only the values are heard | **independent**: the pitch you want the sample at |
-| SID voice | **toggle stream** | two values, loud and off | **yes**, until stopped | **left connected**: the values chop the tone | **derived** from the note playing |
-| sinus SID | **curve stream** | a smooth shape, many values | **yes**, until stopped | **left connected**: the values shape the tone | **derived** from the note playing |
+| digidrum | **PCM stream** | a stored sample, any length | **no**, plays once and ends | **disconnected**: no generator signal reaches it, so the stream's own values are all that is left | **independent**: the sample's own playback pitch |
+| SID voice | **toggle stream** | two values, loud and off | **yes**, until stopped | **left connected**: the values chop its signal | **derived** from the note playing |
+| sinus SID | **curve stream** | a smooth shape, many values | **yes**, until stopped | **left connected**: the values shape its signal | **derived** from the note playing |
 
 Read the last two rows as special cases of the first. A toggle stream is
 a PCM stream whose sample is two values long and repeats. A curve stream
@@ -263,13 +272,13 @@ At 25,000 ticks a second on an 8 MHz 68000 that gap is most of the
 machine. The format keeps them apart because the hardware must.
 
 The second is musical. A digidrum's rate is **independent**. It is the
-pitch you want a recording played at, and owes nothing to any note. Just
-as well, since the voice is disconnected and there is no note.
+pitch a recording is to play back at, and bears no relation to any note.
+Just as well, since the voice is disconnected and there is no note.
 
-A SID voice's rate is **derived**. Its values chop a square the voice is
-still making, so the two must stay in ratio, or the tone changes with
-every note. One is a sound in itself. The other is a treatment applied
-to a note.
+A SID voice's rate is **derived**. Its values scale the signal the voice
+is still making, so the two signals must stay in ratio, or the tone
+changes with every note. One is a sound in itself. The other is a
+treatment applied to a note.
 
 Those same words say when a rate may change. An independent rate is
 **set once**, fixed at the start, since moving it would bend the sample.
@@ -307,9 +316,9 @@ was written, and what the packer must preserve.
 | stream | coupled to | why |
 |---|---|---|
 | **PCM stream** | nothing | its voice is disconnected, so there is nothing to be in ratio with |
-| **toggle stream** | the voice's **tone period** | two square waves multiply, and their ratio is the tone colour. Hold the ratio and the sound survives a change of note, so the rate must move with every note |
-| **curve stream** | the voice's **tone period** | the curve shapes the square instead of chopping it, but the ratio still decides the result |
-| **retrigger stream** | the **envelope period** | the tick rate sets the pitch; the ratio decides how far into the shape the counter gets, which is the tone colour |
+| **toggle stream** | the voice's **tone period** | two square signals multiply, and their ratio is the tone colour. Hold the ratio and the tone colour is unchanged from note to note, so the rate must move with every note |
+| **curve stream** | the voice's **tone period** | the curve shapes the signal instead of chopping it, but the ratio still sets the result |
+| **retrigger stream** | the **envelope period** | the tick rate sets the pitch; the ratio fixes how far into the shape the counter gets, which is the tone colour |
 
 Coupling is why **retune** exists. A melody moves, so a derived rate
 moves with it, many times a second. If every move restarted the stream,
@@ -342,7 +351,7 @@ Five rules nobody guesses, each of which has cost somebody a day:
   some tunes.
 - **Writing the envelope shape always restarts the envelope.** Even
   with the value already there. A player therefore needs a way to say "leave
-  it alone" on frames that want no restart. The format uses 255.
+  it alone" on frames that must not restart it. The format uses 255.
 - **A timer count of 0 means 256.** An MFP quirk, and an easy
   off-by-a-lot.
 - **The same rate can be built from different number pairs.** 4 x 100
@@ -350,7 +359,8 @@ Five rules nobody guesses, each of which has cost somebody a day:
   a stream runs is where phase problems come from.
 - **A voice's volume register has two possible writers.** The frame
   stream once a frame, and a tick stream many times a frame. When both
-  want it, the frame write stands back. That is the contention above.
+  target it, the frame write skips that register. That is the contention
+  above.
 
 ## Common techniques
 
@@ -384,7 +394,7 @@ Names the YM format itself uses:
 | effect; effect slot 1 and 2 | **tick stream**; **tick channel** A and B (a third is allowed) |
 | TP and TC, the prescaler and timer count fields | the two halves of a **rate** |
 | vmax | the **toggle stream**'s loud value |
-| drum number, drum table | which stored sample a **PCM stream** plays, and where the samples live |
+| drum number, drum table | which stored sample a **PCM stream** plays, and where the samples are kept |
 | player frequency | the **frame clock** |
 
 Names from the hardware, which belong to neither format:
@@ -403,7 +413,7 @@ Names YX6 itself used before this file, and one from elsewhere:
 | mixer forcing (this repo's earlier phrase) | **disconnecting** a voice |
 | M, A1, P1, A2, P2 (YX6's stream letters) | control, command and parameter **script data** |
 | the ym2149-rs and maxYMiser gap models | **zero-restart** and **free-running** **phase policy** |
-| SNDH's TC50 and TC200 tags | the **frame clock** a tune asks for |
+| SNDH's TC50 and TC200 tags | the **frame clock** a tune is written for |
 
 ## The names in the code
 
@@ -413,7 +423,7 @@ for:
 | term | in the code |
 |---|---|
 | the four kinds | `KIND_PCM`, `KIND_TOGGLE`, `KIND_RETRIGGER`, `KIND_CURVE` |
-| what a stream is told to do | `VERB_START_PCM`, `VERB_START_TOGGLE`, `VERB_START_RETRIGGER`, `VERB_START_PCM_PREEMPT`, `VERB_HOLD`, `VERB_RETUNE`, `VERB_RELEASE`, `VERB_RESUME` |
+| the actions a stream can be given | `VERB_START_PCM`, `VERB_START_TOGGLE`, `VERB_START_RETRIGGER`, `VERB_START_PCM_PREEMPT`, `VERB_HOLD`, `VERB_RETUNE`, `VERB_RELEASE`, `VERB_RESUME` |
 | the player's tick handlers | `yx6_pcmA`, `yx6_toggleA_on`, `yx6_toggleA_off`, `yx6_retriggerA`, and their Timer D twins |
 | the actions the script runs | `yx6_pcm_start`, `yx6_pcm_preempt`, `yx6_toggle_start`, `yx6_retrigger_start`, `yx6_retune`, `yx6_resume`, `yx6_hold`, `yx6_release` |
 
@@ -438,7 +448,7 @@ Nothing here is new outside the Atari world:
 | **toggle** and **curve streams** | **wavetable** oscillators: one short cycle repeated. A toggle stream is the smallest wavetable there is, two entries wide |
 | **derived** rate | **key follow**, or key tracking |
 | **independent** rate | a parameter that ignores the note, like a sampler's playback pitch |
-| **coupling** | the **harmonicity ratio** of FM synthesis, where a ratio decides the tone and the absolute pitches do not |
+| **coupling** | the **harmonicity ratio** of FM synthesis, where a ratio sets the tone and the absolute pitches do not |
 | **retrigger stream** | **hard sync** |
 | **free-running** phase | the same words a synth uses for an LFO that never restarts |
 | **tearing**, **contention** | **clock domain crossing** hazards |
@@ -455,9 +465,9 @@ chiptune player writes down an answer.
 | term | meaning |
 |---|---|
 | **YM2149** | the sound chip: Yamaha's AY-3-8910, at 2 MHz on an ST |
-| **MFP** | the MC68901 support chip, where the timers live |
+| **MFP** | the MC68901 support chip, which holds the timers |
 | **register** | one byte of YM2149 state. Sixteen exist; fourteen steer the sound |
-| **generator** | a part of the YM2149 that makes signal by itself |
+| **generator** | a part of the YM2149 that makes a signal by itself |
 | **tone generator** | a counter flipping its output, making a square wave. Three of them |
 | **noise generator** | a shift register making a random-sounding bit pattern |
 | **envelope generator** | a counter walking one of sixteen shapes. Run fast, heard as a pitch |
@@ -474,6 +484,7 @@ chiptune player writes down an answer.
 |---|---|
 | **frame** | one call to the player |
 | **VBL** | the screen refresh, the usual thing a player is called from |
+| **signal** | a series of values with a rate. Generators make them; so do streams |
 | **stream** | values arriving at one register at a steady speed. Has a target, a source and a rate |
 | **target, source** | the register values land in; where they come from |
 | **frame stream** | one value per frame. The music |
@@ -487,7 +498,7 @@ chiptune player writes down an answer.
 | **coupling** | what exactly a derived rate is set against. The ratio is what you hear |
 | **frame clock, control rate** | 50 a second usually. How often the deciding code runs |
 | **tick clock, audio rate** | 48 to 25,600 a second. How often a sound-shaping write lands |
-| **YM2149 clock** | 2,000,000 a second. Runs the generators; software never sees it |
+| **YM2149 clock** | 2,000,000 a second. Runs the generators; software has no access to it |
 | **tick channel** | one timer plus the stream on it. Two in use, A and B; three allowed |
 | **volume stream** | a tick stream writing a voice's volume. Three of the four are one |
 | **phase** | where a stream is inside its own cycle |
@@ -508,21 +519,13 @@ chiptune player writes down an answer.
 
 **What a stream can do**
 
-| term | meaning |
-|---|---|
-| **start** | begin from the beginning |
-| **hold** | carry on unchanged |
-| **retune** | change the rate, keep the place in the cycle |
-| **release** | stop writing |
-| **resume** | write again, from where it was |
-| **expire** | stop because the sample ran out. Only PCM streams do this |
-| **preempt** | take a register from a stream that was using it |
-| **suppress** | fail to start because the register is taken, and retry next frame |
+start, hold, retune, release, resume, expire, preempt, suppress. The
+section of that name above defines each one.
 
-**When the two clocks collide**
+**Conflicts between the two clocks**
 
 | term | meaning |
 |---|---|
 | **tearing** | a tick interrupts the frame write; a value lands in the wrong register |
-| **contention** | frame write and tick stream want the same register |
+| **contention** | frame write and tick stream target the same register |
 | **quantisation** | something happens between frames; only the next frame can act |

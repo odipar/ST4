@@ -15,8 +15,10 @@ the YM names; this is the short of it, because the rest of this document
 reads better once the four effects stop looking like four unrelated
 tricks.
 
-Everything the player does is one operation: **write a value to a
-register**. Only the rate changes, and that gives three clocks — the
+A **signal** is a series of values with a rate, and everything audible
+is one. The chip's generators make signals by themselves; software makes
+them by writing registers, which is the only thing the player ever does.
+Only the rate changes, and that gives three clocks — the
 **frame clock**, one call to the player, usually 50 a second; the two
 **tick clocks**, one MFP timer interrupt each, 48 to 25,600 a second; and
 the YM2149's own 2 MHz, which software never reaches. A series of values
@@ -31,9 +33,9 @@ own generators are left running underneath:
 
 | YM6 | series | repeats | the voice | rate |
 |---|---|---|---|---|
-| DigiDrum | a stored sample, any length | no, plays once and ends | disconnected (section 4's mixer forcing) so only the values are heard | **independent** — the sample's playback pitch |
-| SID-Voice | two values, loud and off | yes, until stopped | left connected, so the values chop the tone | **derived** from the note playing |
-| Sinus-SID | a smooth curve | yes, until stopped | left connected, so the values shape the tone | **derived** from the note playing |
+| DigiDrum | a stored sample, any length | no, plays once and ends | disconnected (section 4's mixer forcing), so no generator signal reaches the voice and the values themselves are the sound | **independent** — the sample's playback pitch |
+| SID-Voice | two values, loud and off | yes, until stopped | left connected, so the values chop its signal | **derived** from the note playing |
+| Sinus-SID | a smooth curve | yes, until stopped | left connected, so the values shape its signal | **derived** from the note playing |
 
 So a SID-Voice is a DigiDrum whose sample is two values long and repeats,
 and the format keeps them apart for two reasons, neither of them about
@@ -71,12 +73,13 @@ rule in this document over the whole timeline at pack time and emits five
 streams of prepared actions — M (what acts this frame; zero almost always),
 A1/P1 and A2/P2 (each slot's action byte and timer count). The player's
 handlers copy prepared values into the timers and the tick handlers'
-operands and compare nothing; the mixer forcing of section 4 arrives baked
-into the R7 stream, the ring is never edited (the borrow/restore of section
-4 has no v2 counterpart), and a drum's gate reopens at the frame boundary
-after its computed end instead of mid-frame at the marker. A loop whose
+operands and compare nothing; the voice disconnection of section 4
+arrives baked into the R7 stream, the ring is never edited (the
+borrow/restore of section 4 has no v2 counterpart), and a drum's gate
+reopens at the frame boundary after its computed end instead of
+mid-frame at the marker. A loop whose
 wrap state differs from its first arrival has its split rotated until the
-two agree, so action streams replay correctly every time round.
+two match, so action streams replay correctly every time round.
 
 Sections 1–4 remain the semantic truth — they are now the specification of
 the pack-time simulator rather than of a run-time interpreter — and their
@@ -92,9 +95,9 @@ mechanism and the budgets still read true.
 > stream and a timer-count stream, E1/T1 and E2/T2. They stay because the
 > rules are still the specification the pack-time simulator implements.
 > The **v5** file replaced those four streams with five of script data,
-> M A1 P1 A2 P2, as section 0 says and as the container table in
+> M A1 P1 A2 P2, as section 0 describes and as the container table in
 > [README.md](README.md) lays out. Where these sections say "the player
-> decides", read "the packer decided, and wrote the answer down".
+> decides", read "the packer resolved it, and wrote the answer down".
 
 
 A YM6 frame can start up to two effects. Each slot is three fields smeared
@@ -115,7 +118,7 @@ timer rate:     2457600 / prediv[TP] / TC   (prediv: -,4,10,16,50,64,100,200)
 The packer already strips the spare bits off the register streams — the
 fourteen streams hold exactly what the chip should see. The design keeps that
 invariant and gives the effects their own streams, repacked at pack time into
-the shape the player wants:
+the shape the player uses:
 
 ```
 stream 14  E1  slot-1 control: code bits 7-4, TP bits 2-0. Zero = idle
@@ -136,7 +139,8 @@ alternative, which needs only r14/r15 added):
 
 - **Ratio.** In a raw r1 stream the byte changes when the fine period *or*
   the effect code changes. Separated, the register streams pack exactly as
-  today and the control streams are long runs of one value — the survey says
+  today and the control streams are long runs of one value — the survey
+  shows
   effect activity is a few percent of frames on most tunes — which the event
   optimizer packs to almost nothing.
 - **One byte, one decision.** The raw layout spreads code and TP over two
@@ -146,11 +150,11 @@ alternative, which needs only r14/r15 added):
   speaks one language.
 
 The effect *parameters* need no streams of their own: SID volume, drum
-number and buzzer shape all live in the voice's volume register, which the
+number and buzzer shape are all held in the voice's volume register, which the
 masked register streams already carry. The player reads them from the ring —
 and sanitizes what must not reach the chip (section 4).
 
-## 2. What the corpus says
+## 2. What the corpus shows
 
 Survey of 516 local YM files plus the research corpus:
 
@@ -162,12 +166,12 @@ Survey of 516 local YM files plus the research corpus:
   `// TODO` — the canonical player has never implemented it.
 - Measured timer rates: SID interrupts 110 Hz - 3.2 kHz; drums almost always
   TP=1 with TC 122..24 → 5-7 kHz typical, and two known outliers at
-  23.6-25.6 kHz (Jambala 11, Megaman). maxYMiser refuses rates above
+  23.6-25.6 kHz (Jambala 11, Megaman). maxYMiser rejects rates above
   25.6 kHz outright; so will the packer.
 - Drum inventories: ≤ 6 drums per tune seen in the wild; largest sample
   3,004 bytes, largest per-tune table 4,532 bytes (local library worst:
   7.9 KB). The number field is 5 bits, so 32 is the format ceiling.
-- Wild files demand lenient parsing: Ninja Remix carries 151 drum codes with
+- Wild files require lenient parsing: Ninja Remix carries 151 drum codes with
   TP=TC=0 (all must be no-ops, per ST-Sound's `if (prediv*count)` guard),
   and files exist with effect codes set but zero drums in the file.
 
@@ -175,22 +179,22 @@ Survey of 516 local YM files plus the research corpus:
 
 ```
 header as v3 through the master clock, then:
-  28  4   byte offset of the drum table; zero when there are no drums
+  28  4   byte offset of the sample table; zero when there are none
   32  2   drum count
   34  72  intro table, now 18 long offsets
  106  72  loop table
- 178  ..  the packed sections, then the drum table
+ 178  ..  the packed sections, then the sample table
 ```
 
 The tables stay at fixed offsets - the player indexes them without parsing -
-so the drum table goes last, found through its header pointer: count
+so the sample table goes last, found through its header pointer: count
 entries of {long offset, word length}, each offset pointing at PSG-ready
 volume bytes 0..15 closed by an end marker with bit 7 set (the maxYMiser
-convention: the drum ISR's own move.b sees it as negative and stops). Drums
+convention: the drum ISR's own move.b reads it as negative and stops). Drums
 sit unpacked: the corpus worst case is under 8 KB and the ISR reads them a
 byte at a time anyway.
 
-Pack-time normalization — the packer is where all dialect knowledge lives:
+Pack-time normalization — the packer holds all the dialect knowledge:
 
 - **YM6**: E = (r1 & $F0) | (r6 >> 5), T = r14; slot 2 from r3/r8/r15.
 - **YM5**: r1 bits 4-5 are a SID-only slot (bits 6-7 ignored, as ST-Sound),
@@ -199,7 +203,8 @@ Pack-time normalization — the packer is where all dialect knowledge lives:
   load-bearing: the same r3 bits mean different effects in YM5 and YM6.
 - **Invalid = idle**: TP=0 or TC=0 with voice bits set, a drum number with
   no such drum, or a rate above 25.6 kHz → E written as 0 (with a pack-time
-  warning). The player never sees a code it cannot run. This also sidesteps
+  warning). The player never receives a code it cannot run. This also
+  sidesteps
   the MFP's "data register 0 counts as 256" surprise.
 - **Sinus-SID** is counted and dropped with a warning; the code point stays
   reserved. Three tunes by one musician, unplayed by the reference player.
@@ -266,18 +271,18 @@ fourteen dumb writes:
 The sanitize trick is the load-bearing idea: effects never add a branch to
 the burst. But the ring is decode history - a later match may copy from any
 byte of it - so the stage BORROWS bytes rather than taking them: every edit
-is logged and undone right after the burst. The chip hears the sanitized
-frame; the ring never keeps the edit. (Implementation note: this was learned
+is logged and undone right after the burst. The chip receives the sanitized
+frame; the ring never keeps the edit. (Implementation note: this emerged
 the hard way - a rig test now packs a pattern that a later match copies
 across a sanitized byte's position, and fails if the byte is not returned.) Idle cost: with the stage inlined
 into YX6_play and each slot gated on E | E-last, an idle frame pays two ring
 pops and two zero tests, ~140 cycles measured from the tables; a running
-drum adds the r7 borrow. One slot machine serves both slots, aimed by a
+drum adds the r7 borrow. One channel machine serves both, aimed by a
 descriptor - last code and count, timer registers, the slot's tick-handler
 block - so the two timers' only remaining difference is data. The tick
 handlers sign off with an immediate byte write to the in-service register
 (it ignores written ones), and a host that never runs user-mode code can
-build with YX6_SUPER_HOST=1 to park the drum tick's a0 in the USP, 16
+build with YX6_SUPER_HOST=1 to park the PCM tick's a0 in the USP, 16
 cycles under the stack; the park is one-way for the USP itself, so a host
 that ever returns to user mode saves the USP with the rest of the machine
 state - YX6_player.S does.
@@ -288,7 +293,7 @@ rates (the Wicked Polygons ticking;
 [the full story](../doc/experiments/2026-08-19-sid-ticking.md)). The burst
 write lands mid-phase and forces the loud half back for up to half a square
 period: inaudible at kHz SID rates, a click train under a 100–1100 Hz
-buzz-bass. The references agree the ISR owns the register — ST-Sound's
+buzz-bass. Both references put the register under the ISR — ST-Sound's
 per-sample SID overrides the frame write, maxYMiser's frame code skips SID
 channels — so while a slot holds a SID **or a drum**, the burst's write of
 that voice's volume register is gated off (one SMC word: the write's
@@ -306,10 +311,11 @@ free-runs, which is the original sound.
 
 ## 5. Timers and interrupts
 
-**Slot 1 → Timer A** (vector $134, control $FFFA19, data $FFFA1F, bit 5 of
-IERA/IMRA/ISRA at $FFFA07/13/0F). **Slot 2 → Timer D** (vector $110, the low
-nibble of TCDCR $FFFA1D — always read-modify-write, Timer C's nibble must
-survive — data $FFFA25, bit 4 of the B registers). This is maxYMiser's
+**Channel A → Timer A** (vector $134, control $FFFA19, data $FFFA1F,
+bit 5 of IERA/IMRA/ISRA at $FFFA07/13/0F). **Channel B → Timer D**
+(vector $110, the low
+nibble of TCDCR $FFFA1D — always read-modify-write, so Timer C's nibble
+is preserved — data $FFFA25, bit 4 of the B registers). This is maxYMiser's
 proven allocation minus its Timer B: **Timer B stays free for raster code**,
 Timer C stays TOS's 200 Hz, and Timer D's only casualty is RS232 baud. The
 YM6 TP value is written verbatim to the control register; T to the data
@@ -327,7 +333,7 @@ Facts the engine leans on, all verified:
   vector $60 to save those 20 cycles per interrupt — a documented option,
   not the default.
 - Init: install dummy vectors; enable + unmask with `bset` (never
-  whole-byte writes — Timer C's bits must survive); all under $2700.
+  whole-byte writes, which would clear Timer C's bits); all under $2700.
   YX6_stop quiesces the claim — timers stopped, bits disabled — and
   restores nothing: the machine state is the HOST's to save and hand back
   (YX6.S assumption 5; YX6_player.S is the worked example). A demo that
@@ -404,18 +410,19 @@ player frame — comfortable for a player, worth documenting for demo hosts.
 2. **Done.** Player effect stage decoding E/T, timers programmed, handlers
    parked — rig-verified frame engine, no audible change.
 3. **Done.** The tick handlers write the chip: the drum plays its sample
-   into the voice's volume register and parks at $D, the SID square swaps
+   into the voice's volume register and parks at $D, the toggle tick swaps
    its two halves through the vector, the buzzer rewrites R13; init/stop
    own and return the MFP. Verified by direct invocation in the rig, by
    the deterministic Hatari harness (an effect-inert tune), and by a real
    drum tune running whole under Hatari. The listening test on hardware
    is the one check only ears can run.
-4. Measure, listen, and only then decide whether Sinus-SID (a sine table
+4. Measure, listen, and only then settle whether Sinus-SID (a sine table
    through the drum engine) ever earns its bytes.
 
 Settled by the research: Timer A + Timer D (B stays for rasters), SEI kept
 (AEI as a host option), drums stored PSG-ready with bit-7 end markers, park
-at $D, TP changes always stop+reload, invalid effects die at pack time.
+at $D, TP changes always stop+reload, invalid effects are dropped at
+pack time.
 
 Open for the adopting commit: C = 20 vs 24 (nothing vs headroom), whether
 YX6_stop silences a mid-flight drum or lets it end, and whether the AEI

@@ -1,7 +1,7 @@
 # The SID ticking: a frame burst fighting a timer square
 
 Not a decline — a diagnosis. Recorded in full because the bug hid behind a
-design assumption that *sounded* right, survived every rig, and only spoke
+design assumption that *sounded* right, passed every rig, and showed
 up in one tune's bass line. The finding generalizes to any player that
 writes YM registers per frame while a timer effect owns one of them.
 
@@ -44,7 +44,8 @@ next timer tick:
   times a second, wherever the write meets the quiet half. High-frequency
   ticking, exactly in the bass+timer combination.
 
-Both references already knew: ST-Sound's per-sample SID **overrides** the
+Both references already recorded it: ST-Sound's per-sample SID
+**overrides** the
 register value the frame code wrote (`sidVolumeCompute` wins), and
 maxYMiser's frame code **skips** volume registers on SID channels — the
 ISR owns the register, full stop.
@@ -55,7 +56,7 @@ slot holds a SID, that instruction's destination displacement is patched
 from 2 (the PSG data register) to 0 — the write lands on the select
 register, where the very next instruction's select overrides it before
 anything reaches a data register. The gate opens again on release, on a
-voice change, when a drum takes the voice over (the drum's sanitize wants
+voice change, when a drum takes the voice over (the drum's sanitize needs
 the write back), at init and at stop. The rig asserts all of it: no
 volume write on gated frames, the write's return on release, the drum
 takeover reopening it.
@@ -63,8 +64,8 @@ takeover reopening it.
 **The sibling, known and deferred:** the burst also writes a sanitized 0
 to a DRUMMED voice's volume register every frame — one wrong sample per
 frame at drum rates (~one in 120 at 6 kHz). Masked by drum content so far;
-the same gate would fix it, but the drum's end lives in an ISR, which
-makes the reopening messier. Written down so it is found on purpose, not
+the same gate would fix it, but the drum's end is detected in an ISR,
+which makes the reopening messier. Written down so it is found on purpose, not
 by ear.
 
 ## The method that settled it

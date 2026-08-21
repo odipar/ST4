@@ -664,7 +664,7 @@ YX6_play:
                                         ; is fetching pixels. Bounded, so a
                                         ; host that plays mid-screen - or a
                                         ; machine whose counter never moves -
-                                        ; gives up rather than hangs.
+                                        ; stops rather than hanging.
         move.w  #$700,$FFFF8240.w       ; this frame's work, red - first,
         .endif                          ; so the monitor never delays the
                                         ; burst; the timers' bar follows
@@ -1017,7 +1017,7 @@ yx6_retriggerA:
         move.b  #$DF,$FFFFFA0F.w
         rte
 
-; Slot 2's instances: Timer D's stop, vector and in-service bit, otherwise
+; Channel B's instances: Timer D's stop, vector and in-service bit, else
 ; the A block byte for byte.
 yx6_pcmD:
         .if YX6_PERF
