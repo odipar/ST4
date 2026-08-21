@@ -56,7 +56,7 @@ VECTORS = 0x000000              # $110/$134: the two timer vectors
 STREAMS = 25                    # what a v7 file carries
 CHANNELS = 4                    # timer channels; stream T maps them
 Yx6_DEFAULT_MAP = 0x9C          # what the packer emits: 0->A 1->D 2->B 3->C
-YX6_FIXED = 54 + STREAMS * 64   # the workspace before the rings
+YX6_FIXED = 56 + STREAMS * 64   # the workspace before the rings
 
 QUICK = '--quick' in sys.argv
 

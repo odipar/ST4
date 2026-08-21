@@ -524,9 +524,11 @@ class Stage:
         This is ymr_write_register's rule in lib_data.s, arrived at from the
         other side.
       * BUZZING - the voice is running an RTE, which drives R13 and leaves
-        the volume register alone, so the frame write happens - with the
-        envelope shape sitting in the register's low nibble, since that is
-        where the retrigger tick reads it.
+        the volume register alone, so the frame write happens and carries
+        the dump's own byte. Under format v8 a .ymr's retrigger streams take
+        their shape from R13, so nothing is hidden in the nibble and this is
+        an ordinary open register: it is compared whole, which is a stricter
+        check than the half-comparison a smuggled shape used to allow.
       * STARTED - a fresh square arms this frame. It restarts at phase zero,
         so the player writes the voice silent itself, after the register
         burst and through the closed gate: one write, carrying zero. A PWM
@@ -764,7 +766,7 @@ def play(name, dump, packed, warns):
         if result == 1:
             wrapped = True
         gated, buzzing, started = stage.step(source)
-        problem = compare(dump, frame, source, writes, gated, buzzing, started)
+        problem = compare(dump, frame, source, writes, gated, started)
         if problem:
             return 'ISSUE %s: %s' % (name, problem)
         problem = mfp_problem(claim + player.mfp, dump.named)
@@ -792,7 +794,7 @@ def play(name, dump, packed, warns):
                '' if dump.triggers == 1 else 's', extra))
 
 
-def compare(dump, frame, source, writes, gated, buzzing, started):
+def compare(dump, frame, source, writes, gated, started):
     """One frame's chip writes against the .YMR's own frame, with the effect
     stage's verdict on the three volume registers."""
     counted = collections.Counter(register for register, _ in writes)
@@ -847,21 +849,10 @@ def compare(dump, frame, source, writes, gated, buzzing, started):
         if counted[register] != 1:
             return 'frame %d wrote R%d %d times' % (frame, register, counted[register])
         value = dump.registers[register][source] & MASK[register]
-        if buzzing & (1 << voice):
-            # The low nibble is not a volume here: the retrigger tick reads
-            # the envelope shape out of it, so only bit 4 is still the song's.
-            # The nibble is checked against the shape the file itself puts in
-            # force, which is a claim about the .YMR and not about the
-            # converter's choice of hiding place.
-            if got[register] & 0x10 != value & 0x10:
-                return ('frame %d R%d envelope-mode bit is %d, want %d'
-                        % (frame, register, (got[register] >> 4) & 1,
-                           (value >> 4) & 1))
-            if got[register] & 15 != dump.shape[source]:
-                return ('frame %d R%d carries shape %d under a running RTE, '
-                        'want %d' % (frame, register, got[register] & 15,
-                                     dump.shape[source]))
-            continue
+        # A buzzing voice is no longer a special case: an RTE drives R13 and
+        # never the volume register, and v8 stopped the shape being smuggled
+        # through the nibble, so the byte is the dump's own and is compared
+        # like any other.
         if got[register] != value:
             return 'frame %d R%d wrote %d, want %d' % (frame, register,
                                                        got[register], value)

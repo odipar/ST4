@@ -99,9 +99,9 @@
 ; and one ring per stream, so its size depends on the ring size in the file.
 ; It is always sized for all twenty-five, whatever the tune uses:
 ;
-;   YX6_SIZE = YX6_FIXED + 25 * N       ; 1654 + 25 * N bytes
+;   YX6_SIZE = YX6_FIXED + 25 * N       ; 1656 + 25 * N bytes
 ;
-; For the default 960-byte rings that is 25654 bytes. A program that knows N
+; For the default 960-byte rings that is 25656 bytes. A program that knows N
 ; at build time can reserve it with
 ;
 ;       ds.b    YX6_FIXED+(YX6_STREAMS*960)
@@ -277,7 +277,20 @@ YX6_LIVE        equ     52              ; word  streams still worth decoding:
                                         ; the channels sit last, so a tune
                                         ; that names two leaves the others'
                                         ; pair off the end
-YX6_STATE       equ     54              ; the decoder states, from an even base
+YX6_ENVSHAPE    equ     54              ; byte  the last envelope shape the
+                                        ; burst wrote to R13. A retrigger
+                                        ; stream restarts the envelope with
+                                        ; the shape in force, and where a
+                                        ; source files that shape somewhere
+                                        ; other than a voice's volume
+                                        ; register - which is YM6's filing,
+                                        ; not the chip's - this is where it
+                                        ; is read from instead
+YX6_SHAPESRC    equ     55              ; byte  nonzero when it is: the header
+                                        ; flag, unpacked once so the two
+                                        ; patch sites test a byte rather
+                                        ; than a bit
+YX6_STATE       equ     56              ; the decoder states, from an even base
 
 ; A timer channel is the format's idea; which of the MFP's four serves it
 ; is this file's. One
@@ -354,12 +367,22 @@ YH_INTRO_TABLE  equ     34              ; one offset per stream: the frames
 YH_LOOP_TABLE   equ     YH_INTRO_TABLE+(YX6_STREAMS*4)
 
 YX6_MAGIC       equ     $59583621       ; 'YX6!'
-YX6_VERSION     equ     7               ; 7: four channels, and the file says
-                                        ; which timer each one runs on
+YX6_VERSION     equ     8               ; 8: a retrigger stream may take its
+                                        ; shape from R13 rather than from a
+                                        ; voice. 7 was four channels, and the
+                                        ; file saying which timer each runs on
 YX6_FLAG_LOOPS  equ     1               ; header flag: the tune loops
 YX6_FLAG_CHAN   equ     2               ; and one per timer channel, from bit
                                         ; 1 up: set when the tune uses it,
                                         ; which is when a timer is claimed
+YX6_FLAG_SHAPE  equ     $20             ; bit 5: this file's retrigger streams
+                                        ; read their shape from R13's last
+                                        ; value. Clear is YM6's arrangement,
+                                        ; the voice's own volume register
+YX6_SHAPE_INIT  equ     8               ; the shape a retrigger restarts before
+                                        ; the tune has written one. RhYMe's
+                                        ; player assumes the same, and its
+                                        ; format says so outright
 YX6_PSG         equ     $FFFF8800       ; select/read at +0, write at +2
 YX6_NO_ENV      equ     $FF             ; R13 value meaning "leave it alone"
 YX6_PORTS       equ     $C0             ; R7 bits the ST needs as outputs
@@ -416,8 +439,18 @@ YX6_init:
         move.w  YH_RING(a0),YX6_N(a3)
         move.w  YH_CHUNK(a0),YX6_C(a3)
         move.w  YH_FLAGS(a0),d0
+        move.w  d0,d1
         and.w   #YX6_FLAG_LOOPS,d0
         move.w  d0,YX6_LOOPS(a3)
+        ; Where a retrigger stream reads its shape is the file's to say, so
+        ; the bit is unpacked here into a byte the two patch sites can test
+        ; without reaching for the header again. The shadow starts at the
+        ; shape a tune that has written none is taken to mean: an RTE can be
+        ; the first thing a song does, and a buzzer restarting nothing at all
+        ; would be silent rather than merely different.
+        and.w   #YX6_FLAG_SHAPE,d1
+        move.b  d1,YX6_SHAPESRC(a3)
+        move.b  #YX6_SHAPE_INIT,YX6_ENVSHAPE(a3)
         move.l  YH_FRAMES(a0),YX6_LEFTFR(a3)
         clr.w   YX6_SLOT(a3)
         lea     YX6_FIXED(a3),a1        ; the rings follow the decoder states
@@ -890,7 +923,8 @@ yx6_w13:
         move.b  $7FFF(a1),d1            ; R13 restarts the envelope whenever it
         cmp.b   #YX6_NO_ENV,d1          ; is written, so $FF means leave it be
         beq.s   .envelope_held
-        movep.w d1,0(a2)
+        move.b  d1,YX6_ENVSHAPE(a3)     ; and this is the shape now in force -
+        movep.w d1,0(a2)                ; free, on the branch that already ran
 .envelope_held:
         .if YX6_MASK_BURST
         move.w  (sp)+,sr
@@ -1387,6 +1421,29 @@ yx6_verbs:
 ; The voice's parameter ring byte - the toggle volume, the retrigger shape
 ; or the sample number ride the voice's own register stream, marked by the
 ; script.
+;
+; yx6_shape: the envelope shape a retrigger stream must restart, out of
+; wherever this file keeps it. YM6 files it in the voice's own volume
+; register - one nibble the chip ignores while that voice follows the
+; envelope, so the byte costs nothing and needs no stream. A source that
+; keeps it with the envelope instead says so in the header, and then it
+; comes from the shadow the burst maintains. Both sites that patch the
+; retrigger tick come through here, so a shape that moves under a running
+; buzzer is tracked from the same place its arm read.
+; in: d0 = the action byte, a3 = workspace; out: d1 = the shape, 0..15.
+; clobbers d5 and a1 on the voice path, as yx6_voice does.
+yx6_shape:
+        tst.b   YX6_SHAPESRC(a3)
+        bne.s   .from_envelope
+        bsr     yx6_voice
+        move.b  (a1),d1
+        and.w   #15,d1
+        rts
+.from_envelope:
+        moveq   #0,d1
+        move.b  YX6_ENVSHAPE(a3),d1     ; already masked: the packer sends R13
+        rts                             ; as 0..15 or the leave-it-alone marker
+
 ; in: d0 = the action byte; out: a1 = the byte, d5 = voice*4.
 yx6_voice:
         move.w  d0,d5
@@ -1445,15 +1502,16 @@ yx6_hold:                               ; flags: 1 = reload the count, 2 =
         moveq   #6,d1
         and.b   d0,d1
         beq.s   .done
+        movea.l CH_ISR(a5),a2           ; yx6_voice leaves a2 alone
+        btst    #2,d0
+        bne.s   .shape
         bsr     yx6_voice               ; the blob outgrew a short branch
         move.b  (a1),d1
         and.w   #15,d1
-        movea.l CH_ISR(a5),a2
-        btst    #2,d0
-        bne.s   .shape
         move.b  d1,ISR_TOGGLE_VOL(a2)
         rts
-.shape:
+.shape:                                 ; a shape follows the file's source,
+        bsr     yx6_shape               ; the same as an arm does
         move.b  d1,ISR_RETRIGGER_SHAPE(a2)
 .done:
         rts
@@ -1490,9 +1548,7 @@ yx6_retune:                         ; the vector is NEVER touched: the
         bra.s   yx6_program
 
 yx6_retrigger_start:
-        bsr     yx6_voice
-        move.b  (a1),d1
-        and.w   #15,d1
+        bsr     yx6_shape
         movea.l CH_ISR(a5),a2
         move.b  d1,ISR_RETRIGGER_SHAPE(a2)
         lea     ISR_RETRIGGER(a2),a1

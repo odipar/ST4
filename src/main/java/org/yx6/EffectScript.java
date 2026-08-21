@@ -204,12 +204,13 @@ public final class EffectScript {
      * work it out again.
      */
     public record Semantics(boolean pcmHoldRetriggers, boolean forceMixerOnPcm,
-                            boolean channelEndsPcm) {
+                            boolean channelEndsPcm, boolean shapeFromR13) {
 
         /** The YM dialect: a held PCM code retriggers its sample every
-         * frame, a voice a sample owns is forced off the mixer, and nothing
-         * ends a sample but its own marker tick. */
-        public static final Semantics YM = new Semantics(true, true, false);
+         * frame, a voice a sample owns is forced off the mixer, nothing ends
+         * a sample but its own marker tick, and a retrigger stream's shape
+         * is where YM6 files it - the voice's own volume register. */
+        public static final Semantics YM = new Semantics(true, true, false, false);
     }
 
     /**
@@ -243,6 +244,11 @@ public final class EffectScript {
      * marker that would have cleared it will never run (v1's stuck flag,
      * replicated for differential exactness). */
     private static final int STUCK = Integer.MAX_VALUE;
+
+    /** What a retrigger stream restarts before the tune has written a shape.
+     * The player primes its shadow with the same value; the two have to
+     * agree, since a tune may arm a buzzer before it ever writes R13. */
+    private static final int SHAPE_BEFORE_ANY_WRITE = 8;
 
     private static final int KIND_TOGGLE = Tune.KIND_TOGGLE;
     private static final int KIND_PCM = Tune.KIND_PCM;
@@ -439,14 +445,23 @@ public final class EffectScript {
      * Sample ends compare as frames-remaining; the toggle's half is
      * deliberately absent - phase free-runs in v1 too. Every channel is in
      * here, in channel order: one a source never uses simply contributes its
-     * untouched initial state to both sides of every comparison. */
+     * untouched initial state to both sides of every comparison.
+     *
+     * <p>The tracked envelope shape joins them only for a source that reads
+     * it. Where the shape comes out of a voice it is already inside that
+     * channel's own state, and comparing a value nothing consults would move
+     * the split of a tune it cannot affect. */
     private int[] snapshot(int frame) {
         int width = channels[0].snapshot().length;
-        int[] out = new int[channels.length * width + 7];
+        boolean tracked = tune.semantics().shapeFromR13();
+        int[] out = new int[channels.length * width + (tracked ? 8 : 7)];
         int at = 0;
         for (Channel channel : channels) {
             System.arraycopy(channel.snapshot(), 0, out, at, width);
             at += width;
+        }
+        if (tracked) {
+            out[at++] = envelopeShape;
         }
         for (int v = 0; v < 3; v++) {
             out[at++] = drumOwner[v];
@@ -466,8 +481,25 @@ public final class EffectScript {
 
     private int gatesBefore;
 
+    /** The shape a retrigger stream would restart, for a source that files
+     * it with the envelope rather than with a voice. It is the last value
+     * R13 was written with, which is what the player's own shadow holds -
+     * and before the tune has written one, the shape a restart is taken to
+     * mean. RhYMe's player assumes the same, and its format says so. */
+    private int envelopeShape = SHAPE_BEFORE_ANY_WRITE;
+
     private void frame(int p, int f) {
         gatesBefore = gates;
+
+        // The player writes R13 in the burst and runs the actions after it,
+        // so a frame that writes a shape AND arms a retrigger arms it on the
+        // new one. Tracking it here, before the channels run, is that order
+        // said at pack time; getting it the other way round would arm every
+        // buzzer on the shape before its own.
+        int written = tune.registers()[Ym2149.ENVELOPE_SHAPE][f] & 0xFF;
+        if (written != Ym2149.NO_ENVELOPE_CHANGE) {
+            envelopeShape = written & 15;
+        }
 
         for (int v = 0; v < 3; v++) {
             if (drumOwner[v] >= 0 && drumEnd[v] == p) {
@@ -545,14 +577,15 @@ public final class EffectScript {
         // sample, not off the chip - so a held one carries the reload and
         // nothing else. Only a source that leaves samples playing gets here
         // with one at all.
-        if (type != KIND_PCM) {
+        if (type == KIND_TOGGLE) {             // .track: v1 repatched blindly
             int value = parameter(f, voice);
-            if (type == KIND_TOGGLE) {         // .track: v1 repatched blindly
-                if (value != channel.vol) {
-                    channel.vol = value;
-                    flags |= HOLD_VOLUME;
-                }
-            } else if (value != channel.shape) {
+            if (value != channel.vol) {
+                channel.vol = value;
+                flags |= HOLD_VOLUME;
+            }
+        } else if (type != KIND_PCM) {
+            int value = shape(f, voice);
+            if (value != channel.shape) {
                 channel.shape = value;
                 flags |= HOLD_SHAPE;
             }
@@ -722,7 +755,7 @@ public final class EffectScript {
         channel.tlast = count;
         channel.masked = false;
         channel.prescaler = code & 7;
-        channel.shape = parameter(f, voice);
+        channel.shape = shape(f, voice);
         channel.vec = KIND_RETRIGGER;
         channel.vecVoice = voice;
         emit(p, index, action(VERB_START_RETRIGGER, voice, code & 7), count);
@@ -812,6 +845,17 @@ public final class EffectScript {
      */
     private int parameter(int f, int voice) {
         return tune.registers()[8 + voice][f] & 15;
+    }
+
+    /**
+     * The shape a retrigger stream on this voice would restart, out of
+     * wherever this tune's source files it - the voice's volume nibble the
+     * way YM6 does, or the last value written to R13, which is the chip's
+     * own arrangement and RhYMe's. {@code yx6_shape} is the player's half of
+     * this and reads the same two places.
+     */
+    private int shape(int f, int voice) {
+        return tune.semantics().shapeFromR13() ? envelopeShape : parameter(f, voice);
     }
 
     /**

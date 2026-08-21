@@ -296,9 +296,12 @@ public final class Yx6Encoder {
         putWord(file, Yx6Format.OFFSET_VERSION, Yx6Format.VERSION);
         // One flag per timer channel: the player claims a timer for each
         // channel named here and leaves the rest to the host. A YM tune
-        // names two, so Timer B stays the host's.
+        // names two, so Timer B stays the host's. One more says where this
+        // tune's retrigger streams read the shape they restart, which the
+        // player cannot work out and must be told.
         putWord(file, Yx6Format.OFFSET_FLAGS,
-                (loops ? Yx6Format.FLAG_LOOPS : 0) | channels);
+                (loops ? Yx6Format.FLAG_LOOPS : 0) | channels
+                | (tune.semantics().shapeFromR13() ? Yx6Format.FLAG_SHAPE_FROM_R13 : 0));
         putLong(file, Yx6Format.OFFSET_FRAMES, frames);
         putWord(file, Yx6Format.OFFSET_PLAYER_HZ, tune.frameRate());
         putWord(file, Yx6Format.OFFSET_STREAM_COUNT, Yx6Format.STREAMS);
