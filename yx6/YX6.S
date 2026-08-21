@@ -920,57 +920,25 @@ yx6_parmoff:
 ;   retrigger: the shape at +4
 ; -----------------------------------------------------------------------------
 
-; One PCM tick: the sample byte goes straight to the voice's volume register.
-; The byte after the last has bit 7 set, so the same move answers "done": park
-; the volume mid-scale against the click, stop the timer, drop the flag.
-yx6_pcmA:
-        .if YX6_PERF
-        move.w  $FFFF8240.w,-(sp)       ; Timer A works in green
-        move.w  #$070,$FFFF8240.w
-        .endif
-        move.b  #8,$FFFF8800.w          ; SMC PERF_PAD+3: select the volume
-        move.b  $12345678,$FFFF8802.w   ; SMC PERF_PAD+8: the next sample
-        bmi.s   .ended
-        move.w  #$2500,sr               ; pair done: the other timer may stack
-        move.l  a0,-(sp)                ; the stack, never the USP: this side
-        lea     yx6_pcmA+8+PERF_PAD(pc),a0 ; nests into parked windows
-        addq.l  #1,(a0)                 ; step the operand itself
-        .if YX6_PERF
-        lea     yx6_perf_acc(pc),a0
-        add.w   #21,(a0)                ; ~a PCM tick, in 10-cycle quanta
-        .endif
-        movea.l (sp)+,a0
-        .if YX6_PERF
-        move.w  (sp)+,$FFFF8240.w
-        .endif
-        move.b  #$DF,$FFFFFA0F.w
-        rte
-.ended:
-        move.b  #$D,$FFFF8802.w         ; middle volume: no click
-        andi.b  #$F0,$FFFFFA19.w        ; the sample ran out: stop Timer A -
-        .if YX6_PERF                    ; the script already knew this frame
-        move.l  a0,-(sp)                ; was coming: gate and mixer follow
-        lea     yx6_perf_acc(pc),a0     ; at the next frame boundary
-        add.w   #23,(a0)
-        movea.l (sp)+,a0
-        move.w  (sp)+,$FFFF8240.w
-        .endif
-yx6_parkA:
-        move.b  #$DF,$FFFFFA0F.w
-        rte
-
-; The toggle tick: each tick writes one of two values - the volume or
-; silence - and installs the other half as the next tick, one word into the
-; vector. Select and data land in one move.l: the immediate's bytes hit
-; $8800 (select) and $8802 (data) by bus layout.
-yx6_toggleA_on:
+; The two channels differ in six things, so the whole set of handlers is
+; written once as a macro and invoked twice. \side is the label suffix,
+; \colour the monitor's band, \eoi and \eoir the end-of-interrupt value
+; and register, \tctrl the timer's control register, \vec its vector, and
+; \park is 1 on the channel allowed to park a0 in the USP. rmac's \~ gives
+; each expansion its own local labels.
+; One half of a toggle tick, \imm carrying both the select and the value:
+; the loud half writes the volume, the quiet half writes silence. The two
+; halves must be byte-congruent - ISR_TOGGLE_ON_SEL and ISR_TOGGLE_OFF_SEL
+; are the same offset into each - which one text guarantees.
+        .macro YX6_TOGGLE_HALF label, imm, colour, eoi, eoir, vec
+\label:
         .if YX6_PERF
         move.w  $FFFF8240.w,-(sp)
-        move.w  #$070,$FFFF8240.w
+        move.w  #\colour,$FFFF8240.w
         .endif
-        move.l  #$08000F00,$FFFF8800.w  ; SMC PERF_PAD+2 select, +4 volume
+        move.l  #\imm,$FFFF8800.w       ; SMC PERF_PAD+2 select, +4 value
         move.w  #$2500,sr
-        move.l  #0,$134.w               ; SMC PERF_PAD+14: the quiet half is
+        move.l  #0,\vec.w               ; SMC PERF_PAD+14: the other half is
         .if YX6_PERF                    ; next - the whole vector, so the
         move.l  a0,-(sp)                ; blob may straddle a 64K boundary
         lea     yx6_perf_acc(pc),a0
@@ -978,32 +946,72 @@ yx6_toggleA_on:
         movea.l (sp)+,a0
         move.w  (sp)+,$FFFF8240.w
         .endif
-        move.b  #$DF,$FFFFFA0F.w
+        move.b  #\eoi,\eoir.w
         rte
-yx6_toggleA_off:
+        .endm
+
+        .macro YX6_TICKS side, colour, eoi, eoir, tctrl, vec, park
+
+; One PCM tick: the sample byte goes straight to the voice's volume register.
+; The byte after the last has bit 7 set, so the same move answers "done": park
+; the volume mid-scale against the click, stop the timer, drop the flag.
+yx6_pcm\side:
         .if YX6_PERF
-        move.w  $FFFF8240.w,-(sp)
-        move.w  #$070,$FFFF8240.w
+        move.w  $FFFF8240.w,-(sp)       ; this channel's band
+        move.w  #\colour,$FFFF8240.w
         .endif
-        move.l  #$08000000,$FFFF8800.w  ; SMC PERF_PAD+2 select; silence
-        move.w  #$2500,sr
-        move.l  #0,$134.w               ; SMC PERF_PAD+14: the loud half next
-        .if YX6_PERF
+        move.b  #8,$FFFF8800.w          ; SMC PERF_PAD+3: select the volume
+        move.b  $12345678,$FFFF8802.w   ; SMC PERF_PAD+8: the next sample
+        bmi.s   .ended\~
+        move.w  #$2500,sr               ; pair done: the other timer may stack
+        .if \park*YX6_SUPER_HOST        ; only the channel that cannot nest
+        move    a0,usp                  ; into a parked window may use the USP
+        .else
         move.l  a0,-(sp)
+        .endif
+        lea     yx6_pcm\side+8+PERF_PAD(pc),a0
+        addq.l  #1,(a0)                 ; step the operand itself
+        .if YX6_PERF
         lea     yx6_perf_acc(pc),a0
-        add.w   #15,(a0)
+        add.w   #21,(a0)                ; ~a PCM tick, in 10-cycle quanta
+        .endif
+        .if \park*YX6_SUPER_HOST
+        move    usp,a0
+        .else
+        movea.l (sp)+,a0
+        .endif
+        .if YX6_PERF
+        move.w  (sp)+,$FFFF8240.w
+        .endif
+        move.b  #\eoi,\eoir.w
+        rte
+.ended\~:
+        move.b  #$D,$FFFF8802.w         ; middle volume: no click
+        andi.b  #$F0,\tctrl.w           ; the sample ran out: stop the timer -
+        .if YX6_PERF                    ; the script already knew this frame
+        move.l  a0,-(sp)                ; was coming: gate and mixer follow
+        lea     yx6_perf_acc(pc),a0     ; at the next frame boundary
+        add.w   #23,(a0)
         movea.l (sp)+,a0
         move.w  (sp)+,$FFFF8240.w
         .endif
-        move.b  #$DF,$FFFFFA0F.w
+yx6_park\side:
+        move.b  #\eoi,\eoir.w
         rte
+
+; The toggle tick: each tick writes one of two values - the volume or
+; silence - and installs the other half as the next tick, one word into the
+; vector. Select and data land in one move.l: the immediate's bytes hit
+; $8800 (select) and $8802 (data) by bus layout.
+        YX6_TOGGLE_HALF yx6_toggle\{side}_on,$08000F00,\colour,\eoi,\eoir,\vec
+        YX6_TOGGLE_HALF yx6_toggle\{side}_off,$08000000,\colour,\eoi,\eoir,\vec
 
 ; The retrigger tick: writing the shape to R13 restarts the envelope, and
 ; that restart at the timer's rate is the whole effect.
-yx6_retriggerA:
+yx6_retrigger\side:
         .if YX6_PERF
         move.w  $FFFF8240.w,-(sp)
-        move.w  #$070,$FFFF8240.w
+        move.w  #\colour,$FFFF8240.w
         .endif
         move.l  #$0D000000,$FFFF8800.w  ; SMC PERF_PAD+4: the shape
         move.w  #$2500,sr
@@ -1014,106 +1022,14 @@ yx6_retriggerA:
         movea.l (sp)+,a0
         move.w  (sp)+,$FFFF8240.w
         .endif
-        move.b  #$DF,$FFFFFA0F.w
+        move.b  #\eoi,\eoir.w
         rte
+        .endm
 
-; Channel B's instances: Timer D's stop, vector and in-service bit, else
-; the A block byte for byte.
-yx6_pcmD:
-        .if YX6_PERF
-        move.w  $FFFF8240.w,-(sp)       ; Timer D works in blue
-        move.w  #$007,$FFFF8240.w
-        .endif
-        move.b  #8,$FFFF8800.w
-        move.b  $12345678,$FFFF8802.w
-        bmi.s   .ended
-        move.w  #$2500,sr               ; Timer A may nest from here on, and
-        .if YX6_SUPER_HOST              ; never parks the USP itself - so
-        move    a0,usp                  ; this side may
-        .else
-        move.l  a0,-(sp)
-        .endif
-        lea     yx6_pcmD+8+PERF_PAD(pc),a0
-        addq.l  #1,(a0)
-        .if YX6_PERF
-        lea     yx6_perf_acc(pc),a0
-        add.w   #21,(a0)
-        .endif
-        .if YX6_SUPER_HOST
-        move    usp,a0
-        .else
-        movea.l (sp)+,a0
-        .endif
-        .if YX6_PERF
-        move.w  (sp)+,$FFFF8240.w
-        .endif
-        move.b  #$EF,$FFFFFA11.w
-        rte
-.ended:
-        move.b  #$D,$FFFF8802.w
-        andi.b  #$F0,$FFFFFA1D.w
-        .if YX6_PERF
-        move.l  a0,-(sp)
-        lea     yx6_perf_acc(pc),a0
-        add.w   #23,(a0)
-        movea.l (sp)+,a0
-        move.w  (sp)+,$FFFF8240.w
-        .endif
-yx6_parkD:
-        move.b  #$EF,$FFFFFA11.w
-        rte
-
-yx6_toggleD_on:
-        .if YX6_PERF
-        move.w  $FFFF8240.w,-(sp)
-        move.w  #$007,$FFFF8240.w
-        .endif
-        move.l  #$08000F00,$FFFF8800.w
-        move.w  #$2500,sr
-        move.l  #0,$110.w
-        .if YX6_PERF
-        move.l  a0,-(sp)
-        lea     yx6_perf_acc(pc),a0
-        add.w   #15,(a0)
-        movea.l (sp)+,a0
-        move.w  (sp)+,$FFFF8240.w
-        .endif
-        move.b  #$EF,$FFFFFA11.w
-        rte
-yx6_toggleD_off:
-        .if YX6_PERF
-        move.w  $FFFF8240.w,-(sp)
-        move.w  #$007,$FFFF8240.w
-        .endif
-        move.l  #$08000000,$FFFF8800.w
-        move.w  #$2500,sr
-        move.l  #0,$110.w
-        .if YX6_PERF
-        move.l  a0,-(sp)
-        lea     yx6_perf_acc(pc),a0
-        add.w   #15,(a0)
-        movea.l (sp)+,a0
-        move.w  (sp)+,$FFFF8240.w
-        .endif
-        move.b  #$EF,$FFFFFA11.w
-        rte
-
-yx6_retriggerD:
-        .if YX6_PERF
-        move.w  $FFFF8240.w,-(sp)
-        move.w  #$007,$FFFF8240.w
-        .endif
-        move.l  #$0D000000,$FFFF8800.w
-        move.w  #$2500,sr
-        .if YX6_PERF
-        move.l  a0,-(sp)
-        lea     yx6_perf_acc(pc),a0
-        add.w   #12,(a0)
-        movea.l (sp)+,a0
-        move.w  (sp)+,$FFFF8240.w
-        .endif
-        move.b  #$EF,$FFFFFA11.w
-        rte
+; Channel A on Timer A, in green; channel B on Timer D, in blue, and the
+; only one that may park a0 in the USP.
+        YX6_TICKS A,$070,$DF,$FFFFFA0F,$FFFFFA19,$134,0
+        YX6_TICKS D,$007,$EF,$FFFFFA11,$FFFFFA1D,$110,1
 
         .if YX6_PERF
 yx6_perf_acc:
