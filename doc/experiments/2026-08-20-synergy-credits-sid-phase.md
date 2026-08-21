@@ -36,13 +36,13 @@ the timer-register write streams bit-equal frame by frame, the per-frame
 PSG content equivalent. True - and still not the sound, because WHAT is
 written does not pin WHEN the square's halves play.
 
-**The audio diff finally saw it, then lied about the fix.** A control
+**The audio diff finally caught it, then misreported the fix.** A control
 run proved Hatari bit-deterministic (two takes of v1, sample-identical),
 so the spectral divergence starting at exactly 38.4s was real. But when
 the suspected fix was applied and the spectral distances did not move,
 the suspect was wrongly cleared - the section is dual-SID beating
 material, where normalized spectral distance is dominated by benign
-beat-phase sensitivity. A metric that cannot tell phase noise from
+beat-phase sensitivity. A metric that cannot distinguish phase noise from
 damage cannot judge a phase fix.
 
 **What finally convicted it:** `cmp` on the pre-fix and post-fix packs -

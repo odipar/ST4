@@ -26,7 +26,7 @@
 ;
 ; One honest limitation: a native host that dispatches PLAY from its Timer C
 ; hook holds the MFP's Timer C in-service for the length of the call, which
-; delays Timer D ticks (slot 2's effects) by up to that length - pending, not
+; delays Timer D ticks (channel B's) by up to that length - pending, not
 ; lost. VBL- and emulator-hosted playback has no such window.
 ; -----------------------------------------------------------------------------
 

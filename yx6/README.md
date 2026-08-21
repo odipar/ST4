@@ -28,7 +28,7 @@ The four build tools are Java; `mksndh.sh`, `ym_sndh.sh`, `mkprg.sh` and
 `play.sh` are four-line wrappers that find the repository and the compiled
 classes, so every command below is spelled the way it always was. Reading a
 `.yx6` header, validating that a set shares one configuration, generating the
-SNDH tags and driving rmac all live in [`org.yx6`](../src/main/java/org/yx6)
+SNDH tags and driving rmac are all in [`org.yx6`](../src/main/java/org/yx6)
 alongside the packer, which the front ends call in process rather than
 through another JVM.
 
@@ -40,11 +40,11 @@ tune length, the loop frame and C must be whole units — a padded section
 would decode one extra value into the ring, and it would be played — so a
 tune with an odd length or loop frame is PADDED to the shape: the packer
 duplicates a frame that neither writes R13 nor triggers a drum, which holds
-the chip state one inaudible tick longer, and says what it did. Only when no
-safe frame exists near a boundary does it fall back to `-k1`. The player is
-built for one unit size and checks every section's ST4 signature against it
-at init; `mkprg.sh` reads the unit out of the file's first section
-automatically.
+the chip state one inaudible tick longer, and reports what it did. Only
+when no safe frame exists near a boundary does it fall back to `-k1`. The
+player is built for one unit size and checks every section's ST4
+signature against it at init; `mkprg.sh` reads the unit out of the
+file's first section automatically.
 
 ## Test driving one
 
@@ -61,10 +61,11 @@ yx6/play.sh one.ym two.ym three.ym    # a set: number keys pick the subtune
 
 [play.sh](play.sh) packs the tune, builds a player around it and starts Hatari
 with sound on. **Press SPACE in the Hatari window to stop**: the program exits,
-and the script closes the emulator behind it — nothing asks you to confirm
-anything. Point it at your own install with `HATARI=` and `TOS=`. Everything it
-builds is kept next to the tune in `<name>-n<ring>-c<chunk>/`, so you can
-compare two ring sizes by ear and keep both. Hand it several tunes and they
+and the script closes the emulator behind it — nothing prompts you to
+confirm anything. Point it at your own install with `HATARI=` and `TOS=`.
+Everything it builds is kept next to the tune in
+`<name>-n<ring>-c<chunk>/`, so you can compare two ring sizes by ear and
+keep both. Hand it several tunes and they
 become one program's subtunes — packed with one configuration, titled and
 named from their own YM headers, switched with the number keys — in a
 `<first name>+<n more>-n<ring>-c<chunk>/` directory of their own.
@@ -77,8 +78,8 @@ yx6/mkprg.sh SONG.PRG song.yx6        # -> SONG.PRG, runnable on an ST
 ```
 
 `mkprg.sh -m` builds the same program but has it drop a `YX6DONE.MRK` file as
-it exits; that is how `play.sh` knows the tune has stopped. A plain build never
-touches the disk.
+it exits; that is how `play.sh` detects that the tune has stopped. A plain
+build never touches the disk.
 
 `-perf` — on play.sh, mkprg.sh, mksndh.sh and ym_sndh.sh alike — assembles
 the raster monitor in (`YX6_PERF equ 1`): the frame step paints the
@@ -93,9 +94,10 @@ frame step waits for the display to start before painting anything: the VBL
 fires dozens of lines above the visible screen, so an unsynced monitor draws
 its bands into the top border where you cannot see them. It syncs on the
 video address counter — which moves only while the chip is fetching pixels —
-with a bounded loop, so a host that calls the player mid-screen gives up
-rather than hangs, and the wait distorts nothing it measures. It is an estimate (10-cycle quanta, fixed per-tick costs), and it
-is free when off: the default build is byte-identical to one made before the
+with a bounded loop, so a host that calls the player mid-screen stops
+waiting instead of hanging, and the wait distorts nothing it measures. It
+is an estimate (10-cycle quanta, fixed per-tick costs), and it is free
+when off: the default build is byte-identical to one made before the
 option existed.
 
 ## The SNDH container
@@ -123,11 +125,11 @@ looping tunes are marked endless, play-once tunes declare their frames -
 and the subtune names, which is what a jukebox shows as its track list:
 SNDH's subtunes ARE its multi-song format. Where the YM header carries
 metadata, [ym_sndh.sh](ym_sndh.sh) carries it across: each tune's YM name
-becomes its subtune name (the file stem when the dump says "unknown"), a
+becomes its subtune name (the file stem when that field is "unknown"), a
 shared YM author becomes the SNDH composer (COMM), the YM player rate
 becomes the TC tag (one rate per file, validated), a lone tune's name
 becomes the title and a set titles itself with its songs joined - unless
--t says otherwise - and CONV records the provenance: converted from YM.
+-t overrides it - and CONV records the provenance: converted from YM.
 YEAR has no YM source and is honestly absent.
 The file is raw and position independent; pack it with ICE 2.4 for the
 archive if you like, players unpack that themselves.
@@ -146,17 +148,17 @@ yx6 [-f] [-o] [-nN] [-cC] [-kK] [-lF] input.ym [output.yx6]
   -kK   ST4 unit size: 1, 2 or 4 (default: 2 when the shape allows, else 1)
   -lF   loop from frame F, overriding the YM header
   -o    play once: pack no loop section
-  -drumhzH  the drum rate ceiling (default 25600): a drum asking for a
+  -drumhzH  the drum rate ceiling (default 25600): a drum encoded at a
         faster timer is resampled to the highest MFP rate under the
         ceiling (windowed-sinc, pitch and duration exact), with a warning
   -sidresume  the maxYMiser SID gap model: a released SID's timer keeps
         counting (interrupt masked) and a re-arrival resumes its phase.
         The default is the ym2149-rs model: every re-arrival restarts the
         square at phase zero. Both are ordinary stream verbs - the player
-        always carries both, the packer chooses per tune
+        always carries both, the packer selects per tune
 ```
 
-`N` decides how much RAM the player needs (`19 × N` plus about 1.2 KB of
+`N` sets how much RAM the player needs (`19 × N` plus about 1.2 KB of
 fixed state) and how far back the packer may reference, so it trades memory
 for compression; it stops at 2520, because the player reads register `k`'s
 ring through an assembled-in displacement of `k*N`. `C` must be at least
@@ -185,7 +187,7 @@ packs 188784 register bytes into 5064 (2.7%).
 ```
 
 `YX6_play` clobbers `d0`–`d5` and `a0`–`a5`, and leaves `d6`, `d7` and
-`a6` alone, the same promise ST4 makes - its decoder state spans `a4` and
+`a6` alone, the same guarantee ST4 gives - its decoder state spans `a4` and
 `a5`. `YX6_init` claims MFP Timers A and D for the effect slots and
 `YX6_stop` quiesces them again; neither saves nor restores any machine
 state - that is the host's, and the player's header lists exactly what a
@@ -233,7 +235,7 @@ packed as two sets of streams split at the loop frame `L`: an intro covering
 frames `[0, L)` and a loop covering `[L, O)`. When a register's section runs
 out mid-refill the player starts its loop stream over — a fresh decoder writing
 on into the same ring — so the rings hold one continuous sequence and the read
-side never learns that anything happened. Nothing requires `L` to fall on a
+side is unaffected by it. Nothing requires `L` to fall on a
 group boundary; a refill that straddles the split just decodes two pieces.
 
 `YX6_play` returns 1 on the frame that ends the tune (the next one is `L`), so
@@ -261,7 +263,7 @@ never steps a pointer:
 
 That is also why `N` stops at 2520: `13*N` must fit the signed 16-bit
 displacement. Faster forms - `movep`, streams pre-formatted for it, streams
-of ready-to-run 68000 code - were measured and declined; the numbers live in
+of ready-to-run 68000 code - were measured and declined; the numbers are in
 [doc/experiments](../doc/experiments/README.md), next to the register
 clustering experiment.
 
@@ -286,7 +288,7 @@ whatever register the interrupt selected. It costs about 24 cycles a frame.
 
 * **Sinus-SID.** Never seen in a dump, and never implemented by any player -
   the packer warns and drops it.
-* **YM2.** Mad Max's forty drum samples live in the player, not the file;
+* **YM2.** Mad Max's forty drum samples are held in the player, not the file;
   supporting them means embedding the bank in the converter. Not yet.
 * **Trusted input.** Beyond the magic, version and stream count, the player
   checks nothing, like the ST4 decoders it is built on.
@@ -312,11 +314,11 @@ MFP timer rather than by the frame.
 | 18 | 2 | `C`, values per call |
 | 20 | 4 | `L`, the loop frame; equal to `O` when the tune plays once |
 | 24 | 4 | YM master clock (informational) |
-| 28 | 4 | byte offset of the drum table; zero when there are no drums |
-| 32 | 2 | drum count |
+| 28 | 4 | byte offset of the sample table; zero when there are none |
+| 32 | 2 | sample count |
 | 34 | 4·S | byte offset of each intro stream, covering frames `[0, L)` |
 | 110 | 4·S | byte offset of each loop stream, covering frames `[L, O)` |
-| 186 | … | the packed streams, then the drum table |
+| 186 | … | the packed streams, then the sample table |
 
 Packed sizes are not stored: ST4 counts output units, not input bytes, so the
 player never needs them.
@@ -325,7 +327,7 @@ Streams 14–18 are **script data** rather than frame streams: they are
 packed the same way, but their bytes never reach a chip register. They
 carry the compiled effect script — the packer replays the reference
 player's decisions over the whole timeline and writes down the outcomes.
-**M** says what acts this frame (bit 0/1 = a tick channel, bit 2 +
+**M** records what acts this frame (bit 0/1 = a tick channel, bit 2 +
 bits 5–3 = the burst-gate state, which registers the frame write must
 leave alone). **A** names the channel's action: a verb, a voice and a
 prescaler, the verbs being start, retune, stop, a **PCM stream** start,
@@ -335,9 +337,9 @@ half of the **rate**.
 
 `O` and `L` count PLAYED frames: when the effect state at the wrap
 differs from its first arrival, the split rotates forward until the two
-agree, and the file carries those frames twice, compiled differently.
+match, and the file carries those frames twice, compiled differently.
 
-The drum table holds the sample tables a PCM stream plays out: `{offset,
+The sample table holds what a PCM stream plays out: `{offset,
 length}` entries pointing at PSG-ready volume bytes, each sample closed
 by a byte with bit 7 set. YM calls these digidrums, and their numbering
 is the YM file's.

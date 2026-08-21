@@ -16,7 +16,7 @@ dotnet test csharp/Nt4.slnx -c Release
 
 The tests are the Java suite, corpus for corpus - `java.util.Random` is
 replicated so the fixtures are byte-identical - covering round trips at every
-unit size, the container format's promises, offset windows and the limit-
+unit size, the container format's guarantees, offset windows and the limit-
 checking decoder, operation splitting, the ZX1 golden sizes, and both fast
 optimizers held to the reference parse.
 

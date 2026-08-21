@@ -74,7 +74,7 @@ _ASSEMBLED = {}
 
 def assemble(unit: int = 1, super_host: bool = False, perf: bool = False):
     """YX6.S plus the decoder, built for one unit size, as one flat blob.
-    super_host builds the YX6_SUPER_HOST variant: the drum tick parks a0 in
+    super_host builds the YX6_SUPER_HOST variant: the PCM tick parks a0 in
     the USP instead of the stack. perf builds the raster monitor in."""
     key = (unit, super_host, perf)
     if key in _ASSEMBLED:
@@ -583,7 +583,7 @@ def run_effects(super_host: bool = False, perf: bool = False) -> str:
     if perf and acc() != 2 * (21 + 21 + 23):    # both drums' playouts
         return f'effects: the drum ticks accumulated {acc()}, not 130'
 
-    # The SID square: the loud half writes the volume and installs the quiet
+    # The toggle tick: the loud half writes the volume and installs the quiet
     # half as a whole vector, and back.
     pairs = invoke_isr(player, sid_on)              # the A block still holds
     vector = int.from_bytes(player.uc.mem_read(0x134, 4), 'big')
@@ -597,7 +597,7 @@ def run_effects(super_host: bool = False, perf: bool = False) -> str:
     # And the buzzer from frame 40: every tick rewrites the shape to R13.
     pairs = invoke_isr(player, CODE + sym['yx6_retriggerA'])
     if pairs != [(13, 11)]:
-        return f'effects: the buzzer tick wrote {pairs}'
+        return f'effects: the retrigger tick wrote {pairs}'
     if perf and acc() != 130 + 15 + 15 + 12:
         return f'effects: the ticks accumulated {acc()}'
 
@@ -675,7 +675,7 @@ def drum_ticks(player, code, register, ctrl, eoi_reg, eoi_value) -> str:
     for tick, value in enumerate((8, 4)):
         pairs = invoke_isr(player, code)
         if pairs != [(register, value)]:
-            return f'effects: drum tick {tick} wrote {pairs}'
+            return f'effects: PCM tick {tick} wrote {pairs}'
     pairs = invoke_isr(player, code)                # the marker tick
     if pairs != [(register, 0x80), (register, 0x0D)]:
         return f'effects: the marker tick wrote {pairs}'
@@ -845,7 +845,7 @@ def run_sndh() -> str:
 
 
 def Yx6_DRUM_TABLE(player) -> int:
-    """The drum table's offset, straight from the packed file's header."""
+    """The sample table's offset, straight from the packed file's header."""
     return int.from_bytes(player.uc.mem_read(player.file + 28, 4), 'big')
 
 

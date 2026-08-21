@@ -234,7 +234,7 @@ final class Yx6EncoderTest {
 
         assertEquals(2, word(file, Yx6Format.OFFSET_SAMPLE_COUNT));
         int table = longAt(file, Yx6Format.OFFSET_SAMPLE_TABLE);
-        assertTrue(table > 0, "the drum table exists");
+        assertTrue(table > 0, "the sample table exists");
         for (int i = 0; i < 2; i++) {
             int at = longAt(file, table + Yx6Format.SAMPLE_ENTRY_SIZE * i);
             int length = word(file, table + Yx6Format.SAMPLE_ENTRY_SIZE * i + 4);
