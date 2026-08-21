@@ -1,9 +1,9 @@
 ; -----------------------------------------------------------------------------
 ; YX6.S - streaming YM chiptune player for the plain 68000 (Atari ST)
 ;
-; By Robbert van Dalen. Plays a .yx6 file: nineteen streams - fourteen frame
-; streams, one per sound register, and five carrying the compiled effect
-; script - every one packed as its own embedded ST4 container and decoded
+; By Robbert van Dalen. Plays a .yx6 file: twenty-two streams - fourteen
+; frame streams, one per sound register, and eight carrying the compiled
+; effect script - every one packed as its own embedded ST4 container and decoded
 ; through its own small ring by ST4_wrap.S. Written by Claude (Anthropic's
 ; Claude Code) under Robbert's direction, based on ZX1 v1.5 by Einar Saukas
 ; and inspired by Steve Clarets' MinYMiser. Use it freely, including
@@ -12,7 +12,11 @@
 ;
 ; It plays the fourteen standard sound registers, loops, and plays what the
 ; YM format calls its special effects - digidrums, SID voices, the
-; sync-buzzer - on MFP Timers A and D. In this player's own words those are
+; sync-buzzer - on THREE TICK CHANNELS. A tick channel is the format's
+; idea; this player implements one with an MFP timer, and yx6_desc_1 to
+; yx6_desc_3 are the whole map: channel 1 on Timer A, 2 on Timer D, 3 on
+; Timer B, claimed only when a tune says it uses them. In this player's
+; own words a channel's streams are
 ; TICK STREAMS: series of values written to one register between frames,
 ; timer-driven, as against the FRAME STREAMS that carry the music itself.
 ; Sinus-SID, which no player has ever implemented, is dropped at pack time.
@@ -31,12 +35,12 @@
 ; a different one is rejected, not garbled.
 ;
 ; -----------------------------------------------------------------------------
-; THE DESIGN, in one paragraph. A tune is O frames long. Each of the nineteen
-; streams gets its own ring of N bytes and its own saved decoder state, and
-; is decoded C values at a time (C = 24 by default). On every VBL the player
-; uses one value from each of the nineteen rings and refills exactly one
+; THE DESIGN, in one paragraph. A tune is O frames long. Each of the
+; twenty-two streams gets its own ring of N bytes and its own saved decoder
+; state, and is decoded C values at a time (C = 24 by default). On every VBL the player
+; uses one value from each of the rings and refills exactly one
 ; stream - stream k on the VBL where the frame number modulo C is k. With
-; C >= 19 every stream is refilled once per C frames, one refill per VBL, so
+; C >= 22 every stream is refilled once per C frames, one refill per VBL, so
 ; the work per frame is flat, and ordered for the chip's benefit: the burst
 ; gates, then the fourteen register writes - the FRAME WRITE, leaving the
 ; VBL at a FIXED offset whatever the frame's tick streams cost - then the
@@ -50,9 +54,10 @@
 ; packer replayed the reference player's whole decision logic over the
 ; timeline - held or new, retune or restart, who stops whose timer, when a
 ; sample's gate reopens - and wrote the outcomes down as prepared actions.
-; Ring M says what acts this frame (almost always: nothing, one test);
-; A1/P1 and A2/P2 carry each tick channel's action byte and timer count.
-; The handlers copy prepared values into Timers A and D and this blob's
+; Ring M says what acts this frame (almost always: nothing, one test); each
+; channel's A/P pair carries its action byte and timer count, and ring X
+; the operand an action byte has no room for.
+; The handlers copy prepared values into the claimed timers and this blob's
 ; tick handlers - digidrum, SID square, sync-buzzer - and compare NOTHING
 ; at run time. A sample's voice is DISCONNECTED by routing baked into the
 ; R7 stream, so its sample is heard alone, and no ring byte is ever edited:
@@ -87,12 +92,13 @@
 ;       lea     workspace,a0
 ;       bsr     YX6_stop                ; chip quiet, timers stopped
 ;
-; The workspace holds the player's own fields, the nineteen decoder states
-; and the nineteen rings, so its size depends on the ring size in the file:
+; The workspace holds the player's own fields, one decoder state per stream
+; and one ring per stream, so its size depends on the ring size in the file.
+; It is always sized for all twenty-two, whatever the tune uses:
 ;
-;   YX6_SIZE = YX6_FIXED + 19 * N       ; 1266 + 19 * N bytes
+;   YX6_SIZE = YX6_FIXED + 22 * N       ; 1460 + 22 * N bytes
 ;
-; For the default 960-byte rings that is 19506 bytes. A program that knows N
+; For the default 960-byte rings that is 22580 bytes. A program that knows N
 ; at build time can reserve it with
 ;
 ;       ds.b    YX6_FIXED+(YX6_STREAMS*960)
@@ -102,13 +108,19 @@
 ; CALLS AND REGISTERS
 ;
 ;   YX6_init   in   a0 = .yx6 file, at an even address, a1 = workspace
-;              out  d0 = 0 accepted, -1 not a v5 yx6 file with 19 streams
+;              out  d0 = 0 accepted, -1 not a v6 yx6 file with 22 streams
 ;                        packed at this build's unit size
-;              Claims MFP Timers A and D for the tick channels: stops them,
-;              parks their vectors, drops stale pendings, enables and
-;              unmasks both. It saves NOTHING - the machine state is the
-;              host's, see assumption 5. Timer B stays free for rasters,
-;              Timer C stays the system's. Pair every init with a stop
+;              Claims a timer for each tick channel the header names:
+;              stops it, parks its vector, drops stale pendings, enables
+;              and unmasks it. It saves NOTHING - the machine state is the
+;              host's, see assumption 5. A YM tune names two channels, so
+;              Timer B stays free for rasters; a tune that names three
+;              takes it. Timer C stays the system's. Pair init with a stop.
+;              A channel the tune does not name is left ALONE, which means
+;              a timer the host had running keeps running: claiming used
+;              to quiet the machine as a side effect and no longer does.
+;              A host that wants a quiet machine stops the timers itself
+;              before init - YX6_player.S is the worked example
 ;   YX6_play   in   a0 = workspace
 ;              out  d0 = 0 played a frame
 ;                   d0 = 1 played a frame, and that frame ended the tune: the
@@ -116,7 +128,7 @@
 ;                   d0 = -1 the tune is over and nothing was written, which
 ;                          only a tune packed with -o can report
 ;   YX6_stop   in   a0 = workspace
-;              Quiesces: stops both timers, disables their interrupts,
+;              Quiesces: stops the claimed timers, disables their interrupts,
 ;              drops pendings, silences the three voices. Restores nothing
 ;   CLOBBERED  d0-d5, a0-a5. d6, d7 and a6 survive, as with ST4 - whose
 ;              decoder state spans a4 and a5, which is why they no longer do.
@@ -125,7 +137,7 @@
 ; mode - which a VBL handler already does. It masks interrupts around the
 ; fourteen writes, because selecting a register and writing it are two bus
 ; cycles and TOS's own handlers use the chip too. Its effect stage programs
-; the two timers YX6_init claimed, vectors included. Beyond the chip, those
+; the timers YX6_init claimed, vectors included. Beyond the chip, those
 ; timers and the workspace, the player writes only ITSELF: it is
 ; self-modifying code. The channel descriptors, the prepared tables and the
 ; tick handlers' operands live in this blob, init patches the burst's ring
@@ -162,10 +174,11 @@
 
 ; A host that never runs user-mode code while the player is live - a demo
 ; under its own takeover, say - may define YX6_SUPER_HOST equ 1 before
-; including this file: channel B's PCM tick then parks a0 in the then-unused
-; USP (4 cycles each way instead of 12 through the stack; channel A's
-; always uses the stack, because Timer A nests into Timer D's parked
-; windows and must never overwrite one). The park restores a0
+; including this file: the PCM tick of the channel on Timer D then parks a0
+; in the then-unused USP (4 cycles each way instead of 12 through the
+; stack). Every other channel's always uses the stack, because Timer A and
+; Timer B both nest into Timer D's parked windows and must never overwrite
+; one - Timer D is last in MFP priority, so nothing nests into it. The park restores a0
 ; but not the USP: a host that ever returns to user mode must save its USP
 ; before YX6_init and restore it after YX6_stop, with the rest of the
 ; machine state assumption 5 lists. Default off, because a program that
@@ -199,10 +212,15 @@ PERF_SYNC       equ     8000            ; the sync loop's ceiling: a whole
                                         ; frame's worth of turns, so a host
                                         ; that calls from anywhere still runs
 
-YX6_STREAMS     equ     19              ; R0..R13, then the compiled effect
-                                        ; script: M, then each channel's action
-                                        ; and count bytes - decoded like any
-                                        ; register
+YX6_CHANNELS    equ     3               ; tick channels; the timer each one
+                                        ; runs on is this file's business,
+                                        ; not the format's
+YX6_STREAMS     equ     22              ; R0..R13, then the compiled effect
+                                        ; script: M, X, then each channel's
+                                        ; action and count bytes - decoded
+                                        ; like any register
+YX6_CHAN0       equ     16              ; stream index of channel 1's action
+                                        ; byte: R0..R13, then M and X
 YX6_STATE_SIZE  equ     64              ; per stream, so the index is a shift
                                         ; both ways: *64 in, /16 back to *4
 
@@ -223,24 +241,37 @@ YX6_SLOT        equ     40              ; word  refill turn, 0..C-1
 YX6_INDEX       equ     42              ; word  stream index, during init only
 YX6_LOOPS       equ     44              ; word  nonzero when the tune loops
 YX6_EFXOFF      equ     46              ; long  14*N: the cursor's ring to M's
-YX6_STATE       equ     50              ; 19 decoder states, from an even base
+YX6_LIVE        equ     50              ; word  streams still worth decoding:
+                                        ; the channels sit last, so a tune
+                                        ; that names two leaves the third's
+                                        ; pair off the end
+YX6_STATE       equ     52              ; the decoder states, from an even base
 
-; Each tick channel's descriptor holds only what tells the two apart:
-; its timer's registers, its vector, its partner's control register (the
-; START_PCM_PREEMPT action stops that timer first), and its tick-handler
-; block. No remembered state - the script compiled every comparison at
-; pack time. The hardware addresses are words: movea.w sign-extends $FAxx
-; to $FFFFFAxx.
+; A tick channel is the format's idea; a timer is this file's. One
+; descriptor per channel says which timer implements it, and every channel
+; carries the same fields, so the code that claims, programs and hands
+; timers back is one loop over the table. No remembered state beyond the
+; claim - the script compiled every comparison at pack time. The hardware
+; addresses are words: movea.w sign-extends $FAxx to $FFFFFAxx.
+;
+; The MFP's four interrupt registers march in step - enable, pending,
+; in-service, mask, four bytes apart in both banks - so one address covers
+; all four: IER+4 is pending, +8 in-service, +12 mask.
 CH_CTRL         equ     0               ; word  timer control register
 CH_DATA         equ     2               ; word  timer data register
 CH_VEC          equ     4               ; word  timer vector
-CH_OTHER_CTRL   equ     6               ; word  the partner channel's control
-CH_IER          equ     8               ; word  the timer's enable register
-CH_IERBIT       equ     10              ; word  and its bit: a toggle release
+CH_IER          equ     6               ; word  the timer's enable register
+CH_IERBIT       equ     8               ; word  and its bit: a toggle release
                                         ; only MASKS the interrupt, so the
                                         ; counter keeps counting and a
                                         ; resume is phase-continuous
+CH_CLAIMED      equ     10              ; word  nonzero once YX6_init took
+                                        ; this channel's timer, which it
+                                        ; does only for a channel the
+                                        ; header names
 CH_ISR          equ     12              ; long  the channel's tick handlers
+CH_SIZE         equ     16              ; the table is indexed, so descriptors
+                                        ; are a fixed stride apart
 ; rmac evaluates left to right, so the parentheses here are load-bearing:
 ; without them this reads as (YX6_STATE+YX6_STREAMS)*YX6_STATE_SIZE.
 YX6_FIXED       equ     YX6_STATE+(YX6_STREAMS*YX6_STATE_SIZE)
@@ -276,12 +307,16 @@ YH_LOOP         equ     20
 YH_CLOCK        equ     24
 YH_SAMPLES        equ     28              ; long: the sample table, 0 when none
 YH_SAMPLECOUNT    equ     32              ; word
-YH_INTRO_TABLE  equ     34              ; 19 offsets: the frames before the loop
+YH_INTRO_TABLE  equ     34              ; one offset per stream: the frames
+                                        ; before the loop
 YH_LOOP_TABLE   equ     YH_INTRO_TABLE+(YX6_STREAMS*4)
 
 YX6_MAGIC       equ     $59583621       ; 'YX6!'
-YX6_VERSION     equ     5               ; 5: the compiled effect script
+YX6_VERSION     equ     6               ; 6: a third tick channel
 YX6_FLAG_LOOPS  equ     1               ; header flag: the tune loops
+YX6_FLAG_CHAN   equ     2               ; and one per tick channel, from bit
+                                        ; 1 up: set when the tune uses it,
+                                        ; which is when a timer is claimed
 YX6_PSG         equ     $FFFF8800       ; select/read at +0, write at +2
 YX6_NO_ENV      equ     $FF             ; R13 value meaning "leave it alone"
 YX6_PORTS       equ     $C0             ; R7 bits the ST needs as outputs
@@ -316,10 +351,11 @@ YX6_ENVELOPE    equ     13
                 bra.w   YX6_stop
 
 ; -----------------------------------------------------------------------------
-; YX6_init: a0 = .yx6 file, a1 = workspace. Sets up eighteen decoders, decodes
+; YX6_init: a0 = .yx6 file, a1 = workspace. Sets up every decoder, decodes
 ; each stream's first group so frame 0 can be played immediately, patches the
 ; blob's run-time addresses and the burst's ring displacements, and claims
-; MFP Timers A and D for the tick channels - saving nothing, per assumption 5.
+; a timer for each tick channel the header names - saving nothing, per
+; assumption 5.
 ; -----------------------------------------------------------------------------
 YX6_init:
         movea.l a1,a3                   ; a3 is the workspace throughout
@@ -495,24 +531,52 @@ YX6_init:
         move.w  d1,(a0)
         bsr     yx6_link                ; gates open, handlers linked
 
-; Claim Timers A and D: park our handlers on the vectors and leave both
-; timers stopped but enabled and unmasked. Nothing is saved - the machine
-; state is the host's, see assumption 5 in the header. bset/bclr only:
-; Timer C's bits and the ACIA's live in the same registers.
+; Claim a timer for each tick channel the header names: park our handler
+; on its vector and leave the timer stopped but enabled and unmasked. A
+; channel the tune does not use is left entirely alone, timer and all, so
+; a two-channel tune hands Timer B to the host untouched. Nothing is saved
+; - the machine state is the host's, see assumption 5 in the header.
+; bset/bclr only: Timer C's bits and the ACIA's live in the same registers.
+        movea.l YX6_FILE(a3),a0         ; yx6_link had a0
+        move.w  YH_FLAGS(a0),d0
+        lsr.w   #1,d0                   ; flag bit 1+c: channel c is used
+        lea     yx6_desc_1(pc),a5
+        moveq   #YX6_CHANNELS-1,d2
+        move.w  #YX6_CHAN0,YX6_LIVE(a3) ; no channel: no A or P worth decoding
         move.w  sr,-(sp)
         ori.w   #$0700,sr
-        clr.b   $FFFFFA19.w             ; Timer A stopped
-        andi.b  #$F0,$FFFFFA1D.w        ; Timer D stopped; Timer C untouched
-        lea     yx6_parkA(pc),a0
-        move.l  a0,$134.w
-        lea     yx6_parkD(pc),a0
-        move.l  a0,$110.w
-        bclr    #5,$FFFFFA0B.w          ; drop stale pendings
-        bclr    #4,$FFFFFA0D.w
-        bset    #5,$FFFFFA07.w          ; Timer A enabled and unmasked
-        bset    #5,$FFFFFA13.w
-        bset    #4,$FFFFFA09.w          ; Timer D likewise
-        bset    #4,$FFFFFA15.w
+.claim:
+        bsr     yx6_handback            ; an earlier init's claim on this
+                                        ; channel goes back first, whether
+                                        ; or not this tune wants it again:
+                                        ; init twice without a stop and no
+                                        ; timer of ours is left running
+        moveq   #0,d1
+        lsr.w   #1,d0
+        bcc.s   .idle
+        moveq   #1,d1
+.idle:
+        move.w  d1,CH_CLAIMED(a5)       ; what YX6_stop hands back
+        beq.s   .next_channel
+        move.w  #YX6_CHANNELS,d1        ; and the last claimed channel's pair
+        sub.w   d2,d1                   ; is the last stream worth decoding
+        add.w   d1,d1
+        add.w   #YX6_CHAN0,d1
+        move.w  d1,YX6_LIVE(a3)
+        movea.w CH_CTRL(a5),a1
+        andi.b  #$F0,(a1)               ; stopped; a shared nibble kept
+        movea.l CH_ISR(a5),a2
+        lea     ISR_PARK(a2),a2         ; the park entry, until an effect
+        movea.w CH_VEC(a5),a1           ; aims the vector somewhere
+        move.l  a2,(a1)
+        move.w  CH_IERBIT(a5),d1
+        movea.w CH_IER(a5),a1
+        bclr    d1,4(a1)                ; drop a stale pending
+        bset    d1,(a1)                 ; enabled
+        bset    d1,12(a1)               ; and unmasked
+.next_channel:
+        lea     CH_SIZE(a5),a5
+        dbra    d2,.claim
         move.w  (sp)+,sr
 
         moveq   #0,d0
@@ -669,6 +733,24 @@ YX6_play:
         .endif                          ; so the monitor never delays the
                                         ; burst; the timers' bar follows
 
+; One channel's turn in the frame's action stage: \bit of the master byte
+; says whether it acts, \rings is how far its action stream sits above M
+; (channel c's pair is 2+2c and 3+2c streams up), \here names the block
+; and \next the one after it, so the channels chain without a loop's
+; bookkeeping in the common case of nothing acting at all.
+        .macro YX6_ACT chan, bit, rings, here, next
+\here:
+        move.b  (a0),d0                 ; a0 survives yx6_act
+        btst    #\bit,d0
+        beq.s   \next
+        lea     yx6_desc\{chan}(pc),a5
+        movea.l a0,a4
+        .rept \rings
+        adda.l  d3,a4                   ; its ring sits \rings above M
+        .endr
+        bsr     yx6_act
+        .endm
+
 ; The gates first, then the burst, then everything else: the fourteen chip
 ; writes leave the VBL at a FIXED offset, whatever the frame's effects cost.
 ; Only the gate state must precede the burst (a trigger frame's voice must
@@ -679,9 +761,9 @@ YX6_play:
         movea.l YX6_CURSOR(a3),a0
         adda.l  YX6_EFXOFF(a3),a0       ; ring M, at this frame's offset
         move.b  (a0),d0                 ; a0 survives everything below
-        btst    #2,d0                   ; the gate mask changed?
-        beq.s   .burst                  ; bits 5-3 carried the new state
-        lsr.b   #3,d0
+        btst    #3,d0                   ; the gate mask changed?
+        beq.s   .burst                  ; bits 6-4 carried the new state
+        lsr.b   #4,d0
         bsr     yx6_gates
 .burst:
         movea.l YX6_CURSOR(a3),a1       ; the cursor: every register's ring
@@ -703,6 +785,17 @@ yx6_wA:
         YX6_WRITE 5
         YX6_WRITE 6                     ; noise period
 
+; R7 sits HERE ON PURPOSE, between the periods and the volumes, and moving
+; it to either end of the run - which would let R0..R6 and R8..R12 fold
+; into one unbroken block, for two source lines and four bytes - widens an
+; audible window. Routing and volume disagree for as long as the writes
+; between them take: on the frame a sample ends, R7 reconnects the voice
+; while its volume register still holds the sample's parked tail value.
+; That gap is one write, about 4 us, where it is. First in the run it
+; becomes seven writes, 28 us; last, five writes on the other side, 20 us -
+; and the same class of artefact cost a day and a half on Trapped in China.
+; Nothing automated would catch it: the harness reads registers at the end
+; of a frame, and the rig compares each frame's writes as a set.
         move.b  #YX6_MIXER,(a2)         ; R7 also carries the ST's I/O port
 yx6_w7:
         move.b  $7FFF(a1),d1            ; directions, which port A needs kept
@@ -730,32 +823,21 @@ yx6_w13:
 ; were decided at pack time; the handlers copy prepared values to prepared
 ; places and compare nothing. a0 still points at ring M.
         move.b  (a0),d0
-        andi.b  #3,d0                   ; the channels' bits; gates are done
+        andi.b  #(1<<YX6_CHANNELS)-1,d0 ; the channels' bits; gates are done
         beq.s   .effects_done
         moveq   #0,d3
-        move.w  YX6_N(a3),d3
-        lsr.b   #1,d0                   ; bit 0: channel A acts
-        bcc.s   .slot2
-        lea     yx6_desc1(pc),a5
-        movea.l a0,a4
-        adda.l  d3,a4                   ; ring A1 = M + N
-        bsr     yx6_act
-.slot2:
-        move.b  (a0),d0                 ; a0 survives yx6_act; d0 does not
-        btst    #1,d0                   ; bit 1: channel B acts
-        beq.s   .effects_done
-        lea     yx6_desc2(pc),a5
-        movea.l a0,a4
-        adda.l  d3,a4
-        adda.l  d3,a4
-        adda.l  d3,a4                   ; ring A2 = M + 3N
-        bsr     yx6_act
+        move.w  YX6_N(a3),d3            ; d3 survives yx6_act; d0 does not
+        YX6_ACT _1,0,2,.channel1,.channel2
+        YX6_ACT _2,1,4,.channel2,.channel3
+        YX6_ACT _3,2,6,.channel3,.effects_done
 .effects_done:
 
-; Refill the stream whose turn it is. Slots 19..C-1 exist when C is larger
-; than the stream count; they simply have nothing to do.
+; Refill the stream whose turn it is. Slots past the live streams exist
+; when C is larger than that count; they simply have nothing to do - which
+; is also how an unused tick channel costs no time, its pair of streams
+; sitting past the end.
         move.w  YX6_SLOT(a3),d0
-        cmp.w   #YX6_STREAMS,d0
+        cmp.w   YX6_LIVE(a3),d0
         bcc.s   .advance
         moveq   #0,d3
         move.w  YX6_C(a3),d3            ; a whole group
@@ -822,9 +904,10 @@ yx6_w13:
         rts
 
 ; -----------------------------------------------------------------------------
-; YX6_stop: a0 = workspace. Quiesces what YX6_init claimed - both timers
-; stopped, their interrupts disabled and masked, pendings dropped - then
-; silences the three voices. It restores NOTHING: the host that saved the
+; YX6_stop: a0 = workspace. Quiesces what YX6_init claimed - every claimed
+; channel's timer stopped, its interrupt disabled and masked, its pending
+; dropped - then silences the three voices. A timer the tune never asked
+; for is not touched here either. It restores NOTHING: the host that saved the
 ; machine state hands it back itself, after this returns. Tone and envelope
 ; settings stay, and a fresh YX6_init starts the tune over.
 ; -----------------------------------------------------------------------------
@@ -832,14 +915,12 @@ YX6_stop:
         movea.l a0,a3
         move.w  sr,-(sp)
         ori.w   #$0700,sr
-        clr.b   $FFFFFA19.w             ; both timers stopped,
-        andi.b  #$F0,$FFFFFA1D.w
-        bclr    #5,$FFFFFA07.w          ; disabled and masked - the claim
-        bclr    #5,$FFFFFA13.w          ; handed back bit by bit
-        bclr    #4,$FFFFFA09.w
-        bclr    #4,$FFFFFA15.w
-        bclr    #5,$FFFFFA0B.w          ; and no pending ticks of ours
-        bclr    #4,$FFFFFA0D.w
+        lea     yx6_desc_1(pc),a5
+        moveq   #YX6_CHANNELS-1,d2
+.channel:
+        bsr.s   yx6_handback
+        lea     CH_SIZE(a5),a5
+        dbra    d2,.channel
         moveq   #0,d0                   ; every burst gate open again
         bsr     yx6_gates
 ; The silence stays inside the mask: selecting a register and writing it are
@@ -856,26 +937,56 @@ YX6_stop:
         move.w  (sp)+,sr
         rts
 
+; One channel's timer given back: stopped, disabled, masked, no pending
+; tick of ours - and the claim cleared, so a second call does nothing. The
+; vector is left where it points, at this blob's park entry: it cannot
+; fire, and restoring vectors is the host's job (assumption 5).
+; in: a5 = the descriptor; clobbers d1/a1.
+yx6_handback:
+        tst.w   CH_CLAIMED(a5)          ; only what YX6_init took
+        beq.s   .not_ours
+        clr.w   CH_CLAIMED(a5)
+        movea.w CH_CTRL(a5),a1
+        andi.b  #$F0,(a1)               ; the timer stopped,
+        move.w  CH_IERBIT(a5),d1
+        movea.w CH_IER(a5),a1
+        bclr    d1,(a1)                 ; disabled and masked - the claim
+        bclr    d1,12(a1)               ; handed back bit by bit
+        bclr    d1,4(a1)                ; and no pending tick of ours
+.not_ours:
+        rts
+
 ; -----------------------------------------------------------------------------
 ; The effect machinery. The per-frame stage lives inlined in YX6_play; what
-; follows is everything it drives: the two channel descriptors, the tick
-; handlers, and the one machine that serves both timers.
+; follows is everything it drives: the channel descriptors, the tick
+; handlers, and the one machine that serves every channel.
 ; -----------------------------------------------------------------------------
 
-; The channel descriptors - see the CH_ equates. Channel A owns Timer A, B
-; Timer D, whose control nibble is shared with Timer C and only ever changed
-; read-modify-write; the channel machine uses that form for both, which on
-; Timer A writes the same values a clear would.
+; The channel-to-timer map - see the CH_ equates. Tick channel 1 runs on
+; Timer A, 2 on Timer D, 3 on Timer B. Timer C is the operating system's
+; 200 Hz clock and is never touched. Timer D's control nibble is shared
+; with Timer C, so it may only be changed read-modify-write; the channel
+; machine uses that form for all three, which on Timers A and B writes the
+; same values a clear would.
+;
+; Channel 3 is last because Timer B is what a demo wants for raster work:
+; a tune that names two channels leaves it alone, and only a tune that
+; asks for three takes it.
         even
-yx6_desc1:
+yx6_desc_1:
         dc.w    $FA19,$FA1F,$0134       ; control, data, vector
-        dc.w    $FA1D                   ; the partner's control register
         dc.w    $FA07,5                 ; the enable register and its bit
+        dc.w    0                       ; claimed: YX6_init, from the header
         dc.l    0                       ; ISR block: yx6_link
-yx6_desc2:
+yx6_desc_2:
         dc.w    $FA1D,$FA25,$0110
-        dc.w    $FA19
         dc.w    $FA09,4
+        dc.w    0
+        dc.l    0
+yx6_desc_3:
+        dc.w    $FA1B,$FA21,$0120
+        dc.w    $FA07,0
+        dc.w    0
         dc.l    0
 
 ; The two prepared tables the script indexes into: the samples' absolute
@@ -895,21 +1006,23 @@ yx6_parmoff:
 ; patched operand is addressed pc-relatively so the player stays loadable
 ; anywhere - which also means it must run from RAM, where a demo lives.
 ;
-; The two channels' handlers are the same text twice, and MUST stay
+; The channels' handlers are the same text three times, and MUST stay
 ; byte-congruent: the action handlers reach every patched operand through
-; ISR_ offsets measured on the A block. The rig checks the congruence from
-; the symbol table. The park entries - where YX6_init aims the vectors
+; ISR_ offsets measured on channel 1's block, and yx6_link walks the blocks
+; at a fixed stride. The rig checks both from the symbol table. The park entries - where YX6_init aims the vectors
 ; while no effect runs - are the handlers' own tails.
 ;
 ; The timers STACK: each handler drops the IPL to 5 as soon as its PSG
-; select/data pair is complete, so the MFP's higher-priority channel -
-; Timer A over Timer D - can nest instead of waiting a whole tick. The
-; nesting is strictly one-way: Timer A interrupts Timer D's handlers,
-; never the reverse (SEI mode admits only higher MFP priorities while an
-; in-service bit is set), and nothing of the player's sits above Timer A.
-; That direction is why the USP park belongs to the D-side PCM tick alone:
-; the A-side one - which can nest into a parked window - always uses
-; the stack, so a parked USP survives. The drop must never come before
+; select/data pair is complete, so an MFP channel of higher priority can
+; nest instead of waiting a whole tick. The MFP serves its A bank before
+; its B bank, which puts the player's timers in the order A, B, D. The
+; nesting is strictly one-way: a higher-priority timer interrupts a lower
+; one's handler, never the reverse (SEI mode admits only higher MFP
+; priorities while an in-service bit is set), and nothing of the player's
+; sits above Timer A. That direction is why the USP park belongs to
+; Timer D's PCM tick alone - it is the one nothing else waits behind, so
+; nothing can nest into its parked window. Every other channel's tick
+; uses the stack, so a parked USP survives. The drop must never come before
 ; the handler's LAST chip write: a nested tick re-selects the PSG.
 ;
 ; The patch offsets are load-bearing (all fixed ones shift by PERF_PAD when
@@ -920,18 +1033,20 @@ yx6_parmoff:
 ;   retrigger: the shape at +4
 ; -----------------------------------------------------------------------------
 
-; The two channels differ in six things, so the whole set of handlers is
-; written once as a macro and invoked twice. \side is the label suffix,
-; \colour the monitor's band, \eoi and \eoir the end-of-interrupt value
-; and register, \tctrl the timer's control register, \vec its vector, and
-; \park is 1 on the channel allowed to park a0 in the USP. rmac's \~ gives
-; each expansion its own local labels.
-        .macro YX6_TICKS side, colour, eoi, eoir, tctrl, vec, park
+; The channels differ only in which timer runs them, so the whole set of
+; handlers is written once as a macro and invoked once per channel. \chan
+; is the channel's label suffix - rmac renders a bare digit as hex, so the
+; number wears a leading underscore - and the timer arrives
+; as arguments: \eoi and \eoir the end-of-interrupt value and register,
+; \tctrl the timer's control register, \vec its vector. \colour is the
+; monitor's band and \park is 1 on the channel allowed to park a0 in the
+; USP. rmac's \~ gives each expansion its own local labels.
+        .macro YX6_TICKS chan, colour, eoi, eoir, tctrl, vec, park
 
 ; One PCM tick: the sample byte goes straight to the voice's volume register.
 ; The byte after the last has bit 7 set, so the same move answers "done": park
 ; the volume mid-scale against the click, stop the timer, drop the flag.
-yx6_pcm\side:
+yx6_pcm\{chan}:
         .if YX6_PERF
         move.w  $FFFF8240.w,-(sp)       ; this channel's band
         move.w  #\colour,$FFFF8240.w
@@ -945,7 +1060,7 @@ yx6_pcm\side:
         .else
         move.l  a0,-(sp)
         .endif
-        lea     yx6_pcm\side+8+PERF_PAD(pc),a0
+        lea     yx6_pcm\{chan}+8+PERF_PAD(pc),a0
         addq.l  #1,(a0)                 ; step the operand itself
         .if YX6_PERF
         lea     yx6_perf_acc(pc),a0
@@ -971,7 +1086,7 @@ yx6_pcm\side:
         movea.l (sp)+,a0
         move.w  (sp)+,$FFFF8240.w
         .endif
-yx6_park\side:
+yx6_park\{chan}:
         move.b  #\eoi,\eoir.w
         rte
 
@@ -979,7 +1094,7 @@ yx6_park\side:
 ; silence - and installs the other half as the next tick, one word into the
 ; vector. Select and data land in one move.l: the immediate's bytes hit
 ; $8800 (select) and $8802 (data) by bus layout.
-yx6_toggle\{side}_on:
+yx6_toggle\{chan}_on:
         .if YX6_PERF
         move.w  $FFFF8240.w,-(sp)
         move.w  #\colour,$FFFF8240.w
@@ -996,7 +1111,7 @@ yx6_toggle\{side}_on:
         .endif
         move.b  #\eoi,\eoir.w
         rte
-yx6_toggle\{side}_off:
+yx6_toggle\{chan}_off:
         .if YX6_PERF
         move.w  $FFFF8240.w,-(sp)
         move.w  #\colour,$FFFF8240.w
@@ -1016,7 +1131,7 @@ yx6_toggle\{side}_off:
 
 ; The retrigger tick: writing the shape to R13 restarts the envelope, and
 ; that restart at the timer's rate is the whole effect.
-yx6_retrigger\side:
+yx6_retrigger\{chan}:
         .if YX6_PERF
         move.w  $FFFF8240.w,-(sp)
         move.w  #\colour,$FFFF8240.w
@@ -1034,28 +1149,38 @@ yx6_retrigger\side:
         rte
         .endm
 
-; Channel A on Timer A, in green; channel B on Timer D, in blue, and the
-; only one that may park a0 in the USP.
-        YX6_TICKS A,$070,$DF,$FFFFFA0F,$FFFFFA19,$134,0
-        YX6_TICKS D,$007,$EF,$FFFFFA11,$FFFFFA1D,$110,1
+; The map, in one place: channel 1 is Timer A in green, channel 2 Timer D
+; in blue, channel 3 Timer B in red. The MFP serves its A bank before its
+; B bank, so the priority runs Timer A, then Timer B, then Timer D - which
+; makes channel 2 the one nothing can nest into, and so the only one that
+; may park a0 in the USP.
+;                 chan colour  eoi  in-service  control     vector  park
+        YX6_TICKS _1,  $070,   $DF, $FFFFFA0F, $FFFFFA19,   $134,   0
+        YX6_TICKS _2,  $007,   $EF, $FFFFFA11, $FFFFFA1D,   $110,   1
+        YX6_TICKS _3,  $700,   $FE, $FFFFFA0F, $FFFFFA1B,   $120,   0
+
+YX6_BLOCK       equ     yx6_pcm_2-yx6_pcm_1   ; the blocks are congruent, so
+                                        ; one stride walks them
 
         .if YX6_PERF
 yx6_perf_acc:
         dc.w    0                       ; the ticks' estimated cost since the
         .endif                          ; last frame, in 10-cycle quanta
 
-; Where the patched operands sit, measured on the A block; the D block is
-; byte-congruent, so the same offsets serve both through CH_ISR.
+; Where the patched operands sit, measured on channel 1's block; the other
+; blocks are byte-congruent, so the same offsets serve all of them through
+; CH_ISR.
 ISR_PCM_SEL    equ     PERF_PAD+3
 ISR_PCM_PTR    equ     PERF_PAD+8
-ISR_TOGGLE_ON       equ     yx6_toggleA_on-yx6_pcmA
+ISR_TOGGLE_ON       equ     yx6_toggle_1_on-yx6_pcm_1
 ISR_TOGGLE_ON_SEL   equ     ISR_TOGGLE_ON+PERF_PAD+2
 ISR_TOGGLE_VOL     equ     ISR_TOGGLE_ON+PERF_PAD+4
 ISR_TOGGLE_ON_NEXT  equ     ISR_TOGGLE_ON+PERF_PAD+14
-ISR_TOGGLE_OFF      equ     yx6_toggleA_off-yx6_pcmA
+ISR_TOGGLE_OFF      equ     yx6_toggle_1_off-yx6_pcm_1
 ISR_TOGGLE_OFF_SEL  equ     ISR_TOGGLE_OFF+PERF_PAD+2
 ISR_TOGGLE_OFF_NEXT equ     ISR_TOGGLE_OFF+PERF_PAD+14
-ISR_RETRIGGER        equ     yx6_retriggerA-yx6_pcmA
+ISR_RETRIGGER        equ     yx6_retrigger_1-yx6_pcm_1
+ISR_PARK             equ     yx6_park_1-yx6_pcm_1
 ISR_RETRIGGER_SHAPE  equ     ISR_RETRIGGER+PERF_PAD+4
 
 ; -----------------------------------------------------------------------------
@@ -1063,23 +1188,23 @@ ISR_RETRIGGER_SHAPE  equ     ISR_RETRIGGER+PERF_PAD+4
 ; Every burst gate opens (a previous session's mute must not leak), each
 ; descriptor gets its ISR block, and the toggle halves get each other's whole
 ; vector - it never changes, so it is patched once here rather than on
-; every toggle start.
+; every toggle start. One pass over the channel table does all of it.
 ; -----------------------------------------------------------------------------
 yx6_link:
         moveq   #0,d0
         bsr     yx6_gates
-        lea     yx6_desc1(pc),a0
-        lea     yx6_pcmA(pc),a2
-        move.l  a2,CH_ISR(a0)
-        bsr.s   .partners
-        lea     yx6_desc2(pc),a0
-        lea     yx6_pcmD(pc),a2
-        move.l  a2,CH_ISR(a0)
-.partners:
+        lea     yx6_desc_1(pc),a1
+        lea     yx6_pcm_1(pc),a2
+        moveq   #YX6_CHANNELS-1,d1
+.channel:
+        move.l  a2,CH_ISR(a1)
         lea     ISR_TOGGLE_OFF(a2),a0       ; each half installs the other,
         move.l  a0,ISR_TOGGLE_ON_NEXT(a2)   ; as a whole vector
         lea     ISR_TOGGLE_ON(a2),a0
         move.l  a0,ISR_TOGGLE_OFF_NEXT(a2)
+        lea     CH_SIZE(a1),a1
+        lea     YX6_BLOCK(a2),a2
+        dbra    d1,.channel
         rts
 
 ; -----------------------------------------------------------------------------
@@ -1223,9 +1348,22 @@ yx6_retrigger_start:
         move.l  a1,d4
         bra.s   yx6_program
 
-yx6_pcm_preempt:                           ; arbitration, compiled: the loser's
-        movea.w CH_OTHER_CTRL(a5),a1    ; timer stops FIRST, then the sample
-        andi.b  #$F0,(a1)               ; arms its own - the reference order
+yx6_pcm_preempt:                        ; arbitration, compiled: the losers'
+        movea.l a0,a1                   ; timers stop FIRST, then the sample
+        adda.l  d3,a1                   ; arms its own - the reference order.
+        move.b  (a1),d2                 ; A channel has no fixed partner, so
+                                        ; ring X - one stream above M - names
+                                        ; the victims, a bit per tick channel
+        lea     yx6_desc_1(pc),a1
+        moveq   #YX6_CHANNELS-1,d1      ; the table bounds the walk: a bit
+.victim:                                ; past the last channel names nobody
+        lsr.b   #1,d2
+        bcc.s   .spared
+        movea.w CH_CTRL(a1),a2
+        andi.b  #$F0,(a2)
+.spared:
+        lea     CH_SIZE(a1),a1
+        dbra    d1,.victim
 yx6_pcm:
         bsr     yx6_voice
         moveq   #0,d1

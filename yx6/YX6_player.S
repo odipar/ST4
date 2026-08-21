@@ -99,6 +99,22 @@ play:
         clr.b   $FFFFFA09.w
         clr.b   $FFFFFA13.w
         clr.b   $FFFFFA15.w
+; And every timer STOPPED, not merely silenced. Killing the enable bits
+; leaves TOS's timers counting underneath - Timer D is its RS232 baud
+; generator and keeps ticking at a few hundred kHz - which is machine state
+; the tune did not ask for. A host that takes the machine over should hand
+; the player a quiet MFP; the player itself claims only what its tune
+; names. Data registers are saved too: a timer reloads from them.
+        move.b  $FFFFFA19.w,old_tacr
+        move.b  $FFFFFA1B.w,old_tbcr
+        move.b  $FFFFFA1D.w,old_tcdcr
+        move.b  $FFFFFA1F.w,old_tadr
+        move.b  $FFFFFA21.w,old_tbdr
+        move.b  $FFFFFA23.w,old_tcdr
+        move.b  $FFFFFA25.w,old_tddr
+        clr.b   $FFFFFA19.w                     ; Timer A
+        clr.b   $FFFFFA1B.w                     ; Timer B
+        clr.b   $FFFFFA1D.w                     ; Timers C and D share this
         move    usp,a0                          ; ours to keep, per the
         move.l  a0,old_usp                      ; host-state contract
 
@@ -153,6 +169,13 @@ play:
         move.l  old_vbl,VBL_VECTOR
         movea.l old_usp,a0
         move    a0,usp
+        move.b  old_tadr,$FFFFFA1F.w            ; counts back before controls,
+        move.b  old_tbdr,$FFFFFA21.w            ; so a timer restarts on the
+        move.b  old_tcdr,$FFFFFA23.w            ; count TOS gave it
+        move.b  old_tddr,$FFFFFA25.w
+        move.b  old_tacr,$FFFFFA19.w            ; TOS's timers running again
+        move.b  old_tbcr,$FFFFFA1B.w
+        move.b  old_tcdcr,$FFFFFA1D.w
         move.b  old_iera,$FFFFFA07.w            ; and TOS's interrupts revived
         move.b  old_ierb,$FFFFFA09.w
         move.b  old_imra,$FFFFFA13.w
@@ -195,7 +218,7 @@ puts:
         rts
 
         .data
-m_banner:   dc.b    "YX6 player v2.1 - streaming through ST4",13,10,0
+m_banner:   dc.b    "YX6 player v3.0 - streaming through ST4",13,10,0
 m_playing:  dc.b    "Playing. SPACE stops."
         .if YX6_TUNES-1                 ; a line of its own: the console is
             dc.b    13,10               ; 40 columns and one line ran over
@@ -218,6 +241,13 @@ old_iera:    ds.b    1
 old_ierb:    ds.b    1
 old_imra:    ds.b    1
 old_imrb:    ds.b    1
+old_tacr:    ds.b    1
+old_tbcr:    ds.b    1
+old_tcdcr:   ds.b    1
+old_tadr:    ds.b    1
+old_tbdr:    ds.b    1
+old_tcdr:    ds.b    1
+old_tddr:    ds.b    1
         even
 mouse_skip:  ds.w    1
         even

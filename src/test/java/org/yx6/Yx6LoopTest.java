@@ -72,7 +72,8 @@ final class Yx6LoopTest {
         // This tune holds an effect across the wrap, so the split rotates
         // until both arrivals agree; the header carries the played shape.
         int split = result.script().split();
-        assertEquals(Yx6Format.FLAG_LOOPS, word(file, Yx6Format.OFFSET_FLAGS));
+        assertEquals(Yx6Format.FLAG_LOOPS,
+                word(file, Yx6Format.OFFSET_FLAGS) & Yx6Format.FLAG_LOOPS);
         assertEquals(split, longAt(file, Yx6Format.OFFSET_LOOP_FRAME));
         assertEquals(result.script().frames(), longAt(file, Yx6Format.OFFSET_FRAMES));
 
@@ -125,7 +126,7 @@ final class Yx6LoopTest {
         Yx6Encoder.Result result = Yx6Encoder.encode(song(0), 960, 24, -1, false);
         byte[] file = result.file();
 
-        assertEquals(0, word(file, Yx6Format.OFFSET_FLAGS));
+        assertEquals(0, word(file, Yx6Format.OFFSET_FLAGS) & Yx6Format.FLAG_LOOPS);
         assertEquals(FRAMES, longAt(file, Yx6Format.OFFSET_LOOP_FRAME),
                 "the intro covers everything, so the split sits at the end");
         for (int register = 0; register < Yx6Format.STREAMS; register++) {

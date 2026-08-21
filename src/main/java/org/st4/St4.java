@@ -17,7 +17,7 @@ public final class St4 {
     private St4() {}
 
     public static void main(String[] args) {
-        System.out.println("ST4: aligned split-stream packer v2.1 by Robbert van Dalen, "
+        System.out.println("ST4: aligned split-stream packer v3.0 by Robbert van Dalen, "
                 + "based on ZX1 v1.5 by Einar Saukas");
 
         int unit = 1;
@@ -114,7 +114,7 @@ public final class St4 {
      * long boundary. Nothing says how long a stream is: it runs to the next.
      */
     // Public because a container is also how other formats embed an ST4
-    // stream: a yx6 file holds up to twenty-eight of them.
+    // stream: a yx6 file holds up to forty-four of them.
     public static byte[] container(St4Compressor.Result result) {
         int controlAt = St4Format.HEADER_SIZE;                  // already a multiple of 4
         int literalAt = align(controlAt + result.control().length);

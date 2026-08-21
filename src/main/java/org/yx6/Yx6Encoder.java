@@ -150,7 +150,7 @@ public final class Yx6Encoder {
         // still applies above that.
         int offsetLimit = Math.min(ringSize / unit, St4Format.maxOffsetUnits(unit));
 
-        // The nineteen vectors, on the PLAYED timeline the script compiled:
+        // Every stream's vector, on the PLAYED timeline the script compiled:
         // registers source-mapped through the split rotation with R7 carrying
         // the baked mixer force, then the script's own five streams. Bytes a
         // stream does not consume repeat their predecessor - the event
@@ -176,14 +176,15 @@ public final class Yx6Encoder {
             vectors[register] = played;
         }
         vectors[Yx6Format.STREAM_M] = script.m();
-        vectors[Yx6Format.STREAM_A1] = carry(script.a1(), script.m(),
-                EffectScript.M_SLOT1, null);
-        vectors[Yx6Format.STREAM_P1] = carry(script.p1(), script.m(),
-                EffectScript.M_SLOT1, script.a1());
-        vectors[Yx6Format.STREAM_A2] = carry(script.a2(), script.m(),
-                EffectScript.M_SLOT2, null);
-        vectors[Yx6Format.STREAM_P2] = carry(script.p2(), script.m(),
-                EffectScript.M_SLOT2, script.a2());
+        vectors[Yx6Format.STREAM_X] = script.x();
+        for (int c = 0; c < Yx6Format.CHANNELS; c++) {
+            int acts = EffectScript.M_CHANNEL_1 << c;
+            byte[] action = script.actions()[c];
+            vectors[Yx6Format.STREAM_A1 + 2 * c] =
+                    carry(action, script.m(), acts, null);
+            vectors[Yx6Format.STREAM_P1 + 2 * c] =
+                    carry(script.counts()[c], script.m(), acts, action);
+        }
 
         var streams = new ArrayList<Stream>(2 * Yx6Format.STREAMS);
         var intro = new byte[Yx6Format.STREAMS][];
@@ -198,7 +199,7 @@ public final class Yx6Encoder {
         }
 
         byte[] file = build(song, ringSize, chunk, frames, split, loops, intro,
-                loop, effects.samples());
+                loop, effects.samples(), channelsUsed(script));
         return new Result(file, List.copyOf(streams), ringSize, chunk, split, loops, unit,
                 effects, script);
     }
@@ -254,7 +255,7 @@ public final class Yx6Encoder {
 
     private static byte[] build(Ym6Reader.Song song, int ringSize, int chunk, int frames,
                                 int split, boolean loops, byte[][] intro, byte[][] loop,
-                                byte[][] samples) {
+                                byte[][] samples, int channels) {
         // Containers carry alignment promises of their own - stream A and D
         // are read a word at a time - so each is placed on a long boundary.
         int total = Yx6Format.HEADER_SIZE;
@@ -275,7 +276,11 @@ public final class Yx6Encoder {
         byte[] file = new byte[align(total)];
         putLong(file, Yx6Format.OFFSET_MAGIC, Yx6Format.MAGIC);
         putWord(file, Yx6Format.OFFSET_VERSION, Yx6Format.VERSION);
-        putWord(file, Yx6Format.OFFSET_FLAGS, loops ? Yx6Format.FLAG_LOOPS : 0);
+        // One flag per tick channel: the player claims a timer for each
+        // channel named here and leaves the rest to the host. A YM tune
+        // names two, so Timer B stays the host's.
+        putWord(file, Yx6Format.OFFSET_FLAGS,
+                (loops ? Yx6Format.FLAG_LOOPS : 0) | channels);
         putLong(file, Yx6Format.OFFSET_FRAMES, frames);
         putWord(file, Yx6Format.OFFSET_PLAYER_HZ, song.playerHz());
         putWord(file, Yx6Format.OFFSET_STREAM_COUNT, Yx6Format.STREAMS);
@@ -318,6 +323,22 @@ public final class Yx6Encoder {
             at += containers[register].length;
         }
         return at;
+    }
+
+    /** The header's channel flags: a bit per tick channel the script ever
+     * gives something to do. */
+    private static int channelsUsed(EffectScript.Result script) {
+        int acting = 0;
+        for (byte b : script.m()) {
+            acting |= b;
+        }
+        int flags = 0;
+        for (int c = 0; c < Yx6Format.CHANNELS; c++) {
+            if ((acting & (EffectScript.M_CHANNEL_1 << c)) != 0) {
+                flags |= Yx6Format.flagChannel(c);
+            }
+        }
+        return flags;
     }
 
     private static int align(int at) {

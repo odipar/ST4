@@ -185,14 +185,15 @@ dotnet run --project csharp/src/Nt4.Cli -- [-f] [-kK] [-mN] [-lN] input [output.
 ## YX6: the YM chiptune player
 
 [yx6/](yx6/README.md) puts the streaming decoders to work: a Java packer turns
-a YM chiptune dump — YM5 or YM6, LHA-archived or not — into nineteen ST4
+a YM chiptune dump — YM5 or YM6, LHA-archived or not — into twenty-two ST4
 containers: one per YM2149 sound register, plus the compiled effect script —
-five streams of pack-time-prepared actions — with the digidrum samples
+eight streams of pack-time-prepared actions — with the digidrum samples
 appended as a table. A
-2,000-byte 68000 player decodes them through nineteen small rings with
+2,400-byte 68000 player decodes them through small rings with
 ST4_wrap, one refill per frame, and plays the effects — digidrums, SID
-voices, the sync-buzzer — on MFP Timers A and D. On one measured tune that
-costs about 1,790 cycles a frame under cycle-exact emulation, effects
+voices, the sync-buzzer — on tick channels, three of them, run on MFP
+Timers A, D and B and claimed only when a tune says it uses them. On one
+measured tune that costs about 1,690 cycles a frame under cycle-exact emulation, effects
 included — the effect decisions themselves were made at pack time: the
 packer simulates the reference player over the whole timeline and the
 player replays prepared actions.

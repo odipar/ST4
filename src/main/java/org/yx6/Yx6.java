@@ -49,15 +49,20 @@ public final class Yx6 {
                 if (script.m()[f] == 0 && script.r7force()[f] == 0) {
                     continue;
                 }
-                System.out.printf("%6d  M=%02X A1=%02X P1=%3d A2=%02X P2=%3d R7|=%02X%n",
-                        f, script.m()[f] & 0xFF, script.a1()[f] & 0xFF,
-                        script.p1()[f] & 0xFF, script.a2()[f] & 0xFF,
-                        script.p2()[f] & 0xFF, script.r7force()[f] & 0xFF);
+                StringBuilder line = new StringBuilder(
+                        String.format("%6d  M=%02X", f, script.m()[f] & 0xFF));
+                for (int c = 0; c < script.actions().length; c++) {
+                    line.append(String.format(" A%d=%02X P%d=%3d", c + 1,
+                            script.actions()[c][f] & 0xFF, c + 1,
+                            script.counts()[c][f] & 0xFF));
+                }
+                System.out.printf("%s R7|=%02X%n", line,
+                        script.r7force()[f] & 0xFF);
             }
             script.notes().forEach(n -> System.out.println("note: " + n));
             return;
         }
-        System.out.println("YX6: YM chiptune packer v2.1 by Robbert van Dalen, "
+        System.out.println("YX6: YM chiptune packer v3.0 by Robbert van Dalen, "
                 + "streaming ST4");
 
         int ringSize = Yx6Format.DEFAULT_RING_SIZE;
@@ -422,7 +427,7 @@ public final class Yx6 {
                         : "Plays frames 0-" + (result.loopFrame() - 1)
                                 + ", then loops from frame " + result.loopFrame()
                 : "Plays once, then stops");
-        String[] effectNames = {"M ", "A1", "P1", "A2", "P2"};
+        String[] effectNames = {"M ", "X ", "A1", "P1", "A2", "P2", "A3", "P3"};
         for (Yx6Encoder.Stream stream : result.streams()) {
             String name = stream.register() < Yx6Format.REGISTER_STREAMS
                     ? String.format("R%-2d", stream.register())
@@ -433,8 +438,12 @@ public final class Yx6 {
         }
         System.out.printf("Packed %d register bytes into %d (%.1f%%), file %d bytes%n",
                 raw, result.packedSize(), 100.0 * result.packedSize() / raw, result.file().length);
-        System.out.printf("Player needs %d bytes of ring plus its state%n",
-                Yx6Format.STREAMS * result.ringSize());
+        int flags = ((result.file()[Yx6Format.OFFSET_FLAGS] & 0xFF) << 8)
+                | (result.file()[Yx6Format.OFFSET_FLAGS + 1] & 0xFF);
+        System.out.printf("Player needs %d bytes of ring plus its state,"
+                        + " and decodes %d of the %d streams%n",
+                Yx6Format.STREAMS * result.ringSize(),
+                Yx6Format.liveStreams(flags), Yx6Format.STREAMS);
         for (String note : result.script().notes()) {
             System.out.println(note);
         }

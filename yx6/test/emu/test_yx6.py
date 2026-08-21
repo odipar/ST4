@@ -52,7 +52,8 @@ PSG = 0xFFFF8800
 PSG_PAGE = 0xFFFF8000
 MFP_PAGE = 0xFFFFF000           # $FFFFFAxx: the effect stage's timers
 VECTORS = 0x000000              # $110/$134: the two timer vectors
-STREAMS = 19                    # what a v4 file carries
+STREAMS = 22                    # what a v6 file carries
+CHANNELS = 3                    # tick channels, on timers A, D and B
 YX6_FIXED = 50 + STREAMS * 64   # the workspace before the rings
 
 QUICK = '--quick' in sys.argv
@@ -404,20 +405,25 @@ def run_effects(super_host: bool = False, perf: bool = False) -> str:
     if player.init() != 0:
         return 'effects: YX6_init rejected the file'
 
-    # The two tick-handler blocks must be byte-congruent: the action
-    # handlers reach every patched operand through offsets measured on the
-    # A block.
+    # Every tick-handler block must be byte-congruent with channel 1's: the
+    # action handlers reach every patched operand through offsets measured
+    # there, and yx6_link walks the blocks at a fixed stride.
     sym = player.symbols
-    for a, d in (('yx6_toggleA_on', 'yx6_toggleD_on'),
-                 ('yx6_toggleA_off', 'yx6_toggleD_off'),
-                 ('yx6_retriggerA', 'yx6_retriggerD'),
-                 ('yx6_parkA', 'yx6_parkD')):
-        if sym[a] - sym['yx6_pcmA'] != sym[d] - sym['yx6_pcmD']:
-            return f'effects: {a}/{d} broke the ISR block congruence'
+    for pattern in ('yx6_toggle_{}_on', 'yx6_toggle_{}_off',
+                    'yx6_retrigger_{}', 'yx6_park_{}'):
+        want = sym[pattern.format(1)] - sym['yx6_pcm_1']
+        for channel in range(2, CHANNELS + 1):
+            label = pattern.format(channel)
+            if sym[label] - sym[f'yx6_pcm_{channel}'] != want:
+                return f'effects: {label} broke the ISR block congruence'
+    stride = sym['yx6_pcm_2'] - sym['yx6_pcm_1']
+    for channel in range(2, CHANNELS + 1):
+        if sym[f'yx6_pcm_{channel}'] - sym['yx6_pcm_1'] != stride * (channel - 1):
+            return f'effects: block {channel} is not one stride along'
 
-    drum_d = CODE + sym['yx6_pcmD']
-    sid_on = CODE + sym['yx6_toggleA_on']
-    sid_off = CODE + sym['yx6_toggleA_off']
+    drum_d = CODE + sym['yx6_pcm_2']
+    sid_on = CODE + sym['yx6_toggle_1_on']
+    sid_off = CODE + sym['yx6_toggle_1_off']
 
     def gate(voice):
         """The voice's burst-gate displacement word: 2 open, 0 muted."""
@@ -447,7 +453,7 @@ def run_effects(super_host: bool = False, perf: bool = False) -> str:
                 return f'effects: frame {frame} wrote the SID voice volume'
             want = 10 - (frame - 4) // 2 if frame <= 14 else 10
             vol = player.uc.mem_read(
-                CODE + sym['yx6_pcmA'] + sym['ISR_TOGGLE_VOL'], 1)[0]
+                CODE + sym['yx6_pcm_1'] + sym['ISR_TOGGLE_VOL'], 1)[0]
             if vol != want:
                 return (f'effects: frame {frame} tick volume {vol}, '
                         f'the slide says {want}')
@@ -577,7 +583,7 @@ def run_effects(super_host: bool = False, perf: bool = False) -> str:
     problem = drum_ticks(player, drum_d, 10, TCDCR, 0xFFFFFA11, 0xEF)
     if problem:
         return problem
-    problem = drum_ticks(player, CODE + sym['yx6_pcmA'], 9, TACR, 0xFFFFFA0F, 0xDF)
+    problem = drum_ticks(player, CODE + sym['yx6_pcm_1'], 9, TACR, 0xFFFFFA0F, 0xDF)
     if problem:
         return problem
     if perf and acc() != 2 * (21 + 21 + 23):    # both drums' playouts
@@ -595,7 +601,7 @@ def run_effects(super_host: bool = False, perf: bool = False) -> str:
         return f'effects: the quiet half wrote {pairs}, vector {vector:#x}'
 
     # And the buzzer from frame 40: every tick rewrites the shape to R13.
-    pairs = invoke_isr(player, CODE + sym['yx6_retriggerA'])
+    pairs = invoke_isr(player, CODE + sym['yx6_retrigger_1'])
     if pairs != [(13, 11)]:
         return f'effects: the retrigger tick wrote {pairs}'
     if perf and acc() != 130 + 15 + 15 + 12:
@@ -620,6 +626,33 @@ def run_effects(super_host: bool = False, perf: bool = False) -> str:
     for voice in range(3):
         if gate(voice) != 2:
             return f'effects: stop left voice {voice} muted'
+
+    # Claiming is per tick channel, and a second YX6_init must hand back
+    # what the first one took: the file names the channels it uses, so a
+    # tune that names fewer leaves the player holding timers nobody asked
+    # for unless init gives them back first. Init the effect tune, then
+    # init an effect-free one into the same blob and workspace.
+    quiet = gen_ym.ym6_file(40, [bytearray(40) for _ in range(16)])
+    reused = Player(pack(gen_ym.ym6_file(frames, values, drums=drums),
+                         960, 24, 0, 1),
+                    workspace_size(960), super_host=super_host, perf=perf)
+    if reused.init() != 0:
+        return 'effects: init rejected the two-channel pack'
+    for _ in range(32):                         # far enough in to be running
+        reused.frame()
+    reused.uc.mem_write(reused.file, pack(quiet, 960, 24, 0, 1))
+    if reused.init() != 0:
+        return 'effects: init rejected the effect-free pack'
+    mfp2 = lambda a: reused.uc.mem_read(a, 1)[0]
+    if mfp2(0xFFFFFA19) & 0x0F or mfp2(0xFFFFFA1D) & 0x0F:
+        return 'effects: re-init left an unclaimed timer running'
+    if mfp2(0xFFFFFA07) & 0x20 or mfp2(0xFFFFFA13) & 0x20 \
+            or mfp2(0xFFFFFA09) & 0x10 or mfp2(0xFFFFFA15) & 0x10:
+        return 'effects: re-init left an unclaimed channel enabled'
+    for _ in range(20):
+        problem, _ = reused.frame()
+        if problem:
+            return 'effects: the re-inited tune ' + problem
 
     # The -sidresume gap model, on the same tune: a fresh player walks to
     # the release and resume and must see the mask, the counting-on timer,
@@ -875,7 +908,7 @@ def main() -> int:
         (600, 240, 24, 'small ring 240/24', 0, 1),
         (600, 48, 24, 'two-group ring 48/24', 128, 1),
         (600, 960, 64, 'long calls 960/64', 401, 1),
-        (608, 38, 19, 'tightest legal 38/19', 13, 1),
+        (608, 44, 22, 'tightest legal 44/22', 13, 1),
         (37, 960, 24, 'shorter than a ring', 5, 3),
         (40, 960, 24, 'loop shorter than a group', 35, 4),
         (24, 960, 24, 'exactly one group', 0, 2),
