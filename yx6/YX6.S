@@ -926,30 +926,6 @@ yx6_parmoff:
 ; and register, \tctrl the timer's control register, \vec its vector, and
 ; \park is 1 on the channel allowed to park a0 in the USP. rmac's \~ gives
 ; each expansion its own local labels.
-; One half of a toggle tick, \imm carrying both the select and the value:
-; the loud half writes the volume, the quiet half writes silence. The two
-; halves must be byte-congruent - ISR_TOGGLE_ON_SEL and ISR_TOGGLE_OFF_SEL
-; are the same offset into each - which one text guarantees.
-        .macro YX6_TOGGLE_HALF label, imm, colour, eoi, eoir, vec
-\label:
-        .if YX6_PERF
-        move.w  $FFFF8240.w,-(sp)
-        move.w  #\colour,$FFFF8240.w
-        .endif
-        move.l  #\imm,$FFFF8800.w       ; SMC PERF_PAD+2 select, +4 value
-        move.w  #$2500,sr
-        move.l  #0,\vec.w               ; SMC PERF_PAD+14: the other half is
-        .if YX6_PERF                    ; next - the whole vector, so the
-        move.l  a0,-(sp)                ; blob may straddle a 64K boundary
-        lea     yx6_perf_acc(pc),a0
-        add.w   #15,(a0)                ; ~a toggle tick, in 10-cycle quanta
-        movea.l (sp)+,a0
-        move.w  (sp)+,$FFFF8240.w
-        .endif
-        move.b  #\eoi,\eoir.w
-        rte
-        .endm
-
         .macro YX6_TICKS side, colour, eoi, eoir, tctrl, vec, park
 
 ; One PCM tick: the sample byte goes straight to the voice's volume register.
@@ -1003,8 +979,40 @@ yx6_park\side:
 ; silence - and installs the other half as the next tick, one word into the
 ; vector. Select and data land in one move.l: the immediate's bytes hit
 ; $8800 (select) and $8802 (data) by bus layout.
-        YX6_TOGGLE_HALF yx6_toggle\{side}_on,$08000F00,\colour,\eoi,\eoir,\vec
-        YX6_TOGGLE_HALF yx6_toggle\{side}_off,$08000000,\colour,\eoi,\eoir,\vec
+yx6_toggle\{side}_on:
+        .if YX6_PERF
+        move.w  $FFFF8240.w,-(sp)
+        move.w  #\colour,$FFFF8240.w
+        .endif
+        move.l  #$08000F00,$FFFF8800.w  ; SMC PERF_PAD+2 select, +4 volume
+        move.w  #$2500,sr
+        move.l  #0,\vec.w                ; SMC PERF_PAD+14: the quiet half is
+        .if YX6_PERF                    ; next - the whole vector, so the
+        move.l  a0,-(sp)                ; blob may straddle a 64K boundary
+        lea     yx6_perf_acc(pc),a0
+        add.w   #15,(a0)                ; ~a toggle tick, in 10-cycle quanta
+        movea.l (sp)+,a0
+        move.w  (sp)+,$FFFF8240.w
+        .endif
+        move.b  #\eoi,\eoir.w
+        rte
+yx6_toggle\{side}_off:
+        .if YX6_PERF
+        move.w  $FFFF8240.w,-(sp)
+        move.w  #\colour,$FFFF8240.w
+        .endif
+        move.l  #$08000000,$FFFF8800.w  ; SMC PERF_PAD+2 select; silence
+        move.w  #$2500,sr
+        move.l  #0,\vec.w                ; SMC PERF_PAD+14: the loud half next
+        .if YX6_PERF
+        move.l  a0,-(sp)
+        lea     yx6_perf_acc(pc),a0
+        add.w   #15,(a0)
+        movea.l (sp)+,a0
+        move.w  (sp)+,$FFFF8240.w
+        .endif
+        move.b  #\eoi,\eoir.w
+        rte
 
 ; The retrigger tick: writing the shape to R13 restarts the envelope, and
 ; that restart at the timer's rate is the whole effect.
