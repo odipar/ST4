@@ -203,7 +203,7 @@ public final class YmrEffects {
      * ends on that frame, so the script must not leave it running to its marker.
      */
     public static final EffectScript.Semantics SEMANTICS =
-            new EffectScript.Semantics(false, false, true);
+            new EffectScript.Semantics(false, false, true, true);
 
     /** Code bit 3: flipped on every sample trigger, so that two pops of one
      * index at one rate are two different code bytes and the script starts the
@@ -222,11 +222,9 @@ public final class YmrEffects {
 
     /** Bit 4 of a volume register: the voice takes its level from the envelope
      * generator, and the volume nibble is ignored. */
-    private static final int ENVELOPE_MODE = 0x10;
 
     /** The shape an RTE retriggers before the song has ever popped one -
      * {@code ENV_SHAPE_INIT} in the RhYMe player, and a value the spec names. */
-    private static final int SHAPE_BEFORE_ANY_POP = 0x08;
 
     /** R13, the envelope shape, and R8, the first of the three volume
      * registers a timer effect's parameter is read out of. */
@@ -245,7 +243,6 @@ public final class YmrEffects {
     private final byte[][] codes = new byte[CHANNELS][];
     private final byte[][] counts = new byte[CHANNELS][];
     private final byte[][] samples;
-    private final int[] shapes;
     private final List<String> notes = new ArrayList<>();
 
     // What each channel had to have changed, counted rather than reported a
@@ -254,7 +251,6 @@ public final class YmrEffects {
     private final int[] reservedEffect = new int[CHANNELS];
     private final int[] reservedType = new int[CHANNELS];
     private final int[] stoppedTimer = new int[CHANNELS];
-    private final int[] plainVolumeRte = new int[CHANNELS];
     private final int[] missingSample = new int[CHANNELS];
     private final int[] cappedSample = new int[CHANNELS];
     private final int[] rateRestart = new int[CHANNELS];
@@ -267,7 +263,6 @@ public final class YmrEffects {
         this.frames = source.frameCount();
         this.registers = new byte[YmrReader.REGISTER_COUNT][];
         this.samples = prepareSamples();
-        this.shapes = new int[frames];
     }
 
     /** Converts a song, unrolling looped samples to {@link #DEFAULT_UNROLL}. */
@@ -290,7 +285,6 @@ public final class YmrEffects {
         for (int r = 0; r < YmrReader.REGISTER_COUNT; r++) {
             registers[r] = source.registers()[r].clone();
         }
-        trackShapes();
         for (int channel = 0; channel < CHANNELS; channel++) {
             walk(channel);
         }
@@ -405,30 +399,6 @@ public final class YmrEffects {
         return out;
     }
 
-    // -------------------------------------------------------------- the shapes
-
-    /**
-     * The envelope shape in force on every frame - the player's own copy of
-     * R13, which is not the same thing as the register vector.
-     *
-     * <p>R13 is the one register a .YMR frame may decline to write, and the
-     * reader marks a frame that did not pop it with
-     * {@link YmrReader#NO_ENVELOPE_SHAPE}. An RTE retriggers whatever shape
-     * was last set, though, so the value it wants is the last one popped
-     * rather than this frame's marker - and before the song has popped one at
-     * all, the spec says to assume $08, which is what RhYMe's player primes
-     * its shadow with.
-     */
-    private void trackShapes() {
-        int shape = SHAPE_BEFORE_ANY_POP;
-        for (int frame = 0; frame < frames; frame++) {
-            int written = registers[R_ENVELOPE_SHAPE][frame] & 0xFF;
-            if (written != YmrReader.NO_ENVELOPE_SHAPE) {
-                shape = written;
-            }
-            shapes[frame] = shape & 15;
-        }
-    }
 
     // ------------------------------------------------------------- the streams
 
@@ -573,22 +543,14 @@ public final class YmrEffects {
         if (code == 0) {
             return;
         }
-        int register = R_VOLUME_A + voice;
-        int kind = code & 0xC0;
-        if (kind == Tune.KIND_PCM) {
-            registers[register][frame] = (byte) sample;
-        } else if (kind == Tune.KIND_RETRIGGER) {
-            int volume = registers[register][frame] & 0xFF;
-            // The shape goes in whatever bit 4 says, because the script reads
-            // this byte whatever bit 4 says: see this class's javadoc. What is
-            // worth counting is the frames where that costs something, which
-            // is neither "bit 4 is clear" nor "the nibble differs" but both -
-            // a voice on the envelope generator does not hear its nibble, and
-            // a nibble that already holds the shape does not move.
-            if ((volume & ENVELOPE_MODE) == 0 && (volume & 15) != shapes[frame]) {
-                plainVolumeRte[channel]++;
-            }
-            registers[register][frame] = (byte) ((volume & ~15) | shapes[frame]);
+        // A retrigger stream needs nothing written. Format v8 lets a file
+        // say that its shape comes from R13 rather than from a voice, and a
+        // .YMR says so, because that is where RhYMe keeps it: the player
+        // primes its handler from the envelope shadow, not from a volume
+        // register it never touches. So the volume byte stays the .YMR's own
+        // on every frame, which is what it was before this front end existed.
+        if ((code & 0xC0) == Tune.KIND_PCM) {
+            registers[R_VOLUME_A + voice][frame] = (byte) sample;
         }
     }
 
@@ -643,14 +605,6 @@ public final class YmrEffects {
             if (cappedSample[channel] > 0) {
                 note(timer + " triggers a sample past the " + SAMPLES + " this format"
                         + " carries " + times(cappedSample[channel]) + ": nothing plays");
-            }
-            if (plainVolumeRte[channel] > 0) {
-                note(timer + "'s RTE takes the volume nibble of " + voice + " on "
-                        + frameCount(plainVolumeRte[channel]) + " where the voice is"
-                        + " still on a plain level and the shape is not the level:"
-                        + " the buzzer needs its shape more than those frames need"
-                        + " their volume, so each one plays at the level the shape's"
-                        + " number happens to name until the envelope takes the voice");
             }
             if (rateRestart[channel] > 0) {
                 note(timer + " moves a running sample's prescaler "

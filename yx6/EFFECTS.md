@@ -158,6 +158,24 @@ number and buzzer shape are all held in the voice's volume register, which the
 masked register streams already carry. The player reads them from the ring —
 and sanitizes what must not reach the chip (section 4).
 
+That filing is YM6's, and for a YM6 file it is exactly right, because that is
+where its bytes are. It sits oddly with what this document says two sections
+earlier, though: a buzzer "is the one effect not tied to a single voice",
+there being one envelope generator and any number of voices following it. Its
+shape is per-generator data kept per-voice, because YM6 had a spare nibble
+there and nowhere better — free for a YM6 file, since a voice following the
+envelope makes the chip ignore that nibble anyway.
+
+It is not free for a source that files the shape with the envelope and puts
+the voice on it a frame later; there the nibble is still a level, and the
+buzzer and the voice cannot both have it. Format v8 lets the file choose: a
+header flag says a retrigger stream takes its shape from R13's last value
+instead, which the player keeps as a shadow at the cost of one `move.b` on a
+branch the frame write already ran. Clear stays the default and stays YM6's,
+so a YM tune's bytes are read where they were written. Only the buzzer's
+parameter moved; a SID voice's volume and a digidrum's number are still the
+voice's register, and still free.
+
 ## 2. What the corpus shows
 
 Survey of 516 local YM files plus the research corpus:

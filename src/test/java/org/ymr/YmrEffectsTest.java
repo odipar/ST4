@@ -143,14 +143,11 @@ final class YmrEffectsTest {
     // ------------------------------------------------------------------- RTE
 
     @Test
-    void anRteWritesTheShapeIntoTheVolumeNibbleWhateverTheEnvelopeBitSays() {
-        // yx6's retrigger tick reads the shape it rewrites R13 with out of the
-        // voice's volume register, so the shape has to be put there. Doing it
-        // is free exactly when bit 4 says the chip takes the voice's level from
-        // the envelope generator and ignores the nibble - and it is done where
-        // the bit is clear too, because the script reads the byte either way:
-        // declining to write is not declining to be read, it only feeds the
-        // buzzer a volume as a shape.
+    void anRteLeavesTheVoicesVolumeRegisterExactlyAsTheDumpHadIt() {
+        // Format v8 lets a file say its retrigger streams take their shape
+        // from R13, and a .YMR says so, because that is where RhYMe keeps it.
+        // So there is nothing to smuggle: the volume register carries the
+        // dump's own levels on every frame the buzzer runs, bit 4 set or not.
         byte[] image = new Ymr()
                 .frame(VOLUME_B, ENVELOPE_SHAPE, TIMER_B_EFFECT, TIMER_B_RATE)
                 .frame(VOLUME_B)
@@ -164,37 +161,17 @@ final class YmrEffectsTest {
         Tune tune = convert(image);
         byte[] volumeB = tune.registers()[9];
 
-        // Frame 0: bit 4 set, so the nibble is the envelope's to spend.
-        assertEquals(0x1A, volumeB[0] & 0xFF);
-        // Frames 1 and 2: bit 4 clear, so the nibble was a real volume - and
-        // the shape takes it anyway, at the cost of those frames' level.
-        assertEquals(0x0A, volumeB[1] & 0xFF);
-        assertEquals(0x0A, volumeB[2] & 0xFF);
-        assertTrue(note(tune, "takes the volume nibble"), tune.notes().toString());
-        assertTrue(note(tune, "2 frames"), tune.notes().toString());
-    }
-
-    @Test
-    void aShapeThatAlreadySitsInTheNibbleCostsNothingAndIsNotCounted() {
-        // The note is about what the conversion took, so a frame whose nibble
-        // already holds the shape does not belong in it however clear bit 4 is.
-        byte[] image = new Ymr()
-                .frame(VOLUME_B, ENVELOPE_SHAPE, TIMER_B_EFFECT, TIMER_B_RATE)
-                .frame()
-                .stream(VOLUME_B, 0x0A)
-                .stream(ENVELOPE_SHAPE, 0x0A)
-                .stream(TIMER_B_EFFECT, YmrReader.TimerFrame.RTE)
-                .stream(TIMER_B_RATE, PRESCALER, COUNTER)
-                .build();
-
-        Tune tune = convert(image);
-
-        assertEquals(0x0A, tune.registers()[9][0] & 0xFF);
+        assertEquals(0x1F, volumeB[0] & 0xFF);
+        assertEquals(0x0C, volumeB[1] & 0xFF);
+        assertEquals(0x0C, volumeB[2] & 0xFF);
         assertTrue(tune.notes().isEmpty(), tune.notes().toString());
     }
 
     @Test
-    void anRteBeforeAnyShapeHasBeenPoppedRetriggersTheShapeTheSpecAssumes() {
+    void aConvertedTuneAsksForItsShapeFromRegisterThirteen() {
+        // The one thing the front end must say, since nothing downstream can
+        // work it out: a .YMR files the shape with the envelope, not with a
+        // voice. The encoder turns this into the header flag the player reads.
         byte[] image = new Ymr()
                 .frame(VOLUME_C, TIMER_D_EFFECT, TIMER_D_RATE)
                 .stream(VOLUME_C, 0x10)
@@ -202,10 +179,11 @@ final class YmrEffectsTest {
                 .stream(TIMER_D_RATE, PRESCALER, COUNTER)
                 .build();
 
-        // "A song that starts an RTE effect without having set a shape is
-        // assumed to start from shape $08", which is what the player primes
-        // its own copy of R13 with.
-        assertEquals(0x18, convert(image).registers()[10][0] & 0xFF);
+        Tune tune = convert(image);
+
+        assertTrue(tune.semantics().shapeFromR13());
+        // and the voice keeps its own byte, envelope-mode bit and all
+        assertEquals(0x10, tune.registers()[10][0] & 0xFF);
     }
 
     @Test

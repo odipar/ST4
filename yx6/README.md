@@ -471,15 +471,17 @@ to the player's shadow and never to the chip, so the frame write cannot fight
 the effect's own timer-rate writes — and says nothing of the sort about an
 RTE, which writes R13 and leaves the voice's volume to the song. That is the
 `.yx6` burst gate exactly: M's gate mask, one bit per voice, which a toggle
-arm and a PCM arm set and a retrigger arm does not. It is also what makes the
-converter's two smuggled parameters possible and unequal. A PCM stream's
-sample number can sit in the volume byte because the gate is shut over it —
-`yx6_gates` has overwritten that write with two `nop`s, so it does not reach
-the chip at all — while an RTE's shape has to sit
-in the low nibble of a byte the frame write really does deliver, and is free
-only where the voice's envelope-mode bit is set — which is the only
-configuration in which a sync-buzzer is audible at all, so a song that means
-its RTE has already set it.
+arm and a PCM arm set and a retrigger arm does not. It is also what decides
+which of a stream's parameters can ride in a register that already means
+something. A PCM stream's sample number can sit in the volume byte because
+the gate is shut over it — `yx6_gates` has overwritten that write with two
+`nop`s, so it does not reach the chip at all. A retrigger stream's shape
+cannot: an RTE leaves the voice's volume to the song, so that byte is
+delivered, and a shape hidden in its low nibble would cost the voice its
+level on any frame not already following the envelope. Format v8 is the
+answer to that — see **Where a retrigger stream's shape comes from** — and
+a `.ymr` sets its flag, so the only parameter this conversion writes is a
+PCM stream's sample number.
 
 One engine reads both dialects, and three flags say which. A held PCM code
 does not retrigger, because a .YMR's trigger is a pop and not the code's
@@ -506,15 +508,46 @@ generalisation and the T stream were built for. Packed with the default shape,
 java -ea -cp target/classes org.ymr.Ymr -f signals-grouped.ymr doc.yx6
 ```
 
-reports 249,600 bytes of register and script data packed into 12,444 (5.0%)
-in a 13,852-byte file, 25 rings of 960 bytes, decoding 23 of the 25 streams so
+reports 249,600 bytes of register and script data packed into 12,432 (5.0%)
+in a 13,840-byte file, 25 rings of 960 bytes, decoding 23 of the 25 streams so
 that one of the default `C`=24's slots is idle; the tune loops from its start,
 and the encoder rotated the split forward 96 frames so the effect state at the
-wrap matches its first arrival. 5,312 of those 12,444 packed bytes are the
+wrap matches its first arrival. 5,312 of those 12,432 packed bytes are the
 eleven script streams, which the `.YMR` — 10,488 bytes — does not carry at
 all: RhYMe's player reconciles its three timers every frame from what popped,
 and this one replays decisions taken at pack time. That is the bookkeeping
 difference paid in bytes, and what it buys is the flat frame.
+
+### Where a retrigger stream's shape comes from
+
+A sync-buzzer restarts the hardware envelope at audio rate, so what a
+retrigger stream needs to know is which shape to restart. YM6 keeps that in
+the voice's own volume register, and the player reads it from there — which
+costs nothing for a YM file, because a voice following the envelope makes the
+chip ignore that register's low nibble, so the byte has one meaning and it is
+the shape.
+
+That is YM6's filing rather than the chip's. There is one envelope generator
+and any number of voices may follow it, so a shape is not per-voice data;
+YM6 had a spare nibble on a voice and nowhere better to put it. RhYMe files
+it where the chip does, keeps it in its own copy of R13, and puts the voice
+on the envelope the frame *after* it starts the buzzer. On that one frame the
+nibble is still a level, and the buzzer and the voice cannot both have it.
+
+Format **v8** lets the file say which. Header flag bit 5 clear is YM6's
+arrangement and the default; set, a retrigger stream takes its shape from the
+last value written to R13, which the player keeps as a shadow. The shadow is
+free: the frame write already loads R13's byte and branches on the marker
+that means *leave the envelope alone*, so keeping it is one `move.b` on the
+branch that already ran. Before a tune has written a shape at all the shadow
+reads `$08`, which is what RhYMe's player primes its own with and what the
+`.YMR` spec says to assume.
+
+Both places that patch the retrigger tick go through one routine, so a shape
+that moves under a running buzzer is tracked from wherever its arm read it,
+and the packer keeps the same value on the same frames — the burst writes R13
+before the actions run, so a frame that writes a shape and arms a buzzer arms
+it on the new one.
 
 ### What a .ymr gives up
 
@@ -539,11 +572,10 @@ the two rate rows below are about.
 | A sample byte above the 4-bit levels | masked, since bit 7 is what ends a PCM stream | yes |
 | A rate pop that moves the prescaler | the timer period in flight, truncated | no — it is every such pop |
 | …under a running sample | the sample restarts on that frame | yes |
-| An RTE frame with the voice on a plain level, the nibble not already the shape | that frame at the level the shape's number names | yes |
 | A sample the song stops early | one sample byte, held until the next frame | no — the window is sub-frame |
 | A PWM or RTE re-configured with nothing changed | nothing is emitted at all | no — RhYMe's exporter cannot write one |
 
-The seven that are counted are named once per sample or once per channel
+The six that are counted are named once per sample or once per channel
 rather than reported a frame at a time, because a song 9,984 frames long can
 break one rule on a thousand of them and still only be doing one thing wrong.
 The three that are not are the three there is nothing to say about: one is
@@ -632,16 +664,6 @@ verb census misses, since START_RETRIGGER is also what a fresh arm emits.
   should not be playing at all. No ordering of the verbs closes it either:
   the actions sit after the burst so their varying cost cannot jitter the
   register writes, which is a promise worth more than this sliver costs.
-* **An RTE's shape costs a volume nibble.** The retrigger tick is patched
-  with what it finds in `R(8+voice) & 15` on every frame the code is armed,
-  so declining to write the shape is not declining to have it read. The
-  frames where that costs anything are the arm frames and essentially only
-  those — the voice is still on a plain level, and the song puts it on the
-  envelope from the frame after, which is where it has to be for the buzzer
-  to be heard at all — so the price is one 20 ms frame at whatever level the
-  shape's number happens to name. The conversion counts them: on
-  `signals-grouped.ymr`, 227 frames of 9,984.
-
 Everything else the conversion has to change, it counts and names rather than
 reporting a frame at a time, because a song 9,984 frames long can break one
 rule on a thousand of them and still only be doing one thing wrong: an effect
@@ -675,8 +697,8 @@ MFP timer rather than by the frame.
 | offset | size | field |
 |---:|---:|---|
 | 0 | 4 | `'YX6!'` |
-| 4 | 2 | format version (7) |
-| 6 | 2 | flags: bit 0 set when the tune loops; bits 1-4, one per timer channel, set when the tune uses it |
+| 4 | 2 | format version (8) |
+| 6 | 2 | flags: bit 0 set when the tune loops; bits 1-4, one per timer channel, set when the tune uses it; bit 5 set when its retrigger streams take their shape from R13 rather than from a voice |
 | 8 | 4 | `O`, the frame count |
 | 12 | 2 | frame rate in Hz: how often the player is called |
 | 14 | 2 | `S`, the stream count: 25, being fourteen frame streams R0..R13 and eleven of script data, M X T and four A/P pairs |
