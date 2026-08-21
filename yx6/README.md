@@ -1,7 +1,7 @@
 # YX6 — streaming YM chiptunes on a plain 68000
 
-YX6 is a MinYMiser-style player, now ST4-native: a YM tune packed as twenty-two ST4
-streams — fourteen carrying the sound registers, eight carrying the compiled
+YX6 is a MinYMiser-style player, now ST4-native: a YM tune packed as twenty-five ST4
+streams — fourteen carrying the sound registers, eleven carrying the compiled
 effect script — each decoded through its own small ring by
 [ST4_wrap.S](../68k/ST4_wrap.S). The music never
 exists in memory as a whole — only rings of a few hundred bytes, refilled one
@@ -9,11 +9,12 @@ stream per frame.
 
 It grew inside the ST1 project and moved here with it; it plays the fourteen
 standard YM2149 registers, loops, and plays the YM6 special effects: SID
-voice, digidrum and sync-buzzer run on tick channels exactly as the
+voice, digidrum and sync-buzzer run on timer channels exactly as the
 original replay routines ran them, compiled at pack time out of either YM
-dialect. The format has three tick channels; the player runs them on MFP
-Timers A, D and B, and claims only the ones a tune says it uses — a YM
-tune uses two, so Timer B stays the host's. [EFFECTS.md](EFFECTS.md) is the design; sinus-SID
+dialect. The format has four timer channels and the file says which MFP
+timer each runs on, one stream carrying the map; the player claims only
+the channels a tune names — a YM tune names two, so the other timers stay
+the host's. [EFFECTS.md](EFFECTS.md) is the design; sinus-SID
 is the one effect deliberately left unplayed, in the good company of every
 other player including the format author's.
 
@@ -118,7 +119,8 @@ yx6/ym_sndh.sh -t"My Set" myset.sndh one.ym two.ym      # both steps in one
 
 The SNDH glue is the polite host the player's assumption 5 describes: INIT
 (subtune in `d0.w`, 1-based) saves exactly what the player touches and
-claims the two timers, EXIT quiesces and hands everything back, PLAY runs
+claims a timer per timer channel the tune names - two, for a YM tune -
+EXIT quiesces and hands everything back, PLAY runs
 one frame - every entry preserves `d0`-`a6`, nothing outside the blob is
 used, the USP is never touched, and INIT called twice without an EXIT
 cleans up after itself. The header carries `TC50` (play is driven at 50 Hz
@@ -137,19 +139,24 @@ The file is raw and position independent; pack it with ICE 2.4 for the
 archive if you like, players unpack that themselves.
 
 One honest limitation, in the file's own header comment: a native host
-that dispatches PLAY from its Timer C hook delays tick channel B's timer (lower
-MFP priority) by up to the length of the call - pending, never lost. VBL
+that dispatches PLAY from its Timer C hook delays timer channel 2's ticks
+(Timer D, lower MFP priority) by up to the length of the call - pending,
+never lost. VBL
 and emulator hosts have no such window.
 
 The packer's parameters are the ring size and the chunk size:
 
 ```
 yx6 [-f] [-o] [-nN] [-cC] [-kK] [-lF] input.ym [output.yx6]
+  -f    overwrite the output file if it exists
   -nN   ring size per stream, in bytes (default 960)
   -cC   values decoded per call, and the round-robin group size (default 24)
   -kK   ST4 unit size: 1, 2 or 4 (default: 2 when the shape allows, else 1)
   -lF   loop from frame F, overriding the YM header
   -o    play once: pack no loop section
+  -minM -secS   trim: drop everything before M:S, so a moment deep in a
+        long tune plays immediately
+  -startframeF -endframeF -framesN   the same window in frames
   -drumhzH  the drum rate ceiling (default 25600): a drum encoded at a
         faster timer is resampled to the highest MFP rate under the
         ceiling (windowed-sinc, pitch and duration exact), with a warning
@@ -160,19 +167,21 @@ yx6 [-f] [-o] [-nN] [-cC] [-kK] [-lF] input.ym [output.yx6]
         always carries both, the packer selects per tune
 ```
 
-`N` sets how much RAM the player needs (`22 × N` plus about 1.4 KB of
+`N` sets how much RAM the player needs (`25 × N` plus about 1.6 KB of
 fixed state) and how far back the packer may reference, so it trades memory
 for compression; it stops at 2520, because the player reads register `k`'s
 ring through an assembled-in displacement of `k*N`. `C` must be at least
-22 — one refill slot per stream — and must divide `N`, which is what lets the
+one refill slot per stream the tune **decodes** — 17 when it drives no
+timer channel, 21 for a YM tune, 25 when it uses all four — and must
+divide `N`, which is what lets the
 player use ST4_wrap rather than the bigger general ring decoder. The packer
 enforces both, packs every stream with `-mN` so no back-reference reaches
 outside the ring, and with `-l65535` so no operation outruns the 68000
 decoder's word counters.
 
-On a synthetic 1500-frame tune, the twenty-two streams pack from 33000 bytes to
-about 2800 — the streams for registers that barely change cost a few bytes each,
-and a tick channel the tune never uses costs 28.
+On a synthetic 1500-frame tune, the twenty-five streams pack from 37500 bytes to
+about 2900 — the streams for registers that barely change cost a few bytes each,
+and a timer channel the tune never uses costs 28.
 On a real one they do far better: Wings of Death's level 6, digidrums and all,
 packs 188784 register bytes into 5064 (2.7%).
 
@@ -180,7 +189,7 @@ packs 188784 register bytes into 5064 (2.7%).
 
 ```
         lea     song,a0                 ; the .yx6 file, loaded anywhere
-        lea     workspace,a1            ; even address, YX6_FIXED+(22*N) bytes
+        lea     workspace,a1            ; even address, YX6_FIXED+(25*N) bytes
         bsr     YX6_init                ; d0 = 0 when the file was accepted
    vbl:                                 ; once per frame, in supervisor mode
         lea     workspace,a0
@@ -191,14 +200,17 @@ packs 188784 register bytes into 5064 (2.7%).
 
 `YX6_play` clobbers `d0`–`d5` and `a0`–`a5`, and leaves `d6`, `d7` and
 `a6` alone, the same guarantee ST4 gives - its decoder state spans `a4` and
-`a5`. `YX6_init` claims one MFP timer per tick channel the file names and
+`a5`. `YX6_init` claims an MFP timer for each timer channel the file names, and
 `YX6_stop` quiesces them again; neither saves nor restores any machine
 state - that is the host's, and the player's header lists exactly what a
 polite host must keep (vectors, timer registers, the four enable/mask bits,
 the USP under `YX6_SUPER_HOST`), with [YX6_player.S](YX6_player.S) as the
-worked example. Timer C stays the system's, and Timer B stays free for
-rasters unless the tune asks for a third tick channel — no YM tune does,
-since a YM frame can start at most two effects.
+worked example. Which timers a tune takes is its own map's business: the
+packer's default puts channels 0 and 1 on Timers A and D, so Timer B stays
+free for rasters and Timer C stays the system's 200 Hz clock. A tune whose
+map names those takes them — and a Timer C tune stops the system clock and
+cannot be hosted from a Timer C hook. No YM tune names either, since a YM
+frame can start at most two effects.
 
 A timer the player does not claim is left exactly as the host had it,
 which includes **still running**: TOS leaves Timer D counting as its
@@ -223,20 +235,23 @@ VBL  1: use value  1 from every stream; refill R1
 VBL 13: use value 13 from every stream; refill R13
 VBL 14: use value 14 from every stream; refill M
 VBL 15: use value 15 from every stream; refill X
-VBL 16: use value 16 from every stream; refill A1
-VBL 17: use value 17 from every stream; refill P1
-VBL 18: use value 18 from every stream; refill A2
-VBL 19: use value 19 from every stream; refill P2
-VBL 20: use value 20 from every stream; refill A3 - if channel 3 is used
-VBL 21: use value 21 from every stream; refill P3 - likewise
-VBL 22: use value 22 from every stream; no refill
-VBL 23: use value 23 from every stream; no refill
+VBL 16: use value 16 from every stream; refill T
+VBL 17: use value 17 from every stream; refill A0
+VBL 18: use value 18 from every stream; refill P0
+VBL 19: use value 19 from every stream; refill A1
+VBL 20: use value 20 from every stream; refill P1
+VBL 21: use value 21 from every stream; refill A2 - if channel 2 is used
+VBL 22: use value 22 from every stream; refill P2 - likewise
+VBL 23: use value 23 from every stream; refill A3 - if channel 3 is used
 ```
 
 The channels sit last on purpose. A tune that uses two of them never has
-to decode the third's pair, and a tune with no effects at all stops after
-X: the player refills up to the last channel the header names, and the
-rest of the streams are in the file but never touched.
+to decode the other two pairs, and a tune with no effects at all stops
+after T: the player refills up to the last channel the header names, and
+the rest of the streams are in the file but never touched. That is also
+why `C` is measured against what a tune decodes rather than against the
+format's twenty-five - the default 960/24 shape still fits every tune
+that leaves a channel idle.
 
 Every stream is therefore one full group ahead of what is being read, and the
 work per frame is flat, and ordered so the chip writes never jitter: the
@@ -318,17 +333,17 @@ Big-endian, fixed header, then the packed streams in register order. The
 words below follow [doc/terminology.md](../doc/terminology.md): a
 **stream** is a series of values arriving at one register, the fourteen
 register streams are **frame streams** (one value per player call), and
-what the YM format calls an "effect" is a **tick stream**, driven by an
+what the YM format calls an "effect" is a **timer stream**, driven by an
 MFP timer rather than by the frame.
 
 | offset | size | field |
 |---:|---:|---|
 | 0 | 4 | `'YX6!'` |
-| 4 | 2 | format version (6) |
-| 6 | 2 | flags: bit 0 set when the tune loops; bits 1-3, one per tick channel, set when the tune uses it |
+| 4 | 2 | format version (7) |
+| 6 | 2 | flags: bit 0 set when the tune loops; bits 1-4, one per timer channel, set when the tune uses it |
 | 8 | 4 | `O`, the frame count |
 | 12 | 2 | frame rate in Hz: how often the player is called |
-| 14 | 2 | `S`, the stream count: 22, being fourteen frame streams R0..R13 and eight of script data, M X A1 P1 A2 P2 A3 P3 |
+| 14 | 2 | `S`, the stream count: 25, being fourteen frame streams R0..R13 and eleven of script data, M X T and four A/P pairs |
 | 16 | 2 | `N`, the ring size |
 | 18 | 2 | `C`, values per call |
 | 20 | 4 | `L`, the loop frame; equal to `O` when the tune plays once |
@@ -336,30 +351,30 @@ MFP timer rather than by the frame.
 | 28 | 4 | byte offset of the sample table; zero when there are none |
 | 32 | 2 | sample count |
 | 34 | 4·S | byte offset of each intro stream, covering frames `[0, L)` |
-| 122 | 4·S | byte offset of each loop stream, covering frames `[L, O)` |
-| 210 | … | the packed streams, then the sample table |
+| 134 | 4·S | byte offset of each loop stream, covering frames `[L, O)` |
+| 234 | … | the packed streams, then the sample table |
 
 Packed sizes are not stored: ST4 counts output units, not input bytes, so the
 player never needs them.
 
-Streams 14–21 are **script data** rather than frame streams: they are
+Streams 14–24 are **script data** rather than frame streams: they are
 packed the same way, but their bytes never reach a chip register. They
 carry the compiled effect script — the packer replays the reference
 player's decisions over the whole timeline and writes down the outcomes.
-**M** records what acts this frame (bits 0–2 = one per tick channel,
-bit 3 + bits 6–4 = the burst-gate state, which registers the frame write
-must leave alone). **A** names the channel's action: a verb, a voice and a
+**M** records what acts this frame (bits 0–3 = one per timer channel,
+bit 4 + bits 7–5 = the burst-gate state, which registers the frame write
+must leave alone). **T** carries the channel-to-timer map, two bits each. **A** names the channel's action: a verb, a voice and a
 prescaler, the verbs being start, retune, stop, a **PCM stream** start,
 a PCM start that preempts a **toggle stream** on the same voice, or a
 hold that reloads or tracks. **P** carries the timer count, the other
 half of the **rate**. **X** is the operand a verb reads when its action
-byte has no room for one: today, which tick channels a preempting sample
+byte has no room for one: today, which timer channels a preempting sample
 stops, one bit each.
 
-A tick channel is what the format names; which timer runs it is the
-player's business. That is why the file says *which channels a tune uses*
-rather than which timers to take, and why the channels are the last
-streams: a tune that uses two leaves the third's pair unread at the end.
+A timer channel is what the format names, and stream **T** says which MFP
+timer each one runs on — so the file, not the player, decides. The
+channels are the last streams for the same reason the flags name them: a
+tune that uses two leaves the other two pairs unread at the end.
 
 `O` and `L` count PLAYED frames: when the effect state at the wrap
 differs from its first arrival, the split rotates forward until the two
@@ -411,29 +426,29 @@ and reports the cost:
 
 ```text
 SUM=OK wraps=1 sum=2941391492
-CALIB 12 241
-T 1700 88
+CALIB 12 242
+T 1700 93
 ```
 
-88 ticks of the 200 Hz clock for 1700 frames, with the calibration loop's
-7,864,630 cycles measured at 241 ticks, works out at about **1,690 cycles per
+93 ticks of the 200 Hz clock for 1700 frames, with the calibration loop's
+7,864,630 cycles measured at 242 ticks, works out at about **1,790 cycles per
 frame** — roughly 1.1% of a 50 Hz frame on an 8 MHz ST, including the
 harness's own loop, the sound chip's bus wait states and the script finding
 nothing to do (the harness tune's effect codes are deliberately inert, so
 the checksum stays deterministic — and it is the same checksum the v1
 interpreter produced, which is the point — and, its script being inert, it
-names no tick channel, so the player decodes sixteen streams and skips the
-six a channel would need). The v1 player measured 96 ticks on the same
-tune, and v2 with two fixed channels 94: replaying compiled decisions is
-cheaper than making them, and decoding only the streams a tune uses is
-cheaper still. A tune that uses two tick channels decodes twenty streams,
-about 2% more than v2's flat nineteen. Measure your own tune before budgeting: the
+names no timer channel, so the player decodes seventeen streams and skips
+the eight the four channels would need). The v1 player measured 96 ticks
+on the same tune, v2 with two fixed channels 94, and v3 with three 88:
+replaying compiled decisions is cheaper than making them, and decoding
+only the streams a tune uses is cheaper still. A tune that uses two timer
+channels decodes twenty-one streams. Measure your own tune before budgeting: the
 byte limit is not a time limit, and how hard a chunk is to decode depends on
 the data.
 
 Most of what is left is the decoder itself: at `C=24` a refill decodes 24 bytes
-on sixteen of every twenty-four frames for this tune, twenty for one that
-uses two tick channels. Raising `C` amortises the per-call
+on seventeen of every twenty-four frames for this tune, twenty-one for one
+that uses two timer channels. Raising `C` amortises the per-call
 cost over more bytes at the price of a refill frame that costs proportionally
 more, which is the wrong trade if your frame budget is tight.
 

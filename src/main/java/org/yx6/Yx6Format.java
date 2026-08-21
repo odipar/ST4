@@ -3,7 +3,7 @@ package org.yx6;
 /**
  * The {@code .yx6} container: a fixed header followed by one embedded ST4
  * container per stream section - fourteen frame streams carrying the
- * YM2149's sound registers, and eight carrying the compiled effect script.
+ * YM2149's sound registers, and eleven carrying the compiled effect script.
  *
  * <p>Every field is big-endian, which is what the 68000 player reads directly
  * out of the loaded file. The header is a fixed size so the player can index
@@ -11,12 +11,12 @@ package org.yx6;
  *
  * <pre>
  *   0   4  'YX6!'
- *   4   2  format version (6)
- *   6   2  flags: bit 0 set when the tune loops, bits 1-3 one per tick
+ *   4   2  format version (7)
+ *   6   2  flags: bit 0 set when the tune loops, bits 1-4 one per timer
  *           channel, set when the tune uses it
  *   8   4  O, the number of frames
  *  12   2  frame rate in Hz: how often the player is called (50 usually)
- *  14   2  S, the stream count (22: R0..R13, then M X A1 P1 A2 P2 A3 P3)
+ *  14   2  S, the stream count (25: R0..R13, then M X T and four A/P pairs)
  *  16   2  N, the ring size in bytes each stream decodes through
  *  18   2  C, the chunk size one ST4_resume call produces
  *  20   4  L, the loop frame; equal to O when the tune does not loop
@@ -24,19 +24,19 @@ package org.yx6;
  *  28   4  byte offset of the sample table; zero when there are none
  *  32   2  sample count
  *  34   4*S  byte offset of each intro section, covering frames [0, L)
- * 122   4*S  byte offset of each loop section, covering frames [L, O)
- * 210   ...  the packed sections, then the sample table
+ * 134   4*S  byte offset of each loop section, covering frames [L, O)
+ * 234   ...  the packed sections, then the sample table
  * </pre>
  *
- * <p>Streams 14-21 carry the compiled effect script, one byte per frame
+ * <p>Streams 14-24 carry the compiled effect script, one byte per frame
  * like the registers, but they are script data rather than frame streams:
  * their bytes never reach a register. The packer replays the reference
  * player's decisions over the whole timeline and emits prepared actions -
  * M says what acts this frame (zero on the vast majority), X is the operand
  * a verb reads when its action byte has no room for one - today, which
- * tick channels a preempting sample stops - and each channel's A and P
+ * timer channels a preempting sample stops - and each channel's A and P
  * name its action and its timer count. The channels come last so that a
- * tune using two of them leaves the third's pair at the end of the file,
+ * tune using two of them leaves the others' pairs at the end of the file,
  * where the player can stop decoding. O and L count PLAYED frames: a loop
  * whose wrap state differs from its first arrival is rotated until the two
  * agree, so the file may carry a few frames twice, compiled differently.
@@ -71,52 +71,49 @@ public final class Yx6Format {
     /** {@code 'YX6!'}, the first four bytes of every file. */
     public static final int MAGIC = 0x59583621;
 
-    /** The only version this release writes or reads: 6 made room for a
-     * third tick channel, 5 replaced the
-     * interpreted effect streams with the compiled effect script. */
-    public static final int VERSION = 6;
+    /** The only version this release writes or reads: 7 made the channel
+     * count four and put the channel-to-timer map in the file, 6 made room
+     * for a third timer channel, 5 replaced the interpreted effect streams
+     * with the compiled effect script. */
+    public static final int VERSION = 7;
 
     /** Flag bit 0: the tune loops back to {@code L} instead of ending. */
     public static final int FLAG_LOOPS = 1;
 
-    /** Flag bit {@code 1 + channel}: the tune uses that tick channel, so
+    /** Flag bit {@code 1 + channel}: the tune uses that timer channel, so
      * the player claims a timer for it. Every channel says so the same
      * way; a channel left clear costs the host nothing. */
     public static int flagChannel(int channel) {
         return 2 << channel;
     }
 
-    /** R0..R13 plus the script streams M, three A/P pairs, and X. */
-    public static final int STREAMS = 22;
+    /** R0..R13 plus the script streams M, X, T and four A/P pairs. */
+    public static final int STREAMS = 25;
 
     /** The frame streams: one per YM2149 sound register. */
     public static final int REGISTER_STREAMS = 14;
 
     /** Stream indices of the script data: the master byte, then
-     * each tick channel's action and timer-count bytes. The byte semantics - the
+     * each timer channel's action and timer-count bytes. The byte semantics - the
      * verb vocabulary, the master bits, the gate mask - are
      * {@link EffectScript}'s ABI, which packer, player and rigs all cite. */
     public static final int STREAM_M = 14;
     public static final int STREAM_X = 15;
-    public static final int STREAM_A1 = 16;
-    public static final int STREAM_P1 = 17;
-    public static final int STREAM_A2 = 18;
-    public static final int STREAM_P2 = 19;
-    public static final int STREAM_A3 = 20;
-    public static final int STREAM_P3 = 21;
+    public static final int STREAM_T = 16;
+    public static final int STREAM_A0 = 17;
 
     /** Channel {@code c}'s action stream; its count stream is the next one.
      * The channels sit last and two apart, so a tune that uses fewer of
      * them leaves a tail of streams the player never has to decode. */
     public static int streamAction(int channel) {
-        return STREAM_A1 + 2 * channel;
+        return STREAM_A0 + 2 * channel;
     }
 
     /** The streams a player must keep decoding for a tune with these header
      * flags: everything up to and including the last channel it names. The
      * rest are in the file, hold nothing anyone reads, and cost no time. */
     public static int liveStreams(int flags) {
-        int live = STREAM_A1;
+        int live = STREAM_A0;
         for (int c = 0; c < CHANNELS; c++) {
             if ((flags & flagChannel(c)) != 0) {
                 live = streamAction(c) + 2;
@@ -125,9 +122,28 @@ public final class Yx6Format {
         return live;
     }
 
-    /** Tick channels the format allows. Each is a pair of streams that
-     * pack to nothing while the tune leaves the channel idle. */
-    public static final int CHANNELS = 3;
+    /** Timer channels the format allows, numbered 0 to 3. Each is a pair
+     * of streams that pack to nothing while the tune leaves the channel
+     * idle. Which of the MFP's timers runs each one is the T stream's to
+     * say, not the player's. */
+    public static final int CHANNELS = 4;
+
+    /** T's two bits per channel: the timer it runs on. */
+    public static final int TIMER_A = 0;
+    public static final int TIMER_B = 1;
+    public static final int TIMER_C = 2;
+    public static final int TIMER_D = 3;
+
+    /** The map a YM tune is packed with. Channels 0 and 1 land on Timers A
+     * and D, which is where v6 put its first two, so a YM tune sounds
+     * exactly as it did; the rest fill in the timers nobody asked for. */
+    public static final int DEFAULT_TIMERS =
+            TIMER_A | (TIMER_D << 2) | (TIMER_B << 4) | (TIMER_C << 6);
+
+    /** Channel {@code c}'s timer, out of a T byte. */
+    public static int timerOf(int assignments, int channel) {
+        return (assignments >> (2 * channel)) & 3;
+    }
 
     public static final int OFFSET_MAGIC = 0;
     public static final int OFFSET_VERSION = 4;
@@ -161,8 +177,10 @@ public final class Yx6Format {
 
     /**
      * Default chunk size, and the group size the round-robin player is built
-     * around: one refill per VBL covers all {@value #STREAMS} streams within
-     * a 24-VBL cycle, with six VBLs to spare.
+     * around: one refill per VBL covers the 21 streams a YM tune decodes
+     * within a 24-VBL cycle, with three VBLs to spare. A tune that uses all
+     * four timer channels decodes {@value #STREAMS} and needs a bigger
+     * chunk - and a ring that divides by it, so 960/24 becomes 1000/25.
      */
     public static final int DEFAULT_CHUNK = 24;
 
@@ -186,15 +204,27 @@ public final class Yx6Format {
      * chunk must be whole units, since one refill call's budget is C/unit.
      */
     public static String checkShape(int ringSize, int chunk, int unit) {
+        return checkShape(ringSize, chunk, unit, STREAMS);
+    }
+
+    /**
+     * As above, for a tune whose live stream count is known. The round-robin
+     * has to refill every stream the player decodes once per C frames, and
+     * since v6 the player decodes only as far as the last channel the tune
+     * names - so a tune that leaves channels idle may use a smaller C than
+     * the format's full stream count would allow.
+     */
+    public static String checkShape(int ringSize, int chunk, int unit, int live) {
         if (!org.st4.St4Format.isUnitSize(unit)) {
             return org.st4.St4Format.checkUnit(unit);
         }
         if (chunk % unit != 0) {
             return "chunk " + chunk + " is not a whole number of " + unit + "-byte units";
         }
-        if (chunk < STREAMS) {
-            return "chunk " + chunk + " is below the " + STREAMS
-                    + " streams, so the round-robin refill cannot fit in one cycle";
+        if (chunk < live) {
+            return "chunk " + chunk + " is below the " + live
+                    + " streams this tune decodes, so the round-robin refill"
+                    + " cannot fit in one cycle";
         }
         if (ringSize < 2 * chunk) {
             return "ring " + ringSize + " must hold two chunks of " + chunk;

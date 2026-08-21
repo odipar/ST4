@@ -52,9 +52,10 @@ PSG = 0xFFFF8800
 PSG_PAGE = 0xFFFF8000
 MFP_PAGE = 0xFFFFF000           # $FFFFFAxx: the effect stage's timers
 VECTORS = 0x000000              # $110/$134: the two timer vectors
-STREAMS = 22                    # what a v6 file carries
-CHANNELS = 3                    # tick channels, on timers A, D and B
-YX6_FIXED = 50 + STREAMS * 64   # the workspace before the rings
+STREAMS = 25                    # what a v7 file carries
+CHANNELS = 4                    # timer channels; stream T maps them
+Yx6_DEFAULT_MAP = 0x9C          # what the packer emits: 0->A 1->D 2->B 3->C
+YX6_FIXED = 54 + STREAMS * 64   # the workspace before the rings
 
 QUICK = '--quick' in sys.argv
 
@@ -405,25 +406,36 @@ def run_effects(super_host: bool = False, perf: bool = False) -> str:
     if player.init() != 0:
         return 'effects: YX6_init rejected the file'
 
+    # The v7 mechanism itself: stream T's byte, decoded into the channel
+    # descriptors. Driven directly, since no YM tune moves the map.
+    problem = check_assignment(player)
+    if problem:
+        return problem
+    if player.init() != 0:                  # put the tune's own map back
+        return 'effects: YX6_init rejected the file on the second pass'
+
     # Every tick-handler block must be byte-congruent with channel 1's: the
     # action handlers reach every patched operand through offsets measured
     # there, and yx6_link walks the blocks at a fixed stride.
     sym = player.symbols
+    timers = ('a', 'b', 'c', 'd')
     for pattern in ('yx6_toggle_{}_on', 'yx6_toggle_{}_off',
                     'yx6_retrigger_{}', 'yx6_park_{}'):
-        want = sym[pattern.format(1)] - sym['yx6_pcm_1']
-        for channel in range(2, CHANNELS + 1):
-            label = pattern.format(channel)
-            if sym[label] - sym[f'yx6_pcm_{channel}'] != want:
+        want = sym[pattern.format('a')] - sym['yx6_pcm_a']
+        for timer in timers[1:]:
+            label = pattern.format(timer)
+            if sym[label] - sym[f'yx6_pcm_{timer}'] != want:
                 return f'effects: {label} broke the ISR block congruence'
-    stride = sym['yx6_pcm_2'] - sym['yx6_pcm_1']
-    for channel in range(2, CHANNELS + 1):
-        if sym[f'yx6_pcm_{channel}'] - sym['yx6_pcm_1'] != stride * (channel - 1):
-            return f'effects: block {channel} is not one stride along'
+    stride = sym['yx6_pcm_b'] - sym['yx6_pcm_a']
+    for i, timer in enumerate(timers):
+        if sym[f'yx6_pcm_{timer}'] - sym['yx6_pcm_a'] != stride * i:
+            return f'effects: block {timer} is not one stride along'
 
-    drum_d = CODE + sym['yx6_pcm_2']
-    sid_on = CODE + sym['yx6_toggle_1_on']
-    sid_off = CODE + sym['yx6_toggle_1_off']
+    # Channel 0 runs on Timer A and channel 1 on Timer D, which is what the
+    # packer's default map says; the blocks are the timers'.
+    drum_d = CODE + sym['yx6_pcm_d']
+    sid_on = CODE + sym['yx6_toggle_a_on']
+    sid_off = CODE + sym['yx6_toggle_a_off']
 
     def gate(voice):
         """The voice's burst-gate displacement word: 2 open, 0 muted."""
@@ -453,7 +465,7 @@ def run_effects(super_host: bool = False, perf: bool = False) -> str:
                 return f'effects: frame {frame} wrote the SID voice volume'
             want = 10 - (frame - 4) // 2 if frame <= 14 else 10
             vol = player.uc.mem_read(
-                CODE + sym['yx6_pcm_1'] + sym['ISR_TOGGLE_VOL'], 1)[0]
+                CODE + sym['yx6_pcm_a'] + sym['ISR_TOGGLE_VOL'], 1)[0]
             if vol != want:
                 return (f'effects: frame {frame} tick volume {vol}, '
                         f'the slide says {want}')
@@ -583,7 +595,7 @@ def run_effects(super_host: bool = False, perf: bool = False) -> str:
     problem = drum_ticks(player, drum_d, 10, TCDCR, 0xFFFFFA11, 0xEF)
     if problem:
         return problem
-    problem = drum_ticks(player, CODE + sym['yx6_pcm_1'], 9, TACR, 0xFFFFFA0F, 0xDF)
+    problem = drum_ticks(player, CODE + sym['yx6_pcm_a'], 9, TACR, 0xFFFFFA0F, 0xDF)
     if problem:
         return problem
     if perf and acc() != 2 * (21 + 21 + 23):    # both drums' playouts
@@ -601,7 +613,7 @@ def run_effects(super_host: bool = False, perf: bool = False) -> str:
         return f'effects: the quiet half wrote {pairs}, vector {vector:#x}'
 
     # And the buzzer from frame 40: every tick rewrites the shape to R13.
-    pairs = invoke_isr(player, CODE + sym['yx6_retrigger_1'])
+    pairs = invoke_isr(player, CODE + sym['yx6_retrigger_a'])
     if pairs != [(13, 11)]:
         return f'effects: the retrigger tick wrote {pairs}'
     if perf and acc() != 130 + 15 + 15 + 12:
@@ -627,7 +639,7 @@ def run_effects(super_host: bool = False, perf: bool = False) -> str:
         if gate(voice) != 2:
             return f'effects: stop left voice {voice} muted'
 
-    # Claiming is per tick channel, and a second YX6_init must hand back
+    # Claiming is per timer channel, and a second YX6_init must hand back
     # what the first one took: the file names the channels it uses, so a
     # tune that names fewer leaves the player holding timers nobody asked
     # for unless init gives them back first. Init the effect tune, then
@@ -882,6 +894,38 @@ def Yx6_DRUM_TABLE(player) -> int:
     return int.from_bytes(player.uc.mem_read(player.file + 28, 4), 'big')
 
 
+def check_assignment(player) -> str:
+    """yx6_assign, driven directly: every map the T stream can name must put
+    the right timer's row into the right channel's descriptor. The rows are
+    the player's own, so this checks the copy and the two-bit decode, which
+    is the whole of the v7 mechanism."""
+    sym = player.symbols
+    rows = {}                                   # timer -> its row, as bytes
+    for i, timer in enumerate(('a', 'b', 'c', 'd')):
+        base = CODE + sym[f'yx6_timer_{timer}']
+        rows[i] = bytes(player.uc.mem_read(base, 18))
+    maps = (0x1B,          # 0->D 1->C 2->B 3->A: reversed
+            0x00,          # every channel on Timer A, which the packer
+                           # never emits but the copy must still do
+            0xE4,          # 0->A 1->B 2->C 3->D: straight
+            Yx6_DEFAULT_MAP)
+    for assignments in maps:
+        stack = STACK_TOP - 512
+        player.uc.mem_write(stack, MAGIC.to_bytes(4, 'big'))
+        player.uc.reg_write(UC_M68K_REG_SR, 0x2700)
+        player.uc.reg_write(UC_M68K_REG_A7, stack)
+        player.uc.reg_write(UC_M68K_REG_D0, assignments)
+        player.uc.emu_start(CODE + sym['yx6_assign'], MAGIC, count=100_000)
+        for channel in range(4):
+            timer = (assignments >> (2 * channel)) & 3
+            got = bytes(player.uc.mem_read(
+                CODE + sym[f'yx6_desc_{channel}'], 18))
+            if got != rows[timer]:
+                return (f'assign: map {assignments:#04x} put the wrong row in'
+                        f' channel {channel} (wanted timer {timer})')
+    return ''
+
+
 def invoke_isr(player, address):
     """Runs one tick handler to its rte, which this Unicorn build cannot
     execute - reaching it is the completed tick. Returns the chip writes."""
@@ -908,7 +952,7 @@ def main() -> int:
         (600, 240, 24, 'small ring 240/24', 0, 1),
         (600, 48, 24, 'two-group ring 48/24', 128, 1),
         (600, 960, 64, 'long calls 960/64', 401, 1),
-        (608, 44, 22, 'tightest legal 44/22', 13, 1),
+        (608, 34, 17, 'tightest legal 34/17', 13, 1),
         (37, 960, 24, 'shorter than a ring', 5, 3),
         (40, 960, 24, 'loop shorter than a group', 35, 4),
         (24, 960, 24, 'exactly one group', 0, 2),

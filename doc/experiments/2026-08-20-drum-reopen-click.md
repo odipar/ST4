@@ -40,7 +40,7 @@ just *what* and *how many*:
                                  R7 at the edges.
 
 Under that comparison the bug is unmissable: **end delta +1 on 79 of 79
-windows**, start delta 0, tick streams byte-identical, and the resume
+windows**, start delta 0, timer streams byte-identical, and the resume
 volume one envelope step lower in v2 (14 became 13) because the reopen
 was reading the *next* frame's ring byte - the fingerprint of an event
 one frame late, visible in the values alone.
@@ -128,7 +128,7 @@ loop-split rotation all derive from the same number.
   `run_effects` frames 32/33 and 49/50, and the class javadoc's
   frame-alignment section).
 * The trace differential on CoS after the fix: 79/79 windows with start
-  delta 0, end delta 0, byte-identical tick streams, identical resume
+  delta 0, end delta 0, byte-identical timer streams, identical resume
   volumes and R7 edges against v1.
 * Robbert's ear on the trusted A/B: fixed.
 

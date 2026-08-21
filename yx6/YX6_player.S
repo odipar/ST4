@@ -55,9 +55,9 @@ start:
 
 ; From here to the handback the machine is ours alone: every TOS interrupt
 ; silenced, the VBL unshared, the keyboard read straight off the ACIA. The
-; SNDH blob does its own polite save/restore of the two timers it claims -
-; redundant under this takeover, and exactly right when the same bytes run
-; under a jukebox.
+; SNDH blob does its own polite save/restore of the timers it claims - two,
+; for a YM tune - which is redundant under this takeover and exactly right
+; when the same bytes run under a jukebox.
         move.l  #play,-(sp)
         move.w  #Supexec,-(sp)
         trap    #XBIOS

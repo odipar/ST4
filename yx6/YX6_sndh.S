@@ -20,8 +20,10 @@
 ;     timer vectors, TACR, TCDCR's Timer D nibble, TADR, TDDR, the four
 ;     enable/mask bits - is saved at INIT and handed back at EXIT. Two is
 ;     what a YM tune needs: its frames start at most two effects, so it
-;     names tick channels 1 and 2 and the player never claims Timer B. A
-;     file that named a third channel would need Timer B saved here too;
+;     names timer channels 0 and 1, which the packer's map puts on Timers
+;     A and D. A file whose T stream named Timer B or C would need those
+;     saved here too, and a Timer C tune could not be hosted from a Timer
+;     C hook at all;
 ;   - INIT is defensive: called twice without an EXIT, it restores first;
 ;   - PLAY before INIT is a no-op; PLAY is driven at the TC50 tag's 50 Hz;
 ;   - the USP is never touched (YX6_SUPER_HOST stays 0), and every buffer
@@ -29,7 +31,7 @@
 ;
 ; One honest limitation: a native host that dispatches PLAY from its Timer C
 ; hook holds the MFP's Timer C in-service for the length of the call, which
-; delays Timer D ticks (tick channel 2's) by up to that length - pending, not
+; delays Timer D ticks (timer channel 2's) by up to that length - pending, not
 ; lost. VBL- and emulator-hosted playback has no such window.
 ; -----------------------------------------------------------------------------
 

@@ -23,7 +23,7 @@ the rate changes, and that gives three clocks — the
 **tick clocks**, one MFP timer interrupt each, 48 to 25,600 a second; and
 the YM2149's own 2 MHz, which software never reaches. A series of values
 arriving at one register is a **stream**: the fourteen register streams
-are **frame streams**, and an effect is a **tick stream**.
+are **frame streams**, and an effect is a **timer stream**.
 
 Three of the four effects are the same thing. **A volume stream sends a
 series of volume values to one voice, one per tick** — which is all a
@@ -71,10 +71,11 @@ Format v5 replaced the E/T streams and the player's interpreting effect
 stage with the **compiled effect script**: `EffectScript.java` replays every
 rule in this document over the whole timeline at pack time and emits
 streams of prepared actions — M (what acts this frame; zero almost always),
-X (the operand an action byte has no room for) and, per tick channel, an
-A/P pair (its action byte and timer count). Format v6 made that three
-channels; a YM frame starts at most two effects, so a YM tune uses two and
-the third's streams pack to nothing. The player's
+X (the operand an action byte has no room for), T (which MFP timer each
+channel runs on) and, per timer channel, an A/P pair (its action byte and
+timer count). Format v7 made that four channels and moved the
+channel-to-timer map into T; a YM frame starts at most two effects, so a
+YM tune uses two and the others' streams pack to nothing. The player's
 handlers copy prepared values into the timers and the tick handlers'
 operands and compare nothing; the voice disconnection of section 4
 arrives baked into the R7 stream, the ring is never edited (the
@@ -97,8 +98,8 @@ mechanism and the budgets still read true.
 > Sections 1 to 6 describe the **v4** shape, where each slot had a control
 > stream and a timer-count stream, E1/T1 and E2/T2. They stay because the
 > rules are still the specification the pack-time simulator implements.
-> The **v6** file replaces those four streams with eight of script data,
-> M X A1 P1 A2 P2 A3 P3, as section 0 describes and as the container table in
+> The **v7** file replaces those four streams with eleven of script data,
+> M X T and four A/P pairs, as section 0 describes and as the container table in
 > [README.md](README.md) lays out. Where these sections say "the player
 > decides", read "the packer resolved it, and wrote the answer down".
 
@@ -314,23 +315,27 @@ free-runs, which is the original sound.
 
 ## 5. Timers and interrupts
 
-A **tick channel** is what the format names; a timer is what this player
-runs one on. The map lives in one table, `yx6_desc_1` to `yx6_desc_3`, and
-nothing outside it knows which timer serves which channel:
+A **timer channel** is what the format names; which of the MFP's four
+timers serves it is what stream T says. The player holds one row per
+timer, `yx6_timer_a` to `yx6_timer_d`, and an assignment copies the named
+row into the channel's descriptor - so the tick handlers belong to the
+timers and are never patched when a channel moves:
 
-**Channel 1 → Timer A** (vector $134, control $FFFA19, data $FFFA1F,
-bit 5 of IERA/IMRA/ISRA at $FFFA07/13/0F). **Channel 2 → Timer D**
-(vector $110, the low
-nibble of TCDCR $FFFA1D — always read-modify-write, so Timer C's nibble
-is preserved — data $FFFA25, bit 4 of the B registers). **Channel 3 →
-Timer B** (vector $120, control $FFFA1B, data $FFFA21, bit 0 of the A
-registers). This is maxYMiser's proven allocation, with its Timer B
-reached for last and only on demand: the header names the channels a tune
-uses, `YX6_init` claims a timer for each, and everything else is left
-alone. No YM tune names the third, so **Timer B stays free for raster
-code** unless a tune genuinely needs it — and a tune that does cannot
-share a host with raster work. Timer C stays TOS's 200 Hz, and Timer D's
-only casualty is RS232 baud. The YM6 TP value is written verbatim to the
+**Timer A**: vector $134, control $FFFA19, data $FFFA1F, bit 5 of
+IERA/IMRA/ISRA at $FFFA07/13/0F. **Timer B**: vector $120, control
+$FFFA1B, data $FFFA21, bit 0 of the A registers. **Timer C**: vector
+$114, the HIGH nibble of TCDCR $FFFA1D, data $FFFA23, bit 5 of the B
+registers. **Timer D**: vector $110, the LOW nibble of TCDCR, data
+$FFFA25, bit 4 of the B registers. C and D share that byte, so both are
+programmed read-modify-write, and C's prescaler shifts up four to reach
+its nibble.
+
+The packer's default map puts channel 0 on Timer A and channel 1 on
+Timer D — maxYMiser's proven allocation, and what v6 wired in — so a YM
+tune sounds as it always did and leaves B and C alone. **Timer B stays
+free for raster code** unless a tune names it, and **Timer C stops TOS's
+200 Hz clock** if a tune names that, which also rules out a host that
+calls PLAY from a Timer C hook. Timer D's only casualty is RS232 baud. The YM6 TP value is written verbatim to the
 control register; T to the data register.
 
 Facts the engine leans on, all verified:

@@ -8,7 +8,7 @@ package org.yx6;
  * <p>This is where the vocabulary changes. On the way in the names are the
  * YM format's, because the bytes are its: effect slots, codes, TP and TC.
  * On the way out they are the engine's, and what leaves here as a pair of
- * bytes per frame becomes a TICK STREAM - a series of values written to one
+ * bytes per frame becomes a TIMER STREAM - a series of values written to one
  * register between frames, at a rate a timer sets. {@code doc/terminology.md}
  * holds the mapping and the model; a digidrum is a PCM stream there, a SID
  * voice a toggle stream, a sync-buzzer a retrigger stream.
@@ -52,7 +52,7 @@ public final class YmEffects {
 
     /** The four effect types, as they sit in code bits 7-6. In the
      *  engine's words: SID is a toggle stream, DRUM a PCM stream, BUZZER a
-     *  retrigger stream, SINUS a curve stream (never implemented). */
+     *  retrigger stream, SINUS a wave stream (no corpus tune uses it). */
     public static final int KIND_TOGGLE = 0x00;
     public static final int KIND_PCM = 0x40;
     public static final int KIND_CURVE = 0x80;
@@ -68,7 +68,7 @@ public final class YmEffects {
     static final int[] PREDIV = {0, 4, 10, 16, 50, 64, 100, 200};
 
     /** What the reader's frames become: two byte pairs per frame naming
-     *  the tick streams to run, the converted samples, what was dropped,
+     *  the timer streams to run, the converted samples, what was dropped,
      *  and one note per resampled sample. This is the handover
      *  point - past here the vocabulary is the engine's. */
     public record Extraction(byte[] e1, byte[] t1, byte[] e2, byte[] t2,

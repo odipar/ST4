@@ -185,15 +185,16 @@ dotnet run --project csharp/src/Nt4.Cli -- [-f] [-kK] [-mN] [-lN] input [output.
 ## YX6: the YM chiptune player
 
 [yx6/](yx6/README.md) puts the streaming decoders to work: a Java packer turns
-a YM chiptune dump — YM5 or YM6, LHA-archived or not — into twenty-two ST4
+a YM chiptune dump — YM5 or YM6, LHA-archived or not — into twenty-five ST4
 containers: one per YM2149 sound register, plus the compiled effect script —
-eight streams of pack-time-prepared actions — with the digidrum samples
+eleven streams of pack-time-prepared actions — with the digidrum samples
 appended as a table. A
-2,400-byte 68000 player decodes them through small rings with
+2,800-byte 68000 player decodes them through small rings with
 ST4_wrap, one refill per frame, and plays the effects — digidrums, SID
-voices, the sync-buzzer — on tick channels, three of them, run on MFP
-Timers A, D and B and claimed only when a tune says it uses them. On one
-measured tune that costs about 1,690 cycles a frame under cycle-exact emulation, effects
+voices, the sync-buzzer — on timer channels, four of them, mapped onto the
+MFP's timers by a stream in the file and claimed only when a tune says it
+uses them. On one
+measured tune that costs about 1,790 cycles a frame under cycle-exact emulation, effects
 included — the effect decisions themselves were made at pack time: the
 packer simulates the reference player over the whole timeline and the
 player replays prepared actions.
@@ -226,11 +227,19 @@ the real decoders, decode under emulation as a plain 68000, and check every
 output byte, exact consumption of all four streams, ring guard bands and the
 packed register metadata.
 
-## Experiments
+## Experiments and design notes
 
 [doc/experiments/](doc/experiments/README.md) records ideas that were
 measured against the real corpus and declined, with the numbers — so a good
-idea that is not worth its complexity never has to be measured twice.
+idea that is not worth its complexity never has to be measured twice, and
+diagnoses of the bugs whose hunts were worth keeping.
+
+The design notes sit beside it: [doc/terminology.md](doc/terminology.md)
+is the vocabulary, [doc/four-timer-channels.md](doc/four-timer-channels.md)
+is how the format came to have four timer channels and to carry its own
+channel-to-timer map, and
+[doc/three-tick-channels.md](doc/three-tick-channels.md) is the design
+space it grew out of.
 
 ## ST1
 
