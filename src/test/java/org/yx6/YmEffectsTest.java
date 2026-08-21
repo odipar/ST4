@@ -131,9 +131,9 @@ final class YmEffectsTest {
         // 25600 (divisor 64 -> 96, ratio 3/2), so the converted 3-value
         // sample {8, 15, 2} becomes 2 values through the windowed sinc in
         // the chip curve's linear domain.
-        assertEquals(2, effects.drums()[0].length);
-        assertEquals(13, effects.drums()[0][0]);
-        assertEquals(13, effects.drums()[0][1]);
+        assertEquals(2, effects.samples()[0].length);
+        assertEquals(13, effects.samples()[0][0]);
+        assertEquals(13, effects.samples()[0][1]);
         // Both triggers scale their divisor by 3/2, keeping pitch: 4*16
         // *3/2 = 96 fits as prescaler 1, count 24; 4*200*3/2 = 1200 as
         // prescaler 2, count 120.
@@ -149,10 +149,10 @@ final class YmEffectsTest {
         // real-hardware mapping. 4-bit files: the byte as it is.
         byte[][] r = blank();
         YmEffects.Extraction eightBit = YmEffects.extract(song("YM6!", r, 1, 1));
-        assertArrayEquals(new byte[] {8, 15, 2}, eightBit.drums()[0]);
+        assertArrayEquals(new byte[] {8, 15, 2}, eightBit.samples()[0]);
         YmEffects.Extraction fourBit = YmEffects.extract(
                 song("YM6!", r, 1, 1 | Ym6Reader.Song.A_DRUM4BITS));
-        assertArrayEquals(new byte[] {0, 3, 1}, fourBit.drums()[0]);
+        assertArrayEquals(new byte[] {0, 3, 1}, fourBit.samples()[0]);
     }
 
     @Test

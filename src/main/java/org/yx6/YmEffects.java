@@ -59,7 +59,7 @@ public final class YmEffects {
     public static final int KIND_RETRIGGER = 0xC0;
 
     /** The fastest tick rate a real player programs: SIDs and buzzers
-     * above it are dropped, drums resampled under it. The CLI's -drumhz
+     * above it are dropped, samples resampled under it. The CLI's -drumhz
      * option moves the drum ceiling. */
     public static final int MAX_TIMER_HZ = 25600;
 
@@ -68,11 +68,11 @@ public final class YmEffects {
     static final int[] PREDIV = {0, 4, 10, 16, 50, 64, 100, 200};
 
     /** What the reader's frames become: two byte pairs per frame naming
-     *  the tick streams to run, the converted drum samples, what was
-     *  dropped, and one note per resampled drum. This is the handover
+     *  the tick streams to run, the converted samples, what was dropped,
+     *  and one note per resampled sample. This is the handover
      *  point - past here the vocabulary is the engine's. */
     public record Extraction(byte[] e1, byte[] t1, byte[] e2, byte[] t2,
-                             byte[][] drums, int inert, int tooFast, int sinus,
+                             byte[][] samples, int inert, int tooFast, int sinus,
                              int missingDrum, java.util.List<String> notes) {
 
         /** All four streams, in file order E1, T1, E2, T2. */
@@ -86,9 +86,9 @@ public final class YmEffects {
     }
 
     private final Ym6Reader.Song song;
-    private final byte[][] drums;
-    private final int[] num;            // per-drum divisor scale num/den >= 1;
-    private final int[] den;            // 1/1 = the drum plays as dumped
+    private final byte[][] samples;
+    private final int[] num;            // per-sample divisor scale num/den >= 1;
+    private final int[] den;            // 1/1 = the sample plays as dumped
     private final java.util.List<java.util.TreeSet<Integer>> divisors;
     private final int drumHz;
     private final java.util.List<String> notes = new java.util.ArrayList<>();
@@ -100,11 +100,11 @@ public final class YmEffects {
     private YmEffects(Ym6Reader.Song song, int drumHz) {
         this.song = song;
         this.drumHz = drumHz;
-        this.drums = convertDrums(song);
-        this.num = new int[drums.length];
-        this.den = new int[drums.length];
+        this.samples = convertSamples(song);
+        this.num = new int[samples.length];
+        this.den = new int[samples.length];
         this.divisors = new java.util.ArrayList<>();
-        for (int i = 0; i < drums.length; i++) {
+        for (int i = 0; i < samples.length; i++) {
             num[i] = 1;
             den[i] = 1;
             divisors.add(new java.util.TreeSet<>());
@@ -146,13 +146,13 @@ public final class YmEffects {
             e2[frame] = (byte) (slot2 >> 8);
             t2[frame] = (byte) slot2;
         }
-        return new Extraction(e1, t1, e2, t2, effects.drums, effects.inert,
+        return new Extraction(e1, t1, e2, t2, effects.samples, effects.inert,
                 effects.tooFast, effects.sinus, effects.missingDrum,
                 java.util.List.copyOf(effects.notes));
     }
 
     /**
-     * Surveys every drum trigger and rescues the drums whose rate exceeds
+     * Surveys every drum trigger and rescues the samples whose rate exceeds
      * the ceiling: each is resampled to the highest MFP-representable rate
      * under it, and every trigger's divisor scales by the same exact ratio.
      * When a drum's triggers cannot all take the ratio exactly, the
@@ -168,7 +168,7 @@ public final class YmEffects {
                                     ? KIND_PCM | (register(3, frame) & 0x30) : 0,
                     register(8, frame) >> 5, register(15, frame), frame);
         }
-        for (int i = 0; i < drums.length; i++) {
+        for (int i = 0; i < samples.length; i++) {
             if (divisors.get(i).isEmpty()) {
                 continue;
             }
@@ -197,9 +197,9 @@ public final class YmEffects {
             }
             num[i] = n;
             den[i] = d;
-            byte[] source = drums[i];
+            byte[] source = samples[i];
             int outLength = Math.max(1, (int) ((long) source.length * d / n));
-            drums[i] = resample(source, outLength);
+            samples[i] = resample(source, outLength);
             notes.add("drum " + i + " resampled "
                     + MFP_CLOCK / fastest + " -> "
                     + (long) MFP_CLOCK * d / ((long) fastest * n)
@@ -217,7 +217,7 @@ public final class YmEffects {
             return;
         }
         int number = register(8 + ((code & 0x30) >> 4) - 1, frame) & 31;
-        if (number >= drums.length) {
+        if (number >= samples.length) {
             return;
         }
         divisors.get(number).add(PREDIV[prescaler] * count);
@@ -346,7 +346,7 @@ public final class YmEffects {
         if (type == KIND_PCM) {
             int voice = (voiceBits >> 4) - 1;
             int number = register(8 + voice, frame) & 31;
-            if (number >= drums.length) {
+            if (number >= samples.length) {
                 missingDrum++;
                 return 0;
             }
@@ -368,7 +368,7 @@ public final class YmEffects {
         }
         int hz = MFP_CLOCK / (PREDIV[prescaler] * count);
         if (hz > (type == KIND_PCM ? drumHz : MAX_TIMER_HZ)) {
-            tooFast++;                  // drums use their own ceiling, so
+            tooFast++;                  // samples use their own ceiling, so
             return 0;                   // -drumhz above 25600 works too
         }
         return ((long) ((code & 0xF0) | prescaler) << 8) | count;
@@ -378,7 +378,7 @@ public final class YmEffects {
      * The drum samples as PSG volume values 0..15, one per byte, without the
      * end markers - those belong to the file layout, not the sound.
      */
-    private static byte[][] convertDrums(Ym6Reader.Song song) {
+    private static byte[][] convertSamples(Ym6Reader.Song song) {
         int count = Math.min(song.digidrums(), Yx6Format.MAX_SAMPLES);
         byte[][] converted = new byte[count][];
         boolean fourBit = (song.attributes() & Ym6Reader.Song.A_DRUM4BITS) != 0;

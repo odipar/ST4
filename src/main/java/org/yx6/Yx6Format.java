@@ -80,7 +80,7 @@ public final class Yx6Format {
     public static final int REGISTER_STREAMS = 14;
 
     /** Stream indices of the script data: the master byte, then
-     * each slot's action and timer-count bytes. The byte semantics - the
+     * each tick channel's action and timer-count bytes. The byte semantics - the
      * verb vocabulary, the master bits, the gate mask - are
      * {@link EffectScript}'s ABI, which packer, player and rigs all cite. */
     public static final int STREAM_M = 14;
@@ -106,14 +106,14 @@ public final class Yx6Format {
 
     public static final int HEADER_SIZE = OFFSET_LOOP_TABLE + 4 * STREAMS;
 
-    /** A drum table entry: a long offset and a word length. */
+    /** A sample table entry: a long offset and a word length. */
     public static final int SAMPLE_ENTRY_SIZE = 6;
 
-    /** The byte after a drum's last sample value has this bit set; the drum
+    /** The byte after a sample's last value has this bit set; the PCM tick
      * interrupt routine's own move.b sees it as negative and stops. */
     public static final int SAMPLE_END_MARK = 0x80;
 
-    /** The format's ceiling: a drum number is five bits. */
+    /** The format's ceiling: a sample number is five bits in the YM file. */
     public static final int MAX_SAMPLES = 32;
 
     /** Default ring size: the size the timings in the README are quoted for. */

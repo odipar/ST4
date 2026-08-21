@@ -12,7 +12,7 @@ import org.st4.Units;
 /**
  * Turns a parsed YM tune into a {@code .yx6} file: fourteen register vectors,
  * masked down to what a plain YM2149 sees, plus the five compiled effect
- * script streams and the drum table, each vector packed as its own embedded
+ * script streams and the sample table, each vector packed as its own embedded
  * ST4 container.
  *
  * <p>Packing the registers separately is the whole point. A register's value
@@ -106,7 +106,8 @@ public final class Yx6Encoder {
     }
 
     /**
-     * As above, with the drum rate ceiling: a drum whose triggers ask for a
+     * As above, with the drum rate ceiling (the -drumhz flag): a sample whose
+     * triggers ask for a
      * faster timer is downsampled to fit under it - see
      * {@link YmEffects#extract(Ym6Reader.Song, int)}.
      */
@@ -118,7 +119,8 @@ public final class Yx6Encoder {
     }
 
     /**
-     * As above, choosing the SID gap model: {@code sidResume} packs the
+     * As above, choosing the phase policy for toggle streams (the flag
+     * keeps the scene's name): {@code sidResume} packs the
      * maxYMiser mask-and-resume semantics instead of the default ym2149-rs
      * phase-zero restarts - see {@link EffectScript#compile}.
      */
@@ -196,7 +198,7 @@ public final class Yx6Encoder {
         }
 
         byte[] file = build(song, ringSize, chunk, frames, split, loops, intro,
-                loop, effects.drums());
+                loop, effects.samples());
         return new Result(file, List.copyOf(streams), ringSize, chunk, split, loops, unit,
                 effects, script);
     }
@@ -252,7 +254,7 @@ public final class Yx6Encoder {
 
     private static byte[] build(Ym6Reader.Song song, int ringSize, int chunk, int frames,
                                 int split, boolean loops, byte[][] intro, byte[][] loop,
-                                byte[][] drums) {
+                                byte[][] samples) {
         // Containers carry alignment promises of their own - stream A and D
         // are read a word at a time - so each is placed on a long boundary.
         int total = Yx6Format.HEADER_SIZE;
@@ -262,11 +264,11 @@ public final class Yx6Encoder {
         for (byte[] container : loop) {
             total = align(total) + container.length;
         }
-        int drumTable = drums.length == 0 ? 0 : align(total);
-        if (drums.length > 0) {
-            total = drumTable + Yx6Format.SAMPLE_ENTRY_SIZE * drums.length;
-            for (byte[] drum : drums) {
-                total += drum.length + 1;               // the end marker byte
+        int sampleTable = samples.length == 0 ? 0 : align(total);
+        if (samples.length > 0) {
+            total = sampleTable + Yx6Format.SAMPLE_ENTRY_SIZE * samples.length;
+            for (byte[] sample : samples) {
+                total += sample.length + 1;               // the end marker byte
             }
         }
 
@@ -281,23 +283,23 @@ public final class Yx6Encoder {
         putWord(file, Yx6Format.OFFSET_CHUNK, chunk);
         putLong(file, Yx6Format.OFFSET_LOOP_FRAME, split);
         putLong(file, Yx6Format.OFFSET_MASTER_CLOCK, song.masterClock());
-        putLong(file, Yx6Format.OFFSET_SAMPLE_TABLE, drumTable);
-        putWord(file, Yx6Format.OFFSET_SAMPLE_COUNT, drums.length);
+        putLong(file, Yx6Format.OFFSET_SAMPLE_TABLE, sampleTable);
+        putWord(file, Yx6Format.OFFSET_SAMPLE_COUNT, samples.length);
 
         int at = Yx6Format.HEADER_SIZE;
         at = place(file, Yx6Format.OFFSET_INTRO_TABLE, intro, at);
         at = place(file, Yx6Format.OFFSET_LOOP_TABLE, loop, at);
 
-        // The drum table: entries first, then the samples, each closed by the
-        // end marker the drum interrupt routine stops on.
-        if (drums.length > 0) {
-            int sample = drumTable + Yx6Format.SAMPLE_ENTRY_SIZE * drums.length;
-            for (int i = 0; i < drums.length; i++) {
-                putLong(file, drumTable + Yx6Format.SAMPLE_ENTRY_SIZE * i, sample);
-                putWord(file, drumTable + Yx6Format.SAMPLE_ENTRY_SIZE * i + 4,
-                        drums[i].length);
-                System.arraycopy(drums[i], 0, file, sample, drums[i].length);
-                sample += drums[i].length;
+        // The sample table: entries first, then the samples, each closed by the
+        // end marker the PCM tick handler stops on.
+        if (samples.length > 0) {
+            int sample = sampleTable + Yx6Format.SAMPLE_ENTRY_SIZE * samples.length;
+            for (int i = 0; i < samples.length; i++) {
+                putLong(file, sampleTable + Yx6Format.SAMPLE_ENTRY_SIZE * i, sample);
+                putWord(file, sampleTable + Yx6Format.SAMPLE_ENTRY_SIZE * i + 4,
+                        samples[i].length);
+                System.arraycopy(samples[i], 0, file, sample, samples[i].length);
+                sample += samples[i].length;
                 file[sample++] = (byte) Yx6Format.SAMPLE_END_MARK;
             }
         }
