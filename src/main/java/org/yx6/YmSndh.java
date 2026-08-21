@@ -50,6 +50,6 @@ public final class YmSndh {
         List<Path> packed = Packing.pack(yms, work, packerFlags, true);
         MkSndh.build(new MkSndh.Options(output, packed,
                 title != null && !title.isEmpty() ? title : set.title(),
-                set.composer(), set.names(), perf));
+                set.composer(), set.names(), perf, true));
     }
 }

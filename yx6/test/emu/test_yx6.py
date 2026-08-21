@@ -13,6 +13,7 @@ Needs `mvn compile` for the packer, rmac on PATH, and `pip install unicorn`.
 """
 import hashlib
 import importlib.util
+import os
 import re
 import subprocess
 import sys
@@ -87,6 +88,10 @@ def assemble(unit: int = 1, super_host: bool = False, perf: bool = False):
     source.write_text(f'ST4_UNIT    equ     {unit}\n'
                       + ('YX6_SUPER_HOST equ  1\n' if super_host else '')
                       + ('YX6_PERF    equ     1\n' if perf else '')
+    # The frame write masks interrupts by default; YX6_NOMASK=1 runs the
+    # whole rig against the variant that does not, which is the tools'
+    # -nomask.
+    + ('YX6_MASK_BURST equ  0\n' if os.environ.get('YX6_NOMASK') else '')
                       + '        include "YX6.S"\n'
                       '        include "ST4_wrap.S"\n')
     binary = SCRATCH / f'link{tag}.bin'

@@ -35,7 +35,7 @@ public final class MkSndh {
     /** What the caller asked for; every field but the tunes has a default. */
     public record Options(Path output, List<Path> tunes, String title,
                           @Nullable String composer, @Nullable List<String> names,
-                          boolean perf) {
+                          boolean perf, boolean maskBurst) {
 
         public Options {
             if (tunes.isEmpty()) {
@@ -140,6 +140,8 @@ public final class MkSndh {
         out.append("RING_SIZE   equ     ").append(set.ring()).append('\n');
         out.append("YX6_TUNES   equ     ").append(n).append('\n');
         out.append("YX6_PERF    equ     ").append(options.perf() ? 1 : 0).append('\n');
+        out.append("YX6_MASK_BURST equ  ").append(options.maskBurst() ? 1 : 0)
+           .append('\n');
         out.append("        dc.b    'TITL',\"").append(clean(options.title())).append("\",0\n");
         if (options.composer() != null && !options.composer().isEmpty()) {
             out.append("        dc.b    'COMM',\"").append(clean(options.composer()))
@@ -209,7 +211,7 @@ public final class MkSndh {
     }
 
     private static final String USAGE =
-            "usage: mksndh.sh [-perf] [-tTitle] [-cComposer] [-Nnamesfile]"
+            "usage: mksndh.sh [-perf] [-nomask] [-tTitle] [-cComposer] [-Nnamesfile]"
             + " output.sndh tune1.yx6 [tune2.yx6 ...]";
 
     public static void main(String[] args) {
@@ -217,11 +219,14 @@ public final class MkSndh {
         @Nullable String composer = null;
         @Nullable List<String> names = null;
         boolean perf = false;
+        boolean maskBurst = true;
         int i = 0;
         for (; i < args.length; i++) {
             String a = args[i];
             if (a.equals("-perf")) {
                 perf = true;
+            } else if (a.equals("-nomask")) {
+                maskBurst = false;
             } else if (a.startsWith("-t")) {
                 title = a.substring(2);
             } else if (a.startsWith("-c")) {
@@ -243,7 +248,7 @@ public final class MkSndh {
         if (title == null || title.isEmpty()) {
             title = output.getFileName().toString().replaceAll("(?i)\\.sndh$", "");
         }
-        build(new Options(output, tunes, title, composer, names, perf));
+        build(new Options(output, tunes, title, composer, names, perf, maskBurst));
     }
 
     static List<String> readNames(Path file) {

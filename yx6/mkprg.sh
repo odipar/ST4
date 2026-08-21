@@ -1,7 +1,7 @@
 #!/bin/sh
 # mkprg.sh - a runnable TOS program around one or more packed tunes.
 #
-#   yx6/mkprg.sh [-m] [-perf] [-tTitle] [-cComposer] [-Nnamesfile] output.prg tunes...
+#   yx6/mkprg.sh [-m] [-perf] [-nomask] [-tTitle] [-cComposer] [-Nnamesfile] output.prg tunes...
 #   yx6/mkprg.sh [-m] tune.yx6 output.prg        # the old order still works
 #
 # -t, -c and -N flow into the embedded SNDH's tags (mksndh.sh has the

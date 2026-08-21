@@ -7,6 +7,7 @@
 #   yx6/play.sh -min13 -sec52 song.ym    # trim: start deep in a long tune
 #   yx6/play.sh one.ym two.ym            # a set: subtunes, number keys pick
 #   yx6/play.sh -perf song.ym            # the raster monitor
+#   yx6/play.sh -nomask song.ym          # drop the frame write's interrupt mask
 #
 # yx6/play.sh -h lists the lot. Press SPACE in the Hatari window to stop; the
 # program asks Hatari to quit on its way out, so the script returns.
