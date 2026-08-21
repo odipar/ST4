@@ -247,9 +247,10 @@ Most hard bugs come from a tick landing during a frame write, or both
 writing the same register:
 
 - **tearing**. A tick lands between a register's select and its value,
-  and the value reaches whatever register the tick selected. Prevented by
-  writing select and value in one instruction, which an interrupt cannot
-  split - not by masking, which would delay the tick instead.
+  and the value reaches whatever register the tick selected. Two cures:
+  write select and value in one instruction, which an interrupt cannot
+  split, or mask interrupts for the burst - which is safe but delays
+  every tick that falls inside it.
 - **contention**. Frame write and timer stream target the same register.
   Prevented by giving the register an owner and skipping it in the burst.
 - **quantisation**. Something happens between frames; only the next frame
@@ -530,6 +531,6 @@ in the section of that name.
 
 | term | meaning |
 |---|---|
-| **tearing** | a tick splits a select from its value; the value lands in the wrong register. One instruction per write prevents it |
+| **tearing** | a tick splits a select from its value; the value lands in the wrong register. One instruction per write prevents it, masking hides it |
 | **contention** | frame write and timer stream target the same register |
 | **quantisation** | something happens between frames; only the next frame can act |

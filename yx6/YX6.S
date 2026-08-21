@@ -139,9 +139,11 @@
 ;              decoder state spans a4 and a5, which is why they no longer do.
 ;
 ; YX6_play writes to the sound chip at $FFFF8800, so it must run in supervisor
-; mode - which a VBL handler already does. It masks NOTHING: each of the
-; fourteen writes is a single movep.w, which a 68000 cannot split, so
-; ticks interleave with the frame write instead of waiting behind it. Its
+; mode - which a VBL handler already does. Each of the fourteen writes is
+; a single movep.w, which a 68000 cannot split, so the burst needs no
+; interrupt mask to be correct - it takes one anyway by default, and
+; YX6_MASK_BURST equ 0 (the tools' -nomask) drops it so ticks interleave
+; with the frame write instead of waiting behind it. Its
 ; effect stage programs the timers YX6_init claimed, vectors included.
 ; Beyond the chip, those timers and the workspace, it writes only ITSELF: it is
 ; self-modifying code. The channel descriptors, the prepared tables and the
@@ -211,6 +213,20 @@ YX6_SUPER_HOST  equ     0
         .if ^^defined YX6_PERF
         .else
 YX6_PERF        equ     0
+        .endif
+
+; YX6_MASK_BURST masks interrupts around the frame write, and is ON by
+; default. It is not needed for correctness - every write is one movep.w,
+; which no interrupt can split - so setting it to 0 is safe, and what it
+; buys is tick timing: with the mask on, a tick landing inside the burst
+; waits about 500 cycles, which at the top of the tick range is longer
+; than a whole tick period. With it off, ticks interleave with the frame
+; write and wait one instruction. Everything else is identical either way,
+; so an A/B on this flag isolates the mask and nothing else - the tools
+; spell it -nomask.
+        .if ^^defined YX6_MASK_BURST
+        .else
+YX6_MASK_BURST  equ     1
         .endif
 PERF_PAD        equ     YX6_PERF*10     ; the color prologue's bytes, sitting
                                         ; ahead of every fixed patch offset
@@ -826,11 +842,16 @@ YX6_play:
 ;
 ; movep.w writes both bytes from one register in ONE instruction. A 68000
 ; takes interrupts between instructions, so nothing can land inside a
-; write, and the burst runs UNMASKED: ticks interleave with it, delayed by
-; one instruction at worst. The tick handlers are atomic the same way -
-; move.l #imm,$FFFF8800.w - so the interleaving is safe in both
+; write and the mask below is optional: with YX6_MASK_BURST at 0 the burst
+; runs unmasked and ticks interleave with it, delayed by one instruction
+; at worst instead of ~500 cycles. The tick handlers are atomic the same
+; way - move.l #imm,$FFFF8800.w - so the interleaving is safe in both
 ; directions, and a tick that lands between two register writes is
 ; followed by a write that selects again.
+        .if YX6_MASK_BURST
+        move.w  sr,-(sp)                ; YX6_MASK_BURST: the old behaviour,
+        ori.w   #$0700,sr               ; for hearing what the mask costs
+        .endif
 yx6_wA:
         YX6_WRITE 0                     ; channel A period, fine and coarse
         YX6_WRITE 1
@@ -871,6 +892,9 @@ yx6_w13:
         beq.s   .envelope_held
         movep.w d1,0(a2)
 .envelope_held:
+        .if YX6_MASK_BURST
+        move.w  (sp)+,sr
+        .endif
 
 ; The actions, now that the chip has its frame: replay the compiled script.
 ; One master byte says what acts - almost always nothing. The action bytes

@@ -1,4 +1,7 @@
-# The unmasked burst: one instruction per write, and no timer waits
+# The burst's mask: what it costs, and how to do without it
+
+(The filename says "unmasked" because that is where the work started.
+It ended with the mask optional rather than gone - see What shipped.)
 
 The frame write used to run with interrupts off. Selecting a register and
 writing it are two bus cycles, and an interrupt landing between them
@@ -96,6 +99,29 @@ cannot drift apart.
 **R7 and R13.** Both write select and data as a pair of their own, and
 both are converted. Leaving them would have kept a tearing window open in
 the one place the burst is unmasked - the point of the exercise.
+
+## What shipped
+
+Both halves, but only one of them by default.
+
+The atomic write stayed: every register write is a `movep.w`, so tearing
+is impossible whatever the interrupt state. The mask became **optional**
+rather than necessary - `YX6_MASK_BURST`, on by default, and the tools'
+`-nomask` turns it off. So the shipping player still holds ticks off for
+the burst, and dropping the mask is one flag away for anyone who wants
+the tick timing instead.
+
+That leaves the numbers as a menu rather than a verdict:
+
+| | masked (default) | -nomask |
+|---|---|---|
+| player | 2,828 bytes | 2,820 |
+| harness, 1700 frames | 94 ticks | 91 |
+| longest interrupt-free span | ~500 cycles | one instruction |
+
+Same chip traffic either way, byte for byte: 16,156 PSG writes over 900
+VBLs of the same tune, identical. The flag moves when ticks run, not what
+reaches the chip.
 
 ## What to keep
 

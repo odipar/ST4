@@ -22,7 +22,7 @@ public final class MkPrg {
 
     public record Options(Path output, List<Path> tunes, @Nullable String title,
                           @Nullable String composer, @Nullable List<String> names,
-                          boolean perf, boolean marker) {}
+                          boolean perf, boolean maskBurst, boolean marker) {}
 
     public static Path build(Options options) {
         Path output = options.output().toAbsolutePath();
@@ -38,7 +38,8 @@ public final class MkPrg {
             title = output.getFileName().toString().replaceAll("(?i)\\.prg$", "");
         }
         MkSndh.build(new MkSndh.Options(work.resolve("tune.sndh"), options.tunes(),
-                title, options.composer(), options.names(), options.perf()));
+                title, options.composer(), options.names(), options.perf(),
+                options.maskBurst()));
 
         // The subtune count and, for a lone tune that ends, its frame count:
         // the shell needs one to bind the number keys and the other to notice
@@ -78,12 +79,13 @@ public final class MkPrg {
     }
 
     private static final String USAGE =
-            "usage: mkprg.sh [-m] [-perf] [-tTitle] [-cComposer] [-Nnamesfile]"
+            "usage: mkprg.sh [-m] [-perf] [-nomask] [-tTitle] [-cComposer] [-Nnamesfile]"
             + " output.prg tunes...";
 
     public static void main(String[] args) {
         boolean marker = false;
         boolean perf = false;
+        boolean maskBurst = true;
         @Nullable String title = null;
         @Nullable String composer = null;
         @Nullable List<String> names = null;
@@ -94,6 +96,8 @@ public final class MkPrg {
                 marker = true;
             } else if (a.equals("-perf")) {
                 perf = true;
+            } else if (a.equals("-nomask")) {
+                maskBurst = false;
             } else if (a.startsWith("-t")) {
                 title = a.substring(2);
             } else if (a.startsWith("-c")) {
@@ -126,6 +130,7 @@ public final class MkPrg {
         if (tunes.isEmpty()) {
             throw Tools.fail(USAGE);
         }
-        build(new Options(output, tunes, title, composer, names, perf, marker));
+        build(new Options(output, tunes, title, composer, names, perf, maskBurst,
+                marker));
     }
 }

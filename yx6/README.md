@@ -320,15 +320,15 @@ bare loop), so the compare that would save a write costs about as much as the
 write.
 
 That burst of writes is what [doc/terminology.md](../doc/terminology.md)
-calls the **frame write**, and it runs with **interrupts enabled**.
-Selecting a register and writing it are two bus cycles, and an interrupt
-between them would send the value to whatever register the interrupt
-selected — so each write is a single `movep.w`, which a 68000 cannot
-split, rather than a pair guarded by a mask. Ticks interleave with the
-burst and wait one instruction at worst, where the old mask held them off
-for about 500 cycles: longer than a tick period at the top of the range.
-[The note](../doc/experiments/2026-08-21-the-unmasked-burst.md) has the
-numbers.
+calls the **frame write**. Selecting a register and writing it are two bus
+cycles, and an interrupt between them would send the value to whatever
+register the interrupt selected — so each write is a single `movep.w`,
+which a 68000 cannot split. That makes the burst's interrupt mask
+optional rather than necessary: it is on by default, and `-nomask` drops
+it, which lets ticks interleave with the burst instead of waiting behind
+it for about 500 cycles — longer than a tick period at the top of the
+range. [The note](../doc/experiments/2026-08-21-the-unmasked-burst.md)
+has the numbers on both.
 
 ## What it does not do
 
