@@ -15,10 +15,10 @@ the YM names; this is the short of it, because the rest of this document
 reads better once the four effects stop looking like four unrelated
 tricks.
 
-A **signal** is a series of values with a rate, and everything audible
-is one. The chip's generators make signals by themselves; software makes
-them by writing registers, which is the only thing the player ever does.
-Only the rate changes, and that gives three clocks — the
+A **signal** is a series of values with a rate, and every sound is one.
+The generators produce signals without any help. Software produces them
+by writing registers, which is the only thing the player ever does. Only
+the rate changes, and that gives three clocks — the
 **frame clock**, one call to the player, usually 50 a second; the two
 **tick clocks**, one MFP timer interrupt each, 48 to 25,600 a second; and
 the YM2149's own 2 MHz, which software never reaches. A series of values

@@ -28,9 +28,9 @@ Writing a register is the only way software changes anything, and each
 register holds its value until written again.
 
 A **signal** is a series of values with a rate: a square wave, a run of
-noise, a sample. Everything audible here is one. Two things make them -
-the chip's generators, on their own, and the software, by writing
-registers.
+noise, a sample. Every sound the chip makes is a signal, and signals come
+from two places. The generators produce them without any help. Software
+produces them by writing registers.
 
 Those registers steer five **generators**, each making a signal of its
 own:
@@ -262,28 +262,24 @@ is one whose sample is a smooth shape and repeats. Where the values are
 kept makes no difference. A curve can be worked out as it goes or read
 from a table, and the sound is the same.
 
-**Why three codes, then, and not one?** Two reasons, neither of them
-about sound.
+**Why three codes, then, and not one?** Two reasons, neither about sound.
 
-The first is cost. A general PCM stream works on every tick: hold a
-pointer, read a byte, step the pointer, test for the end. A two-value
-stream does none of that. It flips between two numbers it already has.
-At 25,000 ticks a second on an 8 MHz 68000 that gap is most of the
-machine. The format keeps them apart because the hardware must.
+**Cost.** A general PCM stream works on every tick: hold a pointer, read
+a byte, step it, test for the end. A two-value stream flips between two
+numbers it already has. At 25,000 ticks a second on an 8 MHz 68000 that
+difference is most of the machine.
 
-The second is musical. A digidrum's rate is **independent**. It is the
-pitch a recording is to play back at, and bears no relation to any note.
-Just as well, since the voice is disconnected and there is no note.
-
-A SID voice's rate is **derived**. Its values scale the signal the voice
-is still making, so the two signals must stay in ratio, or the tone
-changes with every note. One is a sound in itself. The other is a
+**Rate.** A digidrum's is **independent**: the pitch a recording plays
+back at, unrelated to any note, and there is no note anyway because the
+voice is disconnected. A SID voice's is **derived**: its values scale
+the signal the voice still makes, so the two must stay in ratio or the
+tone changes with every note. One is a sound in itself. The other is a
 treatment applied to a note.
 
-Those same words say when a rate may change. An independent rate is
-**set once**, fixed at the start, since moving it would bend the sample.
-A derived rate is **control-rate**: renewed by the code that runs each
-frame, which is what following a melody needs.
+The same split says when a rate may change. Independent means **set
+once**, fixed at the start, because moving it would bend the sample.
+Derived means **control-rate**, renewed each frame, which is what
+following a melody needs.
 
 **The fourth is not a volume stream.** It writes the envelope shape
 instead, and writes the same shape every tick. Since the shape never
