@@ -204,6 +204,30 @@ Survey of 516 local YM files plus the research corpus:
 - Wild files require lenient parsing: Ninja Remix carries 151 drum codes with
   TP=TC=0 (all must be no-ops, per ST-Sound's `if (prediv*count)` guard),
   and files exist with effect codes set but zero drums in the file.
+- The parameter register was measured too, because section 1 asserts where it
+  is and v9 turned that assertion into work a front end does: the shape is
+  resolved at pack time and carried, so being wrong about where YM6 keeps it
+  is now silently wrong rather than loudly. Of 1,018 distinct tunes on hand,
+  243 are YM6 and **three** carry a live sync-buzzer at all — `jamblv1`, and
+  ST-Sound's own `ND-Loader` and `ND-Toxygene` — for 1,375 buzzer frames
+  between them, which is why the effect earns one line above and no more.
+  R13's own stream and the voice's nibble DISAGREE on a real tune: on 621 of
+  `jamblv1`'s 972 buzzer frames the two resolutions part company, and the
+  nibble is the one ST-Sound arrives at. The other two tunes agree with
+  themselves throughout and settle nothing, which is worth saying — two
+  thirds of the corpus evidence for this is inert.
+- The same three tunes settled the shape's ARITY, which matters more than
+  its source and was got wrong for longer. `jamblv1` runs **two** buzzers at
+  once on 462 of those 972 frames. There is one envelope generator, so
+  ST-Sound holds one `envShape`, written by R13 and then by each live buzzer
+  in slot order with the last winning; a per-channel shape encodes a state
+  the chip cannot hold, and did — reading each channel's own voice restarts
+  the wrong shape on 15 of `jamblv1`'s frames. v9's single nibble in X is
+  that arity, not a saving.
+- The SID's loud half was measured the same way and is less marginal: 13,891
+  SID frames across five YM6 tunes, 6,520 of them on the frame after the
+  level moved. A packer that read the volume once at the arm rather than
+  re-patching it wherever the nibble changes would be wrong on all 6,520.
 
 ## 3. The file: yx6 format v4 (superseded by v5, then v6)
 
