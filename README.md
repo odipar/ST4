@@ -186,47 +186,15 @@ corpus.
 dotnet run --project csharp/src/Nt4.Cli -- [-f] [-kK] [-mN] [-lN] input [output.st4]
 ```
 
-## YX6: the YM chiptune player
-
-[yx6/](yx6/README.md) puts the streaming decoders to work. A Java packer turns
-a YM chiptune dump — YM5 or YM6, LHA-archived or not — into twenty-five ST4
-streams: fourteen carrying the YM2149's sound registers, eleven a compiled
-effect script. Each stream is packed as its own container — two for a tune
-that loops, split at the loop frame, because restarting a stream means
-starting a decoder over — with the digidrum samples appended as a table. A
-small 68000 player decodes them through ST4_wrap rings, refilling exactly one
-stream per frame, and plays the effects — digidrums, SID voices, the
-sync-buzzer — on timer channels mapped onto the timers of the ST's MFP
-interrupt chip by a stream in the file. The effect decisions were all made at
-pack time: the packer
-simulates the reference player over the whole timeline, and the player replays
-prepared actions.
-
-A second front end packs RhYMe's own `.YMR` register dumps into that same
-`.yx6` — the two formats are the same idea with different bookkeeping. The
-numbers live downstream: [yx6/README.md](yx6/README.md) packs a tune and
-builds it into an SNDH v2.2 file — the Atari ST's standard music container,
-and the canonical build — or into the `.PRG` that is a thin shell around
-those same bytes. [yx6/FORMAT.md](yx6/FORMAT.md) has the container and what
-a frame costs; [yx6/CONVERSION.md](yx6/CONVERSION.md) what a source loses on
-the way in.
-
-```sh
-mvn -q compile exec:exec@yx6 -Dargs="-f song.ym song.yx6"
-yx6/mksndh.sh song.sndh song.yx6
-yx6/mkprg.sh SONG.PRG song.yx6
-```
-
 ## Tests
 
 ```sh
-mvn test                                  # round-trips, containers, optimizers, both YM front ends, the effect script
+mvn test                                  # round-trips, containers, optimizers
 dotnet test csharp/Nt4.slnx -c Release    # the C# port, same corpora
 python3 68k/test/emu/test_st4.py          # linear decoder vs the Java packer, k = 1, 2, 4
 python3 68k/test/emu/test_st4_wrap.py     # counted wrap, every unit size
 python3 68k/test/emu/test_st4_ring.py     # general ring, both wrap modes, oversized budgets
 python3 68k/test/emu/bench_bits.py        # why the lengths are still Elias gamma
-python3 yx6/test/emu/test_yx6.py          # the YM player, against the chip writes
 ```
 
 The Python rigs need `mvn compile`, [rmac](http://rmac.is-slick.com) and
@@ -235,32 +203,13 @@ the real decoders, decode under emulation as a plain 68000, and check every
 output byte, exact consumption of all four streams, ring guard bands and the
 packed register metadata.
 
-## Experiments and design notes
-
-[doc/experiments/](doc/experiments/README.md) records ideas that were
-measured against the real corpus and declined, with the numbers — so a good
-idea that is not worth its complexity never has to be measured twice, and
-diagnoses of the bugs whose hunts were worth keeping.
-
-The design notes sit beside it: [doc/terminology.md](doc/terminology.md)
-is the vocabulary, [doc/four-timer-channels.md](doc/four-timer-channels.md)
-is how the format came to have four timer channels and to carry its own
-channel-to-timer map, and
-[doc/three-tick-channels.md](doc/three-tick-channels.md) is the design
-space it grew out of.
-
 ## ST1
 
 ST1 — the ZX1 decoders this grew from, and the jx1 packer — is in
 [odipar/ST1](https://github.com/odipar/ST1). ST4 forked from it at
 `odipar/ST1@132aef0`; the shared emulator harness and the MC68000 cycle
 knowledge in the rigs are carried copies of that repository's, which remains
-authoritative for ST1's own timing tables. The one carried copy that is not
-ST1's is [`org.jx1.Decompressor`](src/main/java/org/jx1/README.md), vendored
-from [jx1](https://github.com/odipar/jx1) — the ZX1 decoder the `.ymr` front
-end reads RhYMe's streams with: somebody else's format is worth reading with
-the implementation that already exists rather than a second one written to
-match it.
+authoritative for ST1's own timing tables.
 
 ## License and attribution
 
@@ -271,21 +220,9 @@ through ST4, st4, or nt4.
 
 The ZX1 format and algorithm are by Einar Saukas. The ST4 format and additions
 are © 2026 Robbert van Dalen. Claude (Anthropic's Claude Code) wrote the Java
-and C# tools, the 68000 decoders, the YM player, the tests, and the
-optimization work, under Robbert's direction. ST4_wrap.S is based on
-ST1_wrap.S, which OpenAI Codex wrote for ST1. The YM reader's `-lh5-`
-depacker is ported from Arnaud Carré's ST-Sound library, itself based on
-LZH code by Haruhiko Okumura and Kerwin F. Medina; see [LICENSE](LICENSE).
-
-The YM player's effect semantics stand on the shoulders of the players that
-came before it: Arnaud Carré's ST-Sound defined the de-facto meaning of the
-YM format's effects; gwEm's [maxYMiser](http://www.preromanbritain.com/maxymiser/)
-replay source showed how the original hardware drivers treat SID timers,
-and its mask-and-resume gap model ships as the `-sidresume` option; and
-[ym2149-rs](https://ym2149-rs.org/) is the reference whose SID phase
-semantics — deterministic phase-zero restarts — YX6 plays by default. The
-survey that reconciled them is in
-[doc/experiments/2026-08-20-sid-phase-semantics.md](doc/experiments/2026-08-20-sid-phase-semantics.md).
+and C# tools, the 68000 decoders, the tests, and the optimization work, under
+Robbert's direction. ST4_wrap.S is based on ST1_wrap.S, which OpenAI Codex
+wrote for ST1; see [LICENSE](LICENSE).
 
 Special thanks to Sandor Drieënhuizen and Wietze Spijkerman for their support,
 proofreading, and ideas.
