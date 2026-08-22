@@ -104,15 +104,15 @@ public final class Yx6 {
                     } else if (args[i].startsWith("-drumhz")) {
                         drumHz = parseNumber(args[i].substring(7));
                     } else if (args[i].startsWith("-startframe")) {
-                        startFrame = parseNumber(args[i].substring(11));
+                        startFrame = parseNumber(args[i].substring(11), true);
                     } else if (args[i].startsWith("-endframe")) {
-                        endFrame = parseNumber(args[i].substring(9));
+                        endFrame = parseNumber(args[i].substring(9), true);
                     } else if (args[i].startsWith("-frames")) {
-                        frameCount = parseNumber(args[i].substring(7));
+                        frameCount = parseNumber(args[i].substring(7), true);
                     } else if (args[i].startsWith("-min")) {
-                        startMin = parseNumber(args[i].substring(4));
+                        startMin = parseNumber(args[i].substring(4), true);
                     } else if (args[i].startsWith("-sec")) {
-                        startSec = parseNumber(args[i].substring(4));
+                        startSec = parseNumber(args[i].substring(4), true);
                     } else if (args[i].startsWith("-n")) {
                         ringSize = parseNumber(args[i].substring(2));
                     } else if (args[i].startsWith("-c")) {
@@ -550,7 +550,17 @@ public final class Yx6 {
         return parseNumber(argument, false);
     }
 
-    /** Parses a numeric argument; {@code zeroAllowed} for a loop frame of 0. */
+    /**
+     * Parses a numeric argument, refusing a negative one and, unless
+     * {@code zeroAllowed}, a zero.
+     *
+     * <p>Zero is a real answer for a loop frame and for every part of the trim
+     * window - {@code -min0 -sec13} is how a caller says thirteen seconds in,
+     * and {@code -startframe0} says the same thing again. It is nonsense for a
+     * ring, a chunk, a unit or a rate ceiling, which is why the default stands
+     * for those. A window that comes out empty is caught where the window is
+     * worked out, and says so in those words rather than as a bad parameter.
+     */
     private static int parseNumber(String argument, boolean zeroAllowed) {
         try {
             int value = Integer.parseInt(argument);
