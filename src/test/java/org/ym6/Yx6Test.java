@@ -129,6 +129,33 @@ final class Yx6Test {
     }
 
     @Test
+    void zeroIsARealAnswerForATrimAndAnEmptyWindowSaysSo(@TempDir Path dir)
+            throws Exception {
+        // -min0 -sec13 is how a caller says thirteen seconds in, and it used
+        // to be refused as an invalid value: the parser took zero for every
+        // option to mean nonsense, which it does for a ring or a unit and
+        // does not here.
+        String report = pack(dir, "zero.yx6", "-min0", "-sec2");
+        assertTrue(report.contains("Trimmed to frames 100-"), report);
+
+        // The other half of the fix cannot be asserted from here: a window
+        // that comes out empty is still refused, but the refusal goes through
+        // this CLI's error(), which prints and calls System.exit - so a test
+        // that provoked it would take the JVM with it rather than fail. What
+        // it now says is "Empty trim window: frames 0..0 of 900" instead of
+        // "Invalid parameter value 0", which is the point of moving the check
+        // off the parser, and it is checked by hand.
+        //
+        // The same exit is why a regression here does not read as a failed
+        // assertion: putting -min back on the strict parser makes this test
+        // exit the forked JVM, and surefire reports "The forked VM terminated
+        // without properly saying goodbye" over a BUILD FAILURE. The build
+        // still goes red, which is what matters, but the message names the
+        // symptom rather than the test - so it is written down here for
+        // whoever meets it.
+    }
+
+    @Test
     void theReportCountsTheBytesTheFileActuallyCarries(@TempDir Path dir)
             throws Exception {
         // A rotated split hands the file some frames twice. The tune's length
