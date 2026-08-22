@@ -108,6 +108,11 @@ public final class Yx6Encoder {
      */
     public static Result encode(Tune tune, int ringSize, int chunk,
                                 int loopFrame, boolean progress, int unit) {
+        // The default map is a YM tune's, and only a YM tune's: it puts
+        // channel 2 on Timer B, where a .ymr wants Timer D. A front end whose
+        // format binds its timers passes its own map to the overload below,
+        // and both CLIs do; this shorthand is for callers that have no opinion
+        // - which in practice means tests.
         return encode(tune, ringSize, chunk, loopFrame, progress, unit,
                 Yx6Format.DEFAULT_TIMERS);
     }

@@ -339,6 +339,8 @@ public final class EffectScript {
      * {@code unit} aligns the rotated split the way the encoder needs.
      */
     public static Result compile(Tune tune, int loopFrame, int unit) {
+        // The default map is a YM tune's; a .ymr binds its channels to Timers
+        // A, B and D and passes its own. See Yx6Encoder.encode's shorthand.
         return compile(tune, loopFrame, unit, Yx6Format.DEFAULT_TIMERS);
     }
 

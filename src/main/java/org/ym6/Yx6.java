@@ -320,14 +320,20 @@ public final class Yx6 {
         // drops the loop altogether.
         if (loopFrame < 0 && !playOnce) {
             loopFrame = (int) Math.min(song.loopFrame(), Integer.MAX_VALUE);
-            if (loopFrame >= song.frames()) {
-                System.out.printf("Warning: the YM loop frame is %d in a %d-frame tune; "
-                        + "looping from the start instead%n", loopFrame, song.frames());
-                loopFrame = 0;
-            }
         }
         if (playOnce) {
             loopFrame = -1;
+        }
+        // Wild headers name a loop frame past the end of their own tune, and
+        // so may a hand-typed -lF; the check has to cover both, because the
+        // padding probes the frame BEFORE the split and an out-of-range one
+        // walks off the register array rather than reaching the encoder's own
+        // complaint. It used to sit inside the branch above and catch only
+        // the header's.
+        if (loopFrame >= song.frames()) {
+            System.out.printf("Warning: the loop frame is %d in a %d-frame tune;"
+                    + " looping from the start instead%n", loopFrame, song.frames());
+            loopFrame = 0;
         }
 
         // The boundary: from here on the tune is the engine's, and the dump is
@@ -477,7 +483,11 @@ public final class Yx6 {
             System.out.println("Warning: " + note);
         }
 
-        int raw = tune.frames() * Yx6Format.STREAMS;    // registers and effects alike
+        // The PLAYED length, not the tune's: a rotated split hands the file
+        // some frames twice, and those bytes are in it and were packed. The
+        // line above still counts the tune, because that is the length a
+        // musician has - but a ratio has to be against what was packed.
+        int raw = result.script().frames() * Yx6Format.STREAMS;
         System.out.printf("%d frames at %d Hz (%d:%02d), %d rings of %d bytes, %d per call%n",
                 tune.frames(), tune.frameRate(),
                 tune.frames() / tune.frameRate() / 60,

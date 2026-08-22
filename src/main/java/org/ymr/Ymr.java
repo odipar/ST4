@@ -402,7 +402,11 @@ public final class Ymr {
             System.out.println("Warning: " + note);
         }
 
-        int raw = tune.frames() * Yx6Format.STREAMS;    // registers and script alike
+        // The PLAYED length, not the tune's: a rotated split hands the file
+        // some frames twice, and those bytes are in it and were packed. The
+        // line above still counts the tune, because that is the length a
+        // musician has - but a ratio has to be against what was packed.
+        int raw = result.script().frames() * Yx6Format.STREAMS;    // registers and script alike
         System.out.printf("%d frames at %d Hz (%d:%02d), %d rings of %d bytes,"
                         + " %d per call%n", tune.frames(), tune.frameRate(),
                 tune.frames() / tune.frameRate() / 60,
