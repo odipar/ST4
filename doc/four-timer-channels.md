@@ -2,7 +2,7 @@
 
 > **Shipped, in format v7.** What this note designs is the format as
 > built, and the format has gone on since: v8, v9 and v10 all sit on top
-> of it. See [../yx6/README.md](../yx6/README.md) for the container as it
+> of it. See [../yx6/FORMAT.md](../yx6/FORMAT.md) for the container as it
 > stands. The note stays as the record of the decision, and says what was
 > known when the four channels were settled.
 

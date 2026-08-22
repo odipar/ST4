@@ -204,10 +204,12 @@ prepared actions.
 
 A second front end packs RhYMe's own `.YMR` register dumps into that same
 `.yx6` — the two formats are the same idea with different bookkeeping. The
-numbers live downstream: [yx6/README.md](yx6/README.md) has the stream counts,
-the player's size, what a frame costs, and how to build a tune into an SNDH
-v2.2 file — the Atari ST's standard music container, and the canonical build —
-or into the `.PRG` that is a thin shell around those same bytes.
+numbers live downstream: [yx6/README.md](yx6/README.md) packs a tune and
+builds it into an SNDH v2.2 file — the Atari ST's standard music container,
+and the canonical build — or into the `.PRG` that is a thin shell around
+those same bytes. [yx6/FORMAT.md](yx6/FORMAT.md) has the container and what
+a frame costs; [yx6/CONVERSION.md](yx6/CONVERSION.md) what a source loses on
+the way in.
 
 ```sh
 mvn -q compile exec:exec@yx6 -Dargs="-f song.ym song.yx6"

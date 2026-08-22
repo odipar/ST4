@@ -457,7 +457,7 @@ Beware two words that do not survive the crossing. A .YMR "stream" is a
 change list, not this file's value series, and its "pop" is what advances
 one - see the parenthetical in **Streams** above. The reasoning behind
 each row, and what the conversion costs, is in
-[yx6/README.md](../yx6/README.md) under **What the conversion is**; it is
+[yx6/CONVERSION.md](../yx6/CONVERSION.md) under **What the conversion is**; it is
 not repeated here.
 
 ## The names in the code
