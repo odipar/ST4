@@ -110,7 +110,7 @@ budgets still read true.
 > sections 3 and 4 — are the **v4** shape, where each slot had a control
 > stream and a timer-count stream. They stay because those rules are still
 > the specification the pack-time simulator implements. Section 0 says what
-> the file carries instead, and [README.md](README.md) has the v10 table.
+> the file carries instead, and [FORMAT.md](FORMAT.md) has the v10 table.
 > Where these sections say "the player decides", read "the packer resolved
 > it, and wrote the answer down".
 
@@ -236,7 +236,7 @@ Survey of 516 local YM files plus the research corpus:
   level moved. A packer that read the volume once at the arm rather than
   re-patching it wherever the nibble changes would be wrong on all 6,520.
 
-## 3. The file: yx6 format v4 (superseded; the container is [v10](README.md))
+## 3. The file: yx6 format v4 (superseded; the container is [v10](FORMAT.md))
 
 ```
 header as v3 through the master clock, then:
