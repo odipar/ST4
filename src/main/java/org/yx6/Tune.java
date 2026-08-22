@@ -65,6 +65,18 @@ public record Tune(int frames, int frameRate, long masterClock, int loopFrame,
                    String name, String author, String comment,
                    List<String> notes) {
 
+    /**
+     * The same tune under other semantics. A front end sets the ones its
+     * format decides; where a format decides nothing - no YM file records
+     * which gap model its own player used - a caller may say instead, and
+     * this is how it says so without every layer between carrying a flag.
+     */
+    public Tune under(EffectScript.Semantics semantics) {
+        return new Tune(frames, frameRate, masterClock, loopFrame, registers,
+                codes, counts, shapes, samples, semantics, name, author, comment,
+                notes);
+    }
+
     /** The four kinds of timer stream, as they sit in a code byte's bits
      * 7-6: a TOGGLE STREAM, a PCM STREAM, a WAVE STREAM under its earlier
      * name, and a RETRIGGER STREAM.

@@ -49,7 +49,8 @@ final class EffectScriptTest {
     }
 
     private static EffectScript.Result compileResume(Ym6Reader.Song song, int loop) {
-        return EffectScript.compile(YmEffects.tune(song), loop, 1, true);
+        Tune tune = YmEffects.tune(song);
+        return EffectScript.compile(tune.under(tune.semantics().resuming()), loop, 1);
     }
 
     /** The rig's scene, exactly: SID with a reload, a retune pair, drum
@@ -293,28 +294,19 @@ final class EffectScriptTest {
 
     /** The two dialects of {@link EffectScript.Semantics#channelEndsPcm},
      * with the other two flags pinned so the tests below isolate that one:
-     * neither retriggers a held PCM code, neither forces the mixer, and only
-     * {@link #STOPS} lets a channel's own action end its sample. The YM trio
+     * neither retriggers a held PCM code, neither forces the mixer, both
+     * restart a released toggle stream at phase zero, and only
+     * {@link #STOPS} lets a channel's own action end its sample. The YM set
      * sits on the {@link #RUNS_ON} side of this fork. */
     private static final EffectScript.Semantics RUNS_ON =
-            new EffectScript.Semantics(false, false, false);
+            new EffectScript.Semantics(false, false, false, false);
     private static final EffectScript.Semantics STOPS =
-            new EffectScript.Semantics(false, false, true);
+            new EffectScript.Semantics(false, false, true, false);
 
     private static EffectScript.Result compile(Ym6Reader.Song song,
                                                EffectScript.Semantics semantics) {
-        return EffectScript.compile(under(YmEffects.tune(song), semantics), -1, 1,
-                false, Yx6Format.DEFAULT_TIMERS);
-    }
-
-    /** The same tune under another source format's semantics: the streams a YM
-     * dump produced, told apart only by what the script is allowed to assume
-     * about how they were triggered and stopped. */
-    private static Tune under(Tune tune, EffectScript.Semantics semantics) {
-        return new Tune(tune.frames(), tune.frameRate(), tune.masterClock(),
-                tune.loopFrame(), tune.registers(), tune.codes(), tune.counts(),
-                tune.shapes(), tune.samples(), semantics, tune.name(), tune.author(),
-                tune.comment(), tune.notes());
+        return EffectScript.compile(YmEffects.tune(song).under(semantics), -1, 1,
+                Yx6Format.DEFAULT_TIMERS);
     }
 
     /** A drum on voice A whose code arrives at frame 4 and is gone by frame 8,
