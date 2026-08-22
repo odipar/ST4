@@ -154,6 +154,10 @@ public final class EffectScript {
     public static final int RELEASE_MASK = 1;
     public static final int VERB_START_TOGGLE = 3 << 5;
     public static final int VERB_RETUNE = 4 << 5;
+
+    /** The action byte's voice field addressing no voice. There are three,
+     * so 3 is free, and RETUNE spends it on the live rate change. */
+    public static final int VOICELESS = 3;
     public static final int VERB_START_RETRIGGER = 5 << 5;
     public static final int VERB_START_PCM = 6 << 5;
     public static final int VERB_START_PCM_PREEMPT = 7 << 5;
@@ -212,21 +216,23 @@ public final class EffectScript {
      * work it out again.
      */
     public record Semantics(boolean pcmHoldRetriggers, boolean forceMixerOnPcm,
-                            boolean channelEndsPcm, boolean sidResume) {
+                            boolean channelEndsPcm, boolean sidResume,
+                            boolean retunesLive) {
 
         /** The YM dialect: a held PCM code retriggers its sample every
          * frame, a voice a sample owns is forced off the mixer, nothing ends
          * a sample but its own marker tick, and a released toggle stream
          * comes back at phase zero rather than resuming - the ym2149-rs
          * model, which {@code -sidresume} swaps for maxYMiser's. */
-        public static final Semantics YM = new Semantics(true, true, false, false);
+        public static final Semantics YM = new Semantics(true, true, false, false, false);
 
         /** The same, with the maxYMiser gap model: a release only masks the
          * timer interrupt and a re-arrival resumes the square where it got
          * to. No YM file records which its own player used, so this is the
          * one source semantic a listener picks rather than a format. */
         public Semantics resuming() {
-            return new Semantics(pcmHoldRetriggers, forceMixerOnPcm, channelEndsPcm, true);
+            return new Semantics(pcmHoldRetriggers, forceMixerOnPcm, channelEndsPcm, true,
+                    retunesLive);
         }
     }
 
@@ -528,13 +534,102 @@ public final class EffectScript {
         }
         int voice = ((code >> 4) & 3) - 1;
         int type = code & 0xC0;
-        if (type == KIND_TOGGLE) {         // .toggle
+        if (retunesLive(old, code) && parameterHeld(f, channel, type, voice)) {
+            liveRetune(p, index, channel, code, count);
+        } else if (type == KIND_TOGGLE) {         // .toggle
             toggle(p, f, index, channel, code, count, voice, old);
+        } else if (type == KIND_PCM && retunesPcm(old, code)) {
+            pcmRetune(p, index, channel, code, count, voice);
         } else if (type == KIND_PCM) { // .pcm
             pcm(p, f, index, channel, code, count, voice, old);
         } else {                        // the retrigger arm
             retrigger(p, f, index, channel, code, count, voice);
         }
+    }
+
+    /**
+     * Whether a rate pop can move the prescaler with the timer left running.
+     *
+     * <p>A source whose own player reprograms live - RhYMe writes the
+     * control register and then the data register without stopping - hears
+     * a rate change as a bend, not as a restart. The period already in
+     * flight runs to its own end at the new prescaler and the reload lands
+     * at the next underflow, so a square keeps both its phase and its place
+     * inside the half it is in. Stopping and running the timer instead
+     * truncates that period, and a slide made of many small pops turns into
+     * a rasp of clipped ones.
+     *
+     * <p>A YM file has no such moment to be faithful to: an effect there is
+     * a code sitting in a register, and how a period ends is the player's
+     * business rather than the file's, so {@code retunesLive} is false and
+     * every rate change goes through the ordinary stop-load-run.
+     */
+    private boolean retunesLive(int old, int code) {
+        return tune.semantics().retunesLive()
+                && old != 0 && ((old ^ code) & 0xF8) == 0;  // only bits 2-0
+    }
+
+    /**
+     * Whether the effect's parameter byte stood still across the pop. The
+     * live retune carries no voice - the encoding room it is packed into is
+     * exactly the voice field - so it cannot repatch a volume or a shape
+     * on the way through. When one of those moved on the same frame the
+     * ordinary retune, which does repatch, is the honest encoding and the
+     * truncated period is the price. A PCM stream tracks no register at
+     * all, so it is always free to go live.
+     */
+    private boolean parameterHeld(int f, Channel channel, int type, int voice) {
+        if (type == KIND_TOGGLE) {
+            return parameter(f, voice) == channel.vol;
+        }
+        return type == KIND_PCM || shape(f) == channel.shape;
+    }
+
+    /**
+     * A rate under a running effect, with nothing stopped. RETUNE addressed
+     * to voice 3 - no such voice, and the one free corner of the action
+     * byte - is the player's live path: it never touches the vector, never
+     * touches the parameter, and writes the control and data registers
+     * around a running timer.
+     */
+    private void liveRetune(int p, int index, Channel channel, int code, int count) {
+        channel.tlast = count;
+        channel.prescaler = code & 7;
+        emit(p, index, action(VERB_RETUNE, VOICELESS, code & 7), count);
+    }
+
+    /**
+     * Whether a changed PCM code is a rate moving under a running sample
+     * rather than a fresh trigger.
+     *
+     * <p>A source that has no way to say TRIGGER - a YM file, where an
+     * effect is a code sitting in a register - can only mean one by writing
+     * a code, so every change of one is a trigger and this is never true.
+     * A source that signals its own ({@link Semantics#pcmHoldRetriggers}
+     * false, because the trigger is an event rather than the code's
+     * continued presence) says so in bit 3, and then a code that differs
+     * ONLY in its prescaler is a rate change: the same kind, the same voice,
+     * the same sample, and no new trigger. Reading it as a trigger restarts
+     * a sample the song meant to bend, which is the loudest thing the
+     * conversion used to get wrong.
+     */
+    private boolean retunesPcm(int old, int code) {
+        return !tune.semantics().pcmHoldRetriggers()
+                && old != 0 && (old & 0xC0) == KIND_PCM
+                && ((old ^ code) & 0xF8) == 0;      // only bits 2-0 moved
+    }
+
+    /**
+     * A rate under a running sample. RETUNE leaves the vector alone, so the
+     * PCM tick and the pointer it has walked to both survive; the timer is
+     * stopped, loaded and run again, which truncates the period in flight
+     * and nothing else. The sample plays on from where it was.
+     */
+    private void pcmRetune(int p, int index, Channel channel, int code, int count,
+                           int voice) {
+        channel.tlast = count;
+        channel.prescaler = code & 7;
+        emit(p, index, action(VERB_RETUNE, voice, code & 7), count);
     }
 
     /** .held: a running effect's count reload and parameter tracking -

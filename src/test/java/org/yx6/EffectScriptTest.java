@@ -299,9 +299,9 @@ final class EffectScriptTest {
      * {@link #STOPS} lets a channel's own action end its sample. The YM set
      * sits on the {@link #RUNS_ON} side of this fork. */
     private static final EffectScript.Semantics RUNS_ON =
-            new EffectScript.Semantics(false, false, false, false);
+            new EffectScript.Semantics(false, false, false, false, false);
     private static final EffectScript.Semantics STOPS =
-            new EffectScript.Semantics(false, false, true, false);
+            new EffectScript.Semantics(false, false, true, false, false);
 
     private static EffectScript.Result compile(Ym6Reader.Song song,
                                                EffectScript.Semantics semantics) {

@@ -354,15 +354,18 @@ YH_INTRO_TABLE  equ     34              ; one offset per stream: the frames
 YH_LOOP_TABLE   equ     YH_INTRO_TABLE+(YX6_STREAMS*4)
 
 YX6_MAGIC       equ     $59583621       ; 'YX6!'
-YX6_VERSION     equ     9               ; 9: a retrigger stream's shape is
-                                        ; carried in the script rather than
-                                        ; looked for. 8 chose where to look,
-                                        ; 7 was four channels and the map
+YX6_VERSION     equ     10              ; 10: a PCM stream may loop, and a
+                                        ; rate may reprogram a running timer.
+                                        ; 9 carried the retrigger shape, 8
+                                        ; chose where to look for it, 7 was
+                                        ; four channels and the map
 YX6_FLAG_LOOPS  equ     1               ; header flag: the tune loops
 YX6_FLAG_CHAN   equ     2               ; and one per timer channel, from bit
                                         ; 1 up: set when the tune uses it,
                                         ; which is when a timer is claimed
 YX6_PSG         equ     $FFFF8800       ; select/read at +0, write at +2
+YX6_ONE_SHOT    equ     $FFFF           ; a sample table loop point meaning
+                                        ; the stream stops rather than loops
 YX6_NO_ENV      equ     $FF             ; R13 value meaning "leave it alone"
 YX6_PORTS       equ     $C0             ; R7 bits the ST needs as outputs
 YX6_MIXER       equ     7
@@ -537,7 +540,7 @@ YX6_init:
         move.l  YH_SAMPLES(a0),d1
         beq.s   .no_drums
         movea.l a0,a2
-        adda.l  d1,a2                   ; the entries: offset.l, length.w
+        adda.l  d1,a2                   ; entries: offset.l, length.w, loop.w
         lea     yx6_samples(pc),a1
         move.w  YH_SAMPLECOUNT(a0),d0
         subq.w  #1,d0
@@ -545,8 +548,18 @@ YX6_init:
 .drum_addr:
         move.l  (a2),d1
         add.l   a0,d1                   ; file base + entry offset
-        move.l  d1,(a1)+
-        addq.l  #6,a2
+        move.l  d1,(a1)+                ; the sample's own address, then where
+        move.w  6(a2),d2                ; a stream that runs out goes back to -
+        cmp.w   #YX6_ONE_SHOT,d2        ; resolved here so the tick that meets
+        beq.s   .one_shot               ; the end has one long to load and no
+        ext.l   d2                      ; arithmetic to do
+        add.l   d1,d2
+        move.l  d2,(a1)+
+        bra.s   .next_drum
+.one_shot:
+        clr.l   (a1)+                   ; zero: the tick stops instead
+.next_drum:
+        addq.l  #8,a2
         dbra    d0,.drum_addr
 .no_drums:
 
@@ -1110,7 +1123,8 @@ yx6_desc_3:
 ; sample addresses (YX6_init resolves the file's table once, so a trigger
 ; is one indexed load) and the three parameter-ring offsets (8+voice)*N.
 yx6_samples:
-        ds.l    32
+        ds.l    64                      ; a pair per sample: its address, and
+                                        ; the address it loops back to or 0
 yx6_parmoff:
         ds.l    3
 
@@ -1193,7 +1207,25 @@ yx6_pcm\{chan}:
         .endif
         move.b  #\eoi,\eoir.w
         rte
-.ended\~:
+.ended\~:                               ; a looping stream goes back instead
+        move.l  a0,-(sp)                ; of stopping. Everything here is off
+        lea     yx6_pcm\{chan}+ISR_PCM_PTR(pc),a0   ; the SMC operand, and
+        tst.l   ISR_PCM_LOOP-ISR_PCM_PTR(a0)        ; the loop pointer beside
+        beq.s   .stop\~                              ; it: this player is
+        move.l  ISR_PCM_LOOP-ISR_PCM_PTR(a0),(a0)   ; position independent,
+        .if YX6_PERF                    ; so neither may be named absolutely
+        lea     yx6_perf_acc(pc),a0
+        add.w   #23,(a0)
+        .endif
+        movea.l (sp)+,a0
+        .if YX6_PERF
+        move.w  (sp)+,$FFFF8240.w
+        .endif
+        bra.s   yx6_park\{chan}          ; the end tick has already written the
+                                        ; marker as a level - one sample of
+                                        ; silence at the seam, and no other
+.stop\~:
+        movea.l (sp)+,a0
         move.b  #$D,$FFFF8802.w         ; middle volume: no click
         andi.b  #\keep,\tctrl.w         ; the sample ran out: stop the timer -
         .if YX6_PERF                    ; the script already knew this frame
@@ -1206,6 +1238,12 @@ yx6_pcm\{chan}:
 yx6_park\{chan}:
         move.b  #\eoi,\eoir.w
         rte
+yx6_pcmloop\{chan}:
+        dc.l    0                       ; where this timer's PCM stream loops
+                                        ; back to, or 0 for one that stops.
+                                        ; Inside the block, so the trigger
+                                        ; reaches it at a fixed offset; past
+                                        ; the rte, so nothing falls into it
 
 ; The toggle tick: each tick writes one of two values - the volume or
 ; silence - and installs the other half as the next tick, one word into the
@@ -1289,6 +1327,7 @@ yx6_perf_acc:
 ; CH_ISR.
 ISR_PCM_SEL    equ     PERF_PAD+3
 ISR_PCM_PTR    equ     PERF_PAD+8
+ISR_PCM_LOOP   equ     yx6_pcmloop_a-yx6_pcm_a
 ISR_TOGGLE_ON       equ     yx6_toggle_a_on-yx6_pcm_a
 ISR_TOGGLE_ON_SEL   equ     ISR_TOGGLE_ON+PERF_PAD+2
 ISR_TOGGLE_VOL     equ     ISR_TOGGLE_ON+PERF_PAD+4
@@ -1497,16 +1536,48 @@ yx6_toggle_start:                          ; a fresh square restarts at phase
         move.b  d1,ISR_TOGGLE_VOL(a2)
         lea     ISR_TOGGLE_ON(a2),a1
         move.l  a1,d4
-        bra.s   yx6_program
+        bra     yx6_program
 
 yx6_retune:                         ; the vector is NEVER touched: the
-        bsr     yx6_voice               ; square's phase lives through every
-        move.b  (a1),d1                 ; retune, and through a resume after
-        and.w   #15,d1                  ; a PCM stream took the voice
+        move.b  d0,d1                   ; square's phase lives through every
+        and.b   #$18,d1                 ; retune, and through a resume after
+        cmp.b   #$18,d1                 ; a PCM stream took the voice.
+        beq     yx6_live                ; voice 3 is no voice: see below
+        bsr     yx6_voice
+        move.b  (a1),d1
+        and.w   #15,d1
         movea.l CH_ISR(a5),a2
         move.b  d1,ISR_TOGGLE_VOL(a2)
         moveq   #0,d4
-        bra.s   yx6_program
+        bra     yx6_program
+
+; v10: the prescaler moves under a RUNNING timer. Nothing is stopped, so the
+; period already in flight runs to its own end and the reload lands at the
+; next underflow: a square keeps its phase AND its place inside the half it
+; is in, which is what a source that reprograms live sounds like. Addressed
+; to no voice, so no parameter is repatched - the packer only picks this
+; encoding on a frame where the parameter byte stood still.
+yx6_live:
+        movea.l a4,a1
+        adda.l  d3,a1
+        move.b  (a1),d2                 ; the count
+        and.b   #7,d0
+        move.w  CH_SHIFT(a5),d1         ; Timer C's nibble is the high one
+        lsl.b   d1,d0
+        movea.w CH_CTRL(a5),a1
+        move.w  sr,-(sp)
+        ori.w   #$0700,sr
+        move.w  CH_KEEP(a5),d1
+        and.b   (a1),d1                 ; our nibble out, the other's kept
+        or.b    d0,d1
+        move.b  d1,(a1)                 ; ONE write: never a stopped timer
+        movea.w CH_DATA(a5),a2
+        move.b  d2,(a2)
+        move.w  (sp)+,sr
+        movea.w CH_IER(a5),a1           ; and enabled, whatever a mask left
+        move.w  CH_IERBIT(a5),d1
+        bset    d1,(a1)
+        rts
 
 yx6_retrigger_start:
         bsr     yx6_shape
@@ -1514,7 +1585,7 @@ yx6_retrigger_start:
         move.b  d1,ISR_RETRIGGER_SHAPE(a2)
         lea     ISR_RETRIGGER(a2),a1
         move.l  a1,d4
-        bra.s   yx6_program
+        bra     yx6_program
 
 yx6_pcm_preempt:                        ; arbitration, compiled: the losers'
         movea.l a0,a1                   ; timers stop FIRST, then the sample
@@ -1537,11 +1608,13 @@ yx6_pcm:
         bsr     yx6_voice
         moveq   #0,d1
         move.b  (a1),d1                 ; the sample number, 0..31
-        lsl.w   #2,d1
-        lea     yx6_samples(pc),a2
-        move.l  0(a2,d1.w),d2           ; its absolute address, from init
-        movea.l CH_ISR(a5),a2
-        move.l  d2,ISR_PCM_PTR(a2)
+        lsl.w   #3,d1                   ; a PAIR each since v10: the sample's
+        movea.l CH_ISR(a5),a2           ; address, then where it loops back to
+        lea     yx6_samples(pc),a1
+        move.l  0(a1,d1.w),d2           ; both resolved at init, so a trigger
+        move.l  d2,ISR_PCM_PTR(a2)      ; is two indexed loads and no test
+        move.l  4(a1,d1.w),d2
+        move.l  d2,ISR_PCM_LOOP(a2)
         move.w  d5,d1
         lsr.w   #2,d1
         addq.w  #8,d1

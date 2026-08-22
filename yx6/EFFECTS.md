@@ -85,6 +85,21 @@ mid-frame at the marker. A loop whose
 wrap state differs from its first arrival has its split rotated until the
 two match, so action streams replay correctly every time round.
 
+Two later revisions widened what the script can say, both for the .ymr front
+end and both available to any source that tells the compiler its semantics.
+Format **v9** carries the shape a retrigger stream restarts in X, so the
+player looks for it nowhere (section 2 below has the corpus this settles).
+Format **v10** adds a loop word to each sample table entry — the PCM tick
+that meets the end marker moves the loop address into its own operand
+instead of stopping the timer, `$FFFF` meaning one that stops — and gives
+RETUNE a live form: the action byte's voice field holds three voices in two
+bits, so 3 names none, and RETUNE addressed to it writes the control
+register and then the data register with the timer left running. That is
+what RhYMe's own player does for a rate pop, so a prescaler slide keeps both
+the square's phase and its place inside the period in flight. Naming no
+voice, it repatches no parameter, so the compiler emits it only where the
+parameter stood still and falls back to the ordinary retune where it moved.
+
 Sections 1–4 remain the semantic truth — they are now the specification of
 the pack-time simulator rather than of a run-time interpreter — and their
 frame contract is what `EffectScriptTest`, the rig's directed effect test

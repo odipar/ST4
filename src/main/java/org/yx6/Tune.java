@@ -50,7 +50,10 @@ import org.jspecify.annotations.Nullable;
  * the value is simply carried, the way every other operand is.
  *
  * <p>{@code samples} are the PCM streams' sources, PSG-ready volume values
- * 0..15 one per byte. {@code semantics} is what the source dialect implies
+ * 0..15 one per byte, and {@code sampleLoops} says for each of them where a
+ * PCM stream goes back to when it runs out - an offset into that sample, or
+ * {@link Yx6Format#SAMPLE_ONE_SHOT} for one that stops. The two are one
+ * thing in two arrays, which the compact constructor is what keeps true. {@code semantics} is what the source dialect implies
  * about triggering and stopping and cannot be read out of the codes - see
  * {@link EffectScript.Semantics}. {@code loopFrame} is the SOURCE's loop
  * frame, which is a default and not a decision: a CLI may override it, drop
@@ -67,7 +70,8 @@ import org.jspecify.annotations.Nullable;
  */
 public record Tune(int frames, int frameRate, long masterClock, int loopFrame,
                    byte[][] registers, byte[][] codes, byte[][] counts,
-                   byte[] shapes, byte[][] samples, EffectScript.Semantics semantics,
+                   byte[] shapes, byte[][] samples, int[] sampleLoops,
+                   EffectScript.Semantics semantics,
                    String name, String author, String comment,
                    List<String> notes) {
 
@@ -79,8 +83,8 @@ public record Tune(int frames, int frameRate, long masterClock, int loopFrame,
      */
     public Tune under(EffectScript.Semantics semantics) {
         return new Tune(frames, frameRate, masterClock, loopFrame, registers,
-                codes, counts, shapes, samples, semantics, name, author, comment,
-                notes);
+                codes, counts, shapes, samples, sampleLoops, semantics, name,
+                author, comment, notes);
     }
 
     /** The four kinds of timer stream, as they sit in a code byte's bits
@@ -152,6 +156,19 @@ public record Tune(int frames, int frameRate, long masterClock, int loopFrame,
                 }
             }
         }
+        if (sampleLoops.length != samples.length) {
+            throw new IllegalArgumentException("a tune carries one loop point per"
+                    + " sample, not " + sampleLoops.length + " for " + samples.length);
+        }
+        for (int sample = 0; sample < samples.length; sample++) {
+            int loop = sampleLoops[sample];
+            if (loop != Yx6Format.SAMPLE_ONE_SHOT && loop >= samples[sample].length) {
+                throw new IllegalArgumentException("sample " + sample + " loops from "
+                        + loop + ", which is past its " + samples[sample].length
+                        + " bytes; a sample that does not loop says "
+                        + Yx6Format.SAMPLE_ONE_SHOT);
+            }
+        }
         notes = List.copyOf(notes);
     }
 
@@ -199,7 +216,7 @@ public record Tune(int frames, int frameRate, long masterClock, int loopFrame,
                 split > 0 ? split + splitPad : tune.loopFrame,
                 padding.stretch(tune.registers), padding.stretch(tune.codes),
                 padding.stretch(tune.counts), padding.stretch(tune.shapes),
-                tune.samples, tune.semantics,
+                tune.samples, tune.sampleLoops, tune.semantics,
                 tune.name, tune.author, tune.comment, tune.notes);
     }
 

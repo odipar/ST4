@@ -530,7 +530,7 @@ def run_effects(super_host: bool = False, perf: bool = False) -> str:
             position = int.from_bytes(player.uc.mem_read(
                 drum_d + player.symbols['ISR_PCM_PTR'], 4), 'big')
             drum = int.from_bytes(player.uc.mem_read(
-                player.file + Yx6_DRUM_TABLE(player) + 6, 4), 'big')
+                player.file + Yx6_DRUM_TABLE(player) + 8, 4), 'big')
             if position != player.file + drum:
                 return 'effects: the trigger points at the wrong sample'
         elif frame == 31:                           # the same code again: a
@@ -960,7 +960,8 @@ def invoke_isr(player, address):
 SHAPE_WIDTHS = [0, 2, 2, 2, 1, 1, 1, 1, 1, 2, 1, 1, 2, 1, 1, 2, 1, 1, 2, 1]
 
 
-def ymr_image(frames: int, pops: list, streams: dict, loop: int = 0) -> bytes:
+def ymr_image(frames: int, pops: list, streams: dict, loop: int = 0,
+              samples: list = ()) -> bytes:
     """A .YMR v1.3 register dump with every stream stored uncompressed.
 
     The .ymr front end is the only source that sets the shape-from-R13 flag,
@@ -969,7 +970,9 @@ def ymr_image(frames: int, pops: list, streams: dict, loop: int = 0) -> bytes:
     "stored uncompressed", which is what lets this skip a ZX1 packer.
 
     pops[frame] is the stream indices that frame pops, ascending, and streams
-    maps a stream index to its entries laid end to end.
+    maps a stream index to its entries laid end to end. samples is a list of
+    (levels, looped, loop_start) blocks, which sit between the map and the
+    streams.
     """
     command = bytearray()
     for frame in range(frames):
@@ -980,10 +983,15 @@ def ymr_image(frames: int, pops: list, streams: dict, loop: int = 0) -> bytes:
     header = bytearray(b'YMR!')
     header += (0x0103).to_bytes(2, 'big') + frames.to_bytes(4, 'big')
     header += loop.to_bytes(4, 'big') + (50).to_bytes(2, 'big')
-    header += (0).to_bytes(2, 'big') + (2000000).to_bytes(4, 'big')
+    header += len(samples).to_bytes(2, 'big') + (2000000).to_bytes(4, 'big')
     header += (20).to_bytes(2, 'big') + (0).to_bytes(4, 'big')
 
-    at = 268                                        # the map ends here; no samples
+    blocks = bytearray()
+    for levels, looped, start in samples:
+        blocks += len(levels).to_bytes(4, 'big') + bytes(levels)
+        blocks += bytes([1 if looped else 0]) + start.to_bytes(2, 'big') + b'\0'
+
+    at = 268 + len(blocks)                          # the map, then the blocks
     body = bytearray()
     for stream in range(20):
         data = present.get(stream)
@@ -995,7 +1003,7 @@ def ymr_image(frames: int, pops: list, streams: dict, loop: int = 0) -> bytes:
         body += data
         at += len(data)
     assert len(header) == 268, len(header)
-    return bytes(header + body)
+    return bytes(header + blocks + body)
 
 
 def pack_ymr(image: bytes, ring: int = 960, chunk: int = 24) -> bytes:
@@ -1109,6 +1117,117 @@ def run_shape_source() -> str:
     return ''
 
 
+def run_sample_loop(perf: bool = False) -> str:
+    """A looped sample, which since v10 the player loops rather than stopping.
+
+    RhYMe holds a drum loop under a whole pattern. Before v10 a yx6 PCM
+    stream only ever walked forward, so the loop region had to be written out
+    again and again until some ceiling stopped it, and a song that held it
+    longer heard it die. Now the file carries the point the sample comes back
+    to and the tick does the coming back, so the proof is the pointer: play
+    the block out, and the tick after the marker must be reading the loop
+    start rather than a stopped timer.
+    """
+    pops = [[] for _ in range(8)]
+    pops[0] = [5, 7, 14, 15, 16]
+    image = ymr_image(8, pops, {
+        5: bytes([0x38]),                           # mixer
+        7: bytes([0x0C]),                           # voice B's level
+        14: bytes([2]),                             # Timer B runs a Sample
+        15: bytes([6, 200]),                        # prescaler 6, count 200
+        16: bytes([0]),                             # sample 0
+    }, samples=[(bytes([1, 2, 3, 4]), True, 1)])    # four levels, back to [1]
+    player = Player(pack_ymr(image), workspace_size(960), perf=perf)
+    if player.init() != 0:
+        return 'sample loop: YX6_init rejected the tune'
+    player.frame()                                  # frame 0 starts the sample
+
+    table = Yx6_DRUM_TABLE(player)
+    offset = int.from_bytes(player.uc.mem_read(player.file + table, 4), 'big')
+    loop = int.from_bytes(player.uc.mem_read(player.file + table + 6, 2), 'big')
+    if loop != 1:
+        return f'sample loop: the file stores loop point {loop}, want 1'
+
+    code = CODE + player.symbols['yx6_pcm_b']
+    register = 9                                    # voice B's volume, which
+    for tick, value in enumerate((1, 2, 3, 4)):     # the tick selects itself
+        pairs = invoke_isr(player, code)
+        if pairs != [(register, value)]:
+            return f'sample loop: tick {tick} wrote {pairs}, want level {value}'
+
+    # The marker tick. It has already written the marker as a level - one
+    # sample of silence - but it must NOT stop the timer, and must leave the
+    # pointer on the loop start rather than past the end.
+    at = len(player.mfp)
+    pairs = invoke_isr(player, code)
+    if pairs != [(register, 0x80)]:
+        return f'sample loop: the marker tick wrote {pairs}, want the marker alone'
+    TBCR = 0xFFFFFA1B                               # every tick ends with an
+    stopped = [w for w in player.mfp[at:] if w[0] == TBCR]   # EOI; only a stop
+    if stopped:                                     # touches the control
+        return (f'sample loop: the marker tick programmed {stopped} - a looping'
+                f' stream stops nothing')
+    # The tick is reached, never returned from - this Unicorn build cannot
+    # run an rte - so a stack left unbalanced is invisible unless it is read
+    # off directly. The loop leaves the tick by a different door than the
+    # stop does, and the PERF build has a colour band stacked at that point.
+    left = player.uc.reg_read(UC_M68K_REG_A7)
+    if left != STACK_TOP - 512:
+        return (f'sample loop: the marker tick reached its rte with the stack '
+                f'{STACK_TOP - 512 - left:+d} bytes off')
+    at = int.from_bytes(player.uc.mem_read(
+        code + player.symbols['ISR_PCM_PTR'], 4), 'big')
+    if at != player.file + offset + 1:
+        return (f'sample loop: after the marker the tick reads {at:#x}, want '
+                f'{player.file + offset + 1:#x} - the loop start')
+
+    for tick, value in enumerate((2, 3, 4)):        # round it goes again
+        pairs = invoke_isr(player, code)
+        if pairs != [(register, value)]:
+            return f'sample loop: pass 2 tick {tick} wrote {pairs}, want {value}'
+    return ''
+
+
+def run_live_retune() -> str:
+    """A rate pop under a running effect, which v10 does without stopping.
+
+    RhYMe reprograms a RUNNING timer - control register, then data - so a
+    rate slide bends what is playing instead of restarting it. The verb is
+    RETUNE addressed to voice 3, no such voice being the one free corner of
+    the action byte. What makes it different is only visible in the MFP
+    traffic: the ordinary retune stops the timer and runs it again, and this
+    must never write a zero into the timer's nibble.
+    """
+    pops = [[] for _ in range(6)]
+    pops[0] = [5, 7, 14, 15]
+    pops[3] = [15]                                  # the rate alone moves
+    image = ymr_image(6, pops, {
+        5: bytes([0x38]),
+        7: bytes([0x0C]),                           # voice B's level, unmoved
+        14: bytes([1]),                             # Timer B runs a PWM
+        15: bytes([6, 200, 5, 200]),                # prescaler 6 -> 5
+    })
+    player = Player(pack_ymr(image), workspace_size(960))
+    if player.init() != 0:
+        return 'live retune: YX6_init rejected the tune'
+    for frame in range(3):
+        player.frame()
+    player.mfp.clear()
+    player.frame()                                  # frame 3: the rate pop
+    ctrl, data = 0xFFFFFA1B, 0xFFFFFA21             # Timer B's control, data
+    written = [w for w in player.mfp if w[0] in (ctrl, data)]
+    if len(written) != 2 or written[0][0] != ctrl or written[1][0] != data:
+        return (f'live retune: frame 3 touched the MFP as {written}, want the '
+                f'control register then the data register, once each')
+    if written[0][1] & 7 == 0:
+        return ('live retune: the control write stopped the timer - the whole '
+                'point is that it never stops')
+    if written[0][1] & 7 != 5 or written[1][1] != 200:
+        return (f'live retune: frame 3 programmed prescaler {written[0][1] & 7}'
+                f' count {written[1][1]}, want 5 and 200')
+    return ''
+
+
 def main() -> int:
     # frames, ring, chunk, label, loop frame (None = play once), passes, unit
     shapes = [
@@ -1163,6 +1282,25 @@ def main() -> int:
         failures += 1
     else:
         print('OK   the retrigger shape      (both sources, off the patched tick)')
+
+    for perf in (False, True):
+        problem = run_sample_loop(perf)
+        # The PERF build stacks a colour band on the way in, so a loop that
+        # leaves by a different door than the stop does has to put it back.
+        if problem:
+            print(f'FAIL {"PERF build: " if perf else ""}{problem}')
+            failures += 1
+        else:
+            build = ', PERF build' if perf else ''
+            print(f'OK   the sample loop{build:9s}    '
+                  f'(v10: back to the loop, not stopped)')
+
+    problem = run_live_retune()
+    if problem:
+        print(f'FAIL {problem}')
+        failures += 1
+    else:
+        print('OK   the live retune          (v10: the timer is never stopped)')
 
     for super_host, perf in ((False, False), (True, False), (False, True)):
         problem = run_effects(super_host, perf)
