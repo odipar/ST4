@@ -313,6 +313,11 @@ public final class Yx6Encoder {
                 putLong(file, sampleTable + Yx6Format.SAMPLE_ENTRY_SIZE * i, sample);
                 putWord(file, sampleTable + Yx6Format.SAMPLE_ENTRY_SIZE * i + 4,
                         samples[i].length);
+                // Where a PCM stream goes back to when it runs out, or the
+                // one-shot marker. An offset rather than an address: the
+                // player resolves both against the same base at init.
+                putWord(file, sampleTable + Yx6Format.SAMPLE_ENTRY_SIZE * i + 6,
+                        tune.sampleLoops()[i]);
                 System.arraycopy(samples[i], 0, file, sample, samples[i].length);
                 sample += samples[i].length;
                 file[sample++] = (byte) Yx6Format.SAMPLE_END_MARK;

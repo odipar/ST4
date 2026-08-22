@@ -311,22 +311,38 @@ final class YmrEffectsTest {
     }
 
     @Test
-    void aLoopedSampleIsUnrolledBecauseAPcmStreamWalksForwardAndStops() {
+    void aLoopedSampleIsCarriedWholeWithThePointItComesBackTo() {
         byte[] image = new Ymr()
                 .frame(VOLUME_A)
                 .stream(VOLUME_A, 0x0F)
                 .sample(new byte[] {1, 2, 3, 4, 5, 6}, true, 2)
                 .build();
 
-        Tune tune =
-                YmrEffects.convert(YmrReader.read(image), "test", 20);
+        Tune tune = YmrEffects.convert(YmrReader.read(image), "test");
 
-        // The loop region is [2, 6), four bytes, and three more copies is as
-        // many as fit under twenty.
-        assertArrayEquals(
-                new byte[] {1, 2, 3, 4, 5, 6, 3, 4, 5, 6, 3, 4, 5, 6, 3, 4, 5, 6},
-                tune.samples()[0]);
-        assertTrue(note(tune, "written out 3 more times"), tune.notes().toString());
+        // Since v10 the file says where a sample comes back to and the player
+        // does the coming back, so the sample is the six bytes the .ymr
+        // stores and the loop point rides beside it. Before that a loop had
+        // to be written out again and again until some ceiling stopped it,
+        // which made every long loop both wrong and enormous.
+        assertArrayEquals(new byte[] {1, 2, 3, 4, 5, 6}, tune.samples()[0]);
+        assertEquals(2, tune.sampleLoops()[0]);
+    }
+
+    @Test
+    void aSampleThatEndsIsMarkedAsOneShotRatherThanLoopingToZero() {
+        byte[] image = new Ymr()
+                .frame(VOLUME_A)
+                .stream(VOLUME_A, 0x0F)
+                .sample(new byte[] {1, 2, 3, 4}, false, 0)
+                .build();
+
+        Tune tune = YmrEffects.convert(YmrReader.read(image), "test");
+
+        // A loop point of zero is a real answer - a sample that repeats from
+        // its first byte - so "does not loop" needs a value no length can
+        // reach rather than the falsy one.
+        assertEquals(Yx6Format.SAMPLE_ONE_SHOT, tune.sampleLoops()[0]);
     }
 
     @Test

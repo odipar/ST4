@@ -184,7 +184,7 @@ public final class YmEffects {
                 (int) Math.min(song.loopFrame(), Integer.MAX_VALUE),
                 java.util.Arrays.copyOf(song.registers(), Yx6Format.REGISTER_STREAMS),
                 fx.codes(), fx.counts(), shapes(song, fx), fx.samples(),
-                EffectScript.Semantics.YM,
+                oneShot(fx.samples().length), EffectScript.Semantics.YM,
                 song.name(), song.author(), song.comment(), fx.notes());
     }
 
@@ -209,6 +209,14 @@ public final class YmEffects {
      * {@code jamblv1} R13 and the nibble disagree on hundreds of frames, and
      * the nibble is what the reference player restarts.
      */
+    /** A digidrum is a hit: YM has no way to say a sample loops, and the
+     * reference player's own drum tick stops at the end. */
+    private static int[] oneShot(int samples) {
+        int[] loops = new int[samples];
+        java.util.Arrays.fill(loops, Yx6Format.SAMPLE_ONE_SHOT);
+        return loops;
+    }
+
     private static byte[] shapes(Ym6Reader.Song song, Extraction fx) {
         byte[] shapes = new byte[song.frames()];
         int shape = 0;                      // ST-Sound's reset leaves it here

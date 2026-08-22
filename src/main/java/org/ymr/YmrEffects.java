@@ -96,19 +96,16 @@ import org.yx6.Yx6Format;
  *
  * <h2>What a .YMR asks for and a .yx6 cannot give</h2>
  *
- * <p>Three things are converted rather than carried, and each leaves a note.
- * The format allows 65535 samples and a yx6 sample number is five bits, so
+ * <p>One thing is converted rather than carried, and it leaves a note. The
+ * format allows 65535 samples and a yx6 sample number is five bits, so
  * everything past {@link Yx6Format#MAX_SAMPLES} is dropped and a trigger of a
- * dropped one is reported. A yx6 PCM tick has no loop - it walks forward and
- * stops on an end marker - so a looped sample's loop region is written out
- * again and again until the sample reaches {@link #DEFAULT_UNROLL} bytes, and
- * a song that holds the loop longer than that hears it stop. And a rate pop
- * that moves a running sample's prescaler is a live reprogram in RhYMe but a
- * new code byte here, which the script can only read as a new trigger, so the
- * sample restarts at that frame.
+ * dropped one is reported.
  *
- * <p>That last one is the visible face of a limit in the .yx6 ABI rather than
- * anything this converter chose, and the limit is narrower than it first looks.
+ * <p>Two more used to be losses and are now carried. A looped sample rides
+ * with the point it comes back to and the player does the coming back, and a
+ * rate pop that moves a running effect's prescaler compiles to the live
+ * retune - the fifth {@link EffectScript.Semantics} flag - which reprograms
+ * the timer without stopping it.
  * RhYMe reprograms a RUNNING timer: control register, then data register, the
  * timer never stopped, so the effect keeps its place and only its rate moves.
  * Half of that a yx6 verb does do. A .YMR rate entry is a prescaler and a
@@ -181,21 +178,15 @@ public final class YmrEffects {
      * ends on that frame, so the script must not leave it running to its marker.
      */
     public static final EffectScript.Semantics SEMANTICS =
-            new EffectScript.Semantics(false, false, true, false);
+            new EffectScript.Semantics(false, false, true, false, true);
 
     /** Code bit 3: flipped on every sample trigger, so that two pops of one
      * index at one rate are two different code bytes and the script starts the
      * sample twice. See this class's javadoc for why the bit is free. */
     public static final int TRIGGER = 0x08;
 
-    /** How far a looped sample is unrolled before it is left to stop. Eight
-     * kilobytes is about ten seconds of a 800 Hz drum loop and about a fifth
-     * of a second of a 40 kHz one; past that the file grows faster than the
-     * loop is likely to be held. */
-    public static final int DEFAULT_UNROLL = 8192;
-
-    /** A yx6 sample table entry stores its length in a word, so no sample -
-     * unrolled or not - may pass this. */
+    /** A yx6 sample table entry stores its length in a word, so no sample
+     * may pass this. */
     private static final int MAX_SAMPLE_BYTES = 65535;
 
     /** Bit 4 of a volume register: the voice takes its level from the envelope
@@ -219,12 +210,11 @@ public final class YmrEffects {
 
     private final YmrReader.Song source;
     private final String name;
-    private final int unrollLimit;
     private final int frames;
     private final byte[][] registers;
     private final byte[][] codes = new byte[CHANNELS][];
     private final byte[][] counts = new byte[CHANNELS][];
-    private final byte[][] samples;
+    private final Prepared[] samples;
     private final List<String> notes = new ArrayList<>();
 
     // What each channel had to have changed, counted rather than reported a
@@ -235,32 +225,25 @@ public final class YmrEffects {
     private final int[] stoppedTimer = new int[CHANNELS];
     private final int[] missingSample = new int[CHANNELS];
     private final int[] cappedSample = new int[CHANNELS];
-    private final int[] rateRestart = new int[CHANNELS];
     private final boolean[] triggersAtLoop = new boolean[CHANNELS];
 
-    private YmrEffects(YmrReader.Song source, String name, int unrollLimit) {
+    private YmrEffects(YmrReader.Song source, String name) {
         this.source = source;
         this.name = name;
-        this.unrollLimit = unrollLimit;
         this.frames = source.frameCount();
         this.registers = new byte[YmrReader.REGISTER_COUNT][];
         this.samples = prepareSamples();
     }
 
-    /** Converts a song, unrolling looped samples to {@link #DEFAULT_UNROLL}. */
-    public static Tune convert(YmrReader.Song song, String name) {
-        return convert(song, name, DEFAULT_UNROLL);
-    }
-
     /**
-     * As above, with the ceiling a looped sample is unrolled to.
+     * Converts a song.
      *
      * @param name what to call the song. A .YMR carries no metadata at all -
      *             no title, no author, no comment - so the caller's file stem
      *             is the only name there is, and the other two come out empty.
      */
-    public static Tune convert(YmrReader.Song song, String name, int unrollLimit) {
-        return new YmrEffects(song, name, unrollLimit).run();
+    public static Tune convert(YmrReader.Song song, String name) {
+        return new YmrEffects(song, name).run();
     }
 
     private Tune run() {
@@ -277,7 +260,8 @@ public final class YmrEffects {
         // come out empty and the caller's file stem is the only name there is.
         return new Tune(frames, source.frameRate(), source.ymClock(),
                 source.loops() ? source.loopFrame() : frames,
-                registers, codes, counts, shapes(), samples, SEMANTICS,
+                registers, codes, counts, shapes(), levelsOf(samples),
+                loopsOf(samples), SEMANTICS,
                 name, "", "", notes);
     }
 
@@ -298,6 +282,22 @@ public final class YmrEffects {
      * than in a player that would otherwise have to hold one assumption per
      * format it might be fed.
      */
+    private static byte[][] levelsOf(Prepared[] prepared) {
+        byte[][] out = new byte[prepared.length][];
+        for (int index = 0; index < prepared.length; index++) {
+            out[index] = prepared[index].data();
+        }
+        return out;
+    }
+
+    private static int[] loopsOf(Prepared[] prepared) {
+        int[] out = new int[prepared.length];
+        for (int index = 0; index < prepared.length; index++) {
+            out[index] = prepared[index].loopStart();
+        }
+        return out;
+    }
+
     private byte[] shapes() {
         byte[] shapes = new byte[frames];
         int shape = SHAPE_BEFORE_ANY_POP;
@@ -314,7 +314,7 @@ public final class YmrEffects {
     // ------------------------------------------------------------- the samples
 
     /**
-     * The sample blocks as the file stores them, capped and unrolled.
+     * The sample blocks as the file stores them, capped, with where they loop.
      *
      * <p>Nothing is converted on the way: RhYMe's exporter has already reduced
      * every sample to the 4-bit levels the PSG's volume register takes, which
@@ -323,7 +323,7 @@ public final class YmrEffects {
      * that needs no work at all. A YM digidrum arrives 8-bit and its own
      * front end has to fold it down; here the bytes are the levels.
      */
-    private byte[][] prepareSamples() {
+    private Prepared[] prepareSamples() {
         List<YmrReader.Sample> blocks = source.samples();
         int keep = Math.min(blocks.size(), SAMPLES);
         if (blocks.size() > keep) {
@@ -332,7 +332,7 @@ public final class YmrEffects {
                     + " register, so the format carries " + SAMPLES + " and this song has "
                     + blocks.size());
         }
-        byte[][] prepared = new byte[keep][];
+        Prepared[] prepared = new Prepared[keep];
         for (int index = 0; index < keep; index++) {
             prepared[index] = prepare(index, blocks.get(index));
         }
@@ -340,19 +340,19 @@ public final class YmrEffects {
     }
 
     /**
-     * One sample block, with its loop written out.
+     * One .YMR sample block, ready for the table, and where it loops back to.
      *
-     * <p>A yx6 PCM stream has no loop to give: its tick handler walks forward
-     * and stops on the first byte with bit 7 set, which is the whole of its
-     * end condition and the reason it costs no compare. So a looped sample is
-     * unrolled instead - the loop region repeated until the sample reaches the
-     * ceiling - and what a song loses is the tail of a note held longer than
-     * the unrolled copy lasts. The voice does not stick there: the script
-     * reopens its gate at the computed end and the frame write puts the
-     * shadow volume back, which is what a .YMR player does when a one-shot
-     * sample runs out.
+     * <p>The loop point is the block's own, because from format v10 a PCM
+     * stream has one: the tick's end test already sets the condition codes
+     * off the byte it just played, so resuming instead of stopping costs
+     * nothing per tick and a few instructions on a path that runs once a
+     * sample. Before that it was unrolled - the loop region written out again
+     * and again towards a ceiling - which cost the file real bytes and still
+     * stopped in the end.
      */
-    private byte[] prepare(int index, YmrReader.Sample block) {
+    private record Prepared(byte[] data, int loopStart) {}
+
+    private Prepared prepare(int index, YmrReader.Sample block) {
         byte[] data = levels(index, block.data());
         if (data.length > MAX_SAMPLE_BYTES) {
             // The format allows a sample of 65536 bytes and a yx6 sample table
@@ -364,28 +364,15 @@ public final class YmrEffects {
             data = Arrays.copyOf(data, MAX_SAMPLE_BYTES);
         }
         if (!block.looped()) {
-            return data;
+            return new Prepared(data, Yx6Format.SAMPLE_ONE_SHOT);
         }
         int start = block.loopStart();
         if (start >= data.length) {
             note("sample " + index + " is marked looped from " + start + ", which is past"
                     + " its " + data.length + " bytes: played once instead");
-            return data;
+            return new Prepared(data, Yx6Format.SAMPLE_ONE_SHOT);
         }
-        int region = data.length - start;
-        int ceiling = Math.min(unrollLimit, MAX_SAMPLE_BYTES);
-        int repeats = data.length >= ceiling ? 0 : (ceiling - data.length) / region;
-        byte[] unrolled = Arrays.copyOf(data, data.length + repeats * region);
-        for (int copy = 0; copy < repeats; copy++) {
-            System.arraycopy(data, start, unrolled,
-                    data.length + copy * region, region);
-        }
-        note("sample " + index + " loops from " + start + " and a PCM stream cannot: its"
-                + " loop was written out " + repeats + " more time"
-                + (repeats == 1 ? "" : "s")
-                + ", " + data.length + " -> " + unrolled.length + " bytes, and the voice"
-                + " comes back to its frame volume after that");
-        return unrolled;
+        return new Prepared(data, start);
     }
 
     /**
@@ -474,12 +461,9 @@ public final class YmrEffects {
                     trigger, started, frame, armedTo);
             if ((code & 0xC0) == Tune.KIND_PCM && code != last) {
                 // The script starts a sample wherever a PCM code changes,
-                // however the change came about, so this is where the window
-                // opens - and where a rate pop that moved the prescaler has to
-                // own up to having restarted the sample it was sliding.
-                if (!started) {
-                    rateRestart[channel]++;
-                }
+                // except where only the prescaler moved: bit 3 says whether a
+                // trigger happened, so a rate pop bends the sample rather than
+                // restarting it, and this is a window only when it is a start.
                 if (frame == loop) {
                     triggersAtLoop[channel] = true;
                 }
@@ -579,7 +563,7 @@ public final class YmrEffects {
      * the chip as a volume.
      */
     private int armed(int sample, int prescaler, int counter) {
-        long ticks = samples[sample].length + 1L;
+        long ticks = samples[sample].data().length + 1L;
         long divisor = (long) Tune.prescaler(prescaler & 7) * counter;
         long scaled = ticks * divisor * source.frameRate() + Tune.MFP_CLOCK / 16;
         return (int) ((scaled + Tune.MFP_CLOCK - 1) / Tune.MFP_CLOCK);
@@ -617,12 +601,6 @@ public final class YmrEffects {
             if (cappedSample[channel] > 0) {
                 note(timer + " triggers a sample past the " + SAMPLES + " this format"
                         + " carries " + times(cappedSample[channel]) + ": nothing plays");
-            }
-            if (rateRestart[channel] > 0) {
-                note(timer + " moves a running sample's prescaler "
-                        + times(rateRestart[channel]) + ": RhYMe reprograms the timer live,"
-                        + " and a yx6 PCM stream has no verb for that, so the sample"
-                        + " restarts there");
             }
         }
     }

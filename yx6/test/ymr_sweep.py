@@ -115,7 +115,6 @@ TRIGGER = 0x08                      # code bit 3, flipped on every sample trigge
 
 MAX_SAMPLES = 32                    # what five bits of a volume register name
 MAX_SAMPLE_BYTES = 65535            # what a yx6 sample table's word-sized length names
-UNROLL = 8192                       # how far a looped block is written out
 
 # How far the walk goes into a long tune: the same 1200 frames sweep.py
 # plays. Raising it is the only way to reach the frames the split rotation
@@ -297,23 +296,21 @@ class Ymr:
 
     @staticmethod
     def _prepare(block):
-        """A block's length as a PCM stream will play it.
+        """How many bytes a PCM stream plays before it stops, or None for a
+        block that never stops.
 
-        This is the one place the model has to know something the .YMR does
-        not say, and it is unavoidable: the gate window below is measured in
-        the length of the sample that actually plays, and a yx6 PCM tick has
-        no loop - it walks forward and stops on an end marker - so a looped
-        block is written out again and again instead. Only the length matters
-        here, since nothing in this test hears the bytes.
+        The gate window below is measured in the length of the sample that
+        actually plays. Since v10 a looped block plays until something else
+        takes the timer, because the file says where the sample comes back to
+        and the tick does the coming back; only a one-shot has a length at
+        all. Only the length matters here, since nothing in this test hears
+        the bytes.
         """
         data, looped, start = block
         data = data[:MAX_SAMPLE_BYTES]
         if not looped or start >= len(data):
             return len(data)
-        region = len(data) - start
-        ceiling = min(UNROLL, MAX_SAMPLE_BYTES)
-        repeats = 0 if len(data) >= ceiling else (ceiling - len(data)) // region
-        return len(data) + repeats * region
+        return None
 
     def _decode(self, stream):
         """A stream's stored length is the distance to the next present
@@ -502,7 +499,9 @@ class Ymr:
         frame for the arming phase, rounded up so the gate never reopens
         early. The gate is what this test observes, so getting the frame
         wrong here would read as the player writing through a closed gate."""
-        ticks = self.samples[want.sample] + 1
+        if self.samples[want.sample] is None:
+            return 1 << 30              # a looped sample: the gate never
+        ticks = self.samples[want.sample] + 1    # reopens on its own
         divisor = PRESCALE[want.prescaler & 7] * want.counter
         scaled = ticks * divisor * self.rate + MFP_CLOCK // 16
         return -(-scaled // MFP_CLOCK)

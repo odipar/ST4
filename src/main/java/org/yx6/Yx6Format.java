@@ -72,12 +72,14 @@ public final class Yx6Format {
     public static final int MAGIC = 0x59583621;
 
     /** The only version this release writes or reads: 9 carries a retrigger
-     * stream's shape in the script instead of leaving the player to find it,
+     * stream's loop point in the sample table and a rate that reprograms a
+     * running timer, 9 carried a retrigger stream's shape in the script
+     * instead of leaving the player to find it,
      * 8 let it come from R13 rather than from a voice and needed a mode to
      * say which, 7 made the channel count four and put the channel-to-timer
      * map in the file, 6 made room for a third timer channel, 5 replaced the
      * interpreted effect streams with the compiled effect script. */
-    public static final int VERSION = 9;
+    public static final int VERSION = 10;
 
     /** Flag bit 0: the tune loops back to {@code L} instead of ending. */
     public static final int FLAG_LOOPS = 1;
@@ -166,7 +168,18 @@ public final class Yx6Format {
     public static final int HEADER_SIZE = OFFSET_LOOP_TABLE + 4 * STREAMS;
 
     /** A sample table entry: a long offset and a word length. */
-    public static final int SAMPLE_ENTRY_SIZE = 6;
+    public static final int SAMPLE_ENTRY_SIZE = 8;
+
+    /**
+     * A sample's {@code loopStart} when it does not loop, which is most of
+     * them: a digidrum is a hit and stops.
+     *
+     * <p>A loop point is an offset into the sample and a sample cannot reach
+     * 64 KB, so a word holds any real one and leaves {@code $FFFF} spare to
+     * mean none. That keeps the entry eight bytes and long-aligned, which is
+     * what the player's table of resolved pairs wants.
+     */
+    public static final int SAMPLE_ONE_SHOT = 0xFFFF;
 
     /** The byte after a sample's last value has this bit set; the PCM tick
      * interrupt routine's own move.b sees it as negative and stops. */

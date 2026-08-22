@@ -321,7 +321,7 @@ public final class Ymr {
                 slice(tune.registers(), start, end), slice(tune.codes(), start, end),
                 slice(tune.counts(), start, end),
                 java.util.Arrays.copyOfRange(tune.shapes(), start, end),
-                tune.samples(), tune.semantics(),
+                tune.samples(), tune.sampleLoops(), tune.semantics(),
                 tune.name(), tune.author(), tune.comment(), tune.notes());
     }
 

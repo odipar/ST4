@@ -571,29 +571,33 @@ the two rate rows below are about.
 | A sample numbered past the 32nd | the sample is dropped, and so is every trigger of it | yes |
 | A sample past 65535 bytes | everything after its 65535th, so the length fits a word | yes |
 | A sample looped from past its own end | it is played once instead | yes |
-| A looped sample | its loop region is unrolled towards 8 KB and stops there | yes |
 | A sample byte above the 4-bit levels | masked, since bit 7 is what ends a PCM stream | yes |
-| A rate pop that moves the prescaler | the timer period in flight, truncated | no — it is every such pop |
-| …under a running sample | the sample restarts on that frame | yes |
+| A rate pop that also moves the effect's parameter | the timer period in flight, truncated | no — see below |
 | A sample the song stops early | one sample byte, held until the next frame | no — the window is sub-frame |
 | A PWM or RTE re-configured with nothing changed | nothing is emitted at all | no — RhYMe's exporter cannot write one |
 
-The six that are counted are named once per sample or once per channel
+The four that are counted are named once per sample or once per channel
 rather than reported a frame at a time, because a song 9,984 frames long can
 break one rule on a thousand of them and still only be doing one thing wrong.
-The three that are not are the three there is nothing to say about: one is
-every prescaler move any song makes, one is shorter than the frame it happens
-in, and the last cannot arise from a file RhYMe wrote.
+The two that are not are the two there is nothing useful to say about: one is
+shorter than the frame it happens in, and the other cannot arise from a file
+RhYMe wrote.
 
-A rate pop that moves only the COUNTER is on none of these lines, because it
-costs nothing at all: it leaves the code byte where it was, so it compiles to
-a HOLD carrying the reload flag, and `yx6_hold` writes the count to a timer it
-never stops — the same live reload RhYMe does, verb for verb. That is worth
-saying because it is the ordinary case rather than the lucky one: a pitch
-slide is made of these. On `signals-grouped.ymr` the compiled script carries
-3,827 live reloads against 325 verbs that stop a timer to reprogram it — and
-313 of those 325 are prescaler moves under a running RTE, which is what a
-verb census misses, since START_RETRIGGER is also what a fresh arm emits.
+Rate pops are on almost none of these lines, because almost none of them cost
+anything. A pop that moves only the COUNTER leaves the code byte where it
+was, so it compiles to a HOLD carrying the reload flag, and `yx6_hold` writes
+the count to a timer it never stops. A pop that moves the PRESCALER changes
+the code byte, and from **v10** compiles to the live retune — RETUNE
+addressed to voice 3 — which writes the control register and then the data
+register with the timer still running. Both are RhYMe's own live reprogram,
+verb for verb. On `signals-grouped.ymr` the compiled script carries 3,827
+live reloads and 325 live retunes against no verb at all that stops a timer to
+change its rate; `bla-grouped.ymr` has 678 live retunes and 2 that stop,
+which are the two frames where the effect's parameter moved on the same
+frame as the rate. The live retune is addressed to no voice — that is the
+encoding room it is packed into — so it cannot repatch a volume or a shape on
+the way through, and on a frame where one of those moved the ordinary retune,
+which does repatch, is the honest verb and the truncated period is the price.
 
 * **Three timers bound to voices, against four channels and a map.** A .YMR
   names Timer A, Timer B and Timer D, and the spec fixes which voice each one
@@ -616,36 +620,43 @@ verb census misses, since START_RETRIGGER is also what a fresh arm emits.
   bytes is cut to fit. The .YMR spec caps a sample at 65536, so a file that
   keeps to it loses exactly the one byte; nothing in the reader enforces that
   ceiling, and a file that breaks it loses whatever it is over by.
-* **A PCM tick has no loop.** It walks forward and stops on the first byte
-  with bit 7 set, which is the whole of its end condition and the reason it
-  costs no compare per tick. So a looped sample is unrolled instead — its
-  loop region written out again as many whole times as fit under 8 KB, about
-  ten seconds of an 800 Hz drum loop and about a fifth of a second of a 40 kHz
-  one — and a song that holds the loop longer than the unrolled copy lasts
-  hears it stop. Whole regions only, so a sample already at the ceiling, or
-  one whose region will not fit under it, is unrolled no times at all and the
-  note says so. The voice does not stick there: the script reopens its gate
-  at the computed end and the frame write puts the song's own volume back,
-  which is what a .YMR player does when a one-shot sample runs out.
-* **No verb moves a prescaler under a running timer.** RhYMe pops a rate on
+* **A PCM tick still has no compare, and loops anyway.** It walks forward and
+  stops on the first byte with bit 7 set, which is the whole of its end
+  condition and the reason it costs no compare per tick. From **v10** the
+  sample table carries a loop word beside each sample, `YX6_init` resolves it
+  to an address once, and the tick that meets the end marker moves that
+  address into its own operand instead of stopping the timer. A one-shot says
+  so with `$FFFF`, a value no length can reach — 0 is a real loop point, the
+  sample that repeats whole. The end tick has already written the marker as a
+  level by the time it tests it, so a loop costs one sample of silence at the
+  seam and nothing else; a one-shot's end path is unchanged, marker byte,
+  middle volume, timer stopped. Before v10 the loop region had to be written
+  out again and again towards a ceiling, which made a long loop both wrong and
+  enormous.
+* **Moving a prescaler under a running timer.** RhYMe pops a rate on
   its own to slide a pitch: control register, then data register, the timer
   never stopped, so a running PWM keeps its phase and a running sample its
-  place and only the rate moves. Half of that survives the conversion intact.
+  place and only the rate moves. From **v10** all of that survives the
+  conversion.
   A .YMR rate entry is a prescaler and a counter, only the prescaler is in the
   code byte, and a pop that moves the counter alone therefore leaves the code
   where it was: the script emits a HOLD carrying the reload flag, and
   `yx6_hold` writes the new count to a timer it never stops — RhYMe's own live
   reload, verb for verb. That is what a pitch slide is made of, and it costs
   nothing. A pop that moves the PRESCALER cannot be said that way: it changes
-  the code byte, so it compiles to a program verb, and every verb that carries
-  a rate goes through `yx6_program`, which stops the timer, loads the count and
-  runs it again. The period in flight is truncated whichever verb it is, which
-  is why a prescaler change under a running RTE compiles to a plain
-  START_RETRIGGER and nothing gentler is invented for it. Under a running
-  SAMPLE it costs more: the new code byte is one the script can only read as a
-  new trigger, so the sample restarts there, and the conversion counts it. This
-  is a gap in the `.yx6` ABI rather than anything the converter chose, and no
-  gentler verb would close it, since they all truncate the same period.
+  the code byte, so before v10 it had to compile to a program verb, and every
+  verb that carries a rate goes through `yx6_program`, which stops the timer,
+  loads the count and runs it again — the period in flight truncated, whichever
+  verb it was. v10 gives it a verb of its own instead. The action byte's voice
+  field addresses three voices in two bits, so 3 names none of them, and
+  RETUNE spends that corner on a live rate change: `yx6_live` masks the
+  timer's nibble out of the control byte it reads back, ORs the new prescaler
+  in and writes it once — the timer's nibble never passes through zero — then
+  writes the reload, which the MFP takes at the next underflow. Addressed to
+  no voice, it repatches nothing, so the script only picks it on a frame where
+  the effect's parameter — a PWM's volume, an RTE's shape — stood still. Where
+  the parameter moved too, the ordinary retune is emitted and the period in
+  flight is truncated as before.
 * **A sample the song stops early is stopped a sliver late.** A .YMR can end
   a sample before its data runs out — an effect pop of 0, or a different
   effect arriving on the same timer, which is the same voice, since a .YMR
@@ -700,7 +711,7 @@ MFP timer rather than by the frame.
 | offset | size | field |
 |---:|---:|---|
 | 0 | 4 | `'YX6!'` |
-| 4 | 2 | format version (9) |
+| 4 | 2 | format version (10) |
 | 6 | 2 | flags: bit 0 set when the tune loops; bits 1-4, one per timer channel, set when the tune uses it |
 | 8 | 4 | `O`, the frame count |
 | 12 | 2 | frame rate in Hz: how often the player is called |
@@ -727,7 +738,9 @@ bit 4 + bits 7–5 = the burst-gate state, which registers the frame write
 must leave alone). **T** carries the channel-to-timer map, two bits each. **A** names the channel's action: a verb, a voice and a
 prescaler, the verbs being start, retune, stop, a **PCM stream** start,
 a PCM start that preempts a **toggle stream** on the same voice, or a
-hold that reloads or tracks. **P** carries the timer count, the other
+hold that reloads or tracks. There are three voices in a two-bit field, so
+voice 3 names none, and RETUNE addressed to it is the live rate change:
+control register then data register, the timer never stopped. **P** carries the timer count, the other
 half of the **rate**. **X** is the operand a verb reads when its action
 byte has no room for one: today, which timer channels a preempting sample
 stops, one bit each.
@@ -741,10 +754,12 @@ tune that uses two leaves the other two pairs unread at the end.
 differs from its first arrival, the split rotates forward until the two
 match, and the file carries those frames twice, compiled differently.
 
-The sample table holds what a PCM stream plays out: `{offset,
-length}` entries pointing at PSG-ready volume bytes, each sample closed
-by a byte with bit 7 set. YM calls these digidrums, and their numbering
-is the YM file's.
+The sample table holds what a PCM stream plays out: `{offset, length,
+loop}` entries pointing at PSG-ready volume bytes, each sample closed by a
+byte with bit 7 set. `loop` is where the tick goes back to when it meets
+that byte, as a position in the sample, or `$FFFF` for one that stops
+there — 0 is a real loop point, the sample that repeats whole. YM calls
+these digidrums, they never loop, and their numbering is the YM file's.
 
 ## Tests
 
