@@ -12,7 +12,7 @@
 ;
 ; It plays the fourteen standard sound registers, loops, and plays what the
 ; YM format calls its special effects - digidrums, SID voices, the
-; sync-buzzer - on THREE TIMER CHANNELS. A timer channel is the format's
+; sync-buzzer - on FOUR TIMER CHANNELS. A timer channel is the format's
 ; idea; WHICH of the MFP's timers serves it is the FILE's: stream T maps
 ; the four channels onto the MFP's four timers, two bits each, and
 ; yx6_timers holds one row per timer for the map to point at. A timer is
@@ -24,10 +24,10 @@
 ; EFFECTS.md holds the design and doc/terminology.md the vocabulary.
 ;
 ; REQUIRES ST4_wrap.S, built for the SAME unit size the tune was packed with
-; (yx6 -kK; byte units unless the packer was told otherwise). Include both, in
-; either order, with the unit size defined first:
+; (yx6 -kK; the packer's default is 2). Include both, in either order, with
+; the unit size defined first:
 ;
-;       ST4_UNIT    equ     1
+;       ST4_UNIT    equ     2
 ;               include "YX6.S"
 ;               include "ST4_wrap.S"
 ;
@@ -52,7 +52,7 @@
 ; player counts the calls itself and wraps the write pointer when it lands
 ; on the ring end.
 ;
-; THE SCRIPT. The last five rings are not frame streams: their bytes never
+; THE SCRIPT. The last eleven rings are not frame streams: their bytes never
 ; reach a register. They carry the COMPILED EFFECT SCRIPT, in which the
 ; packer replayed the reference player's whole decision logic over the
 ; timeline - held or new, retune or restart, who stops whose timer, when a
@@ -372,14 +372,14 @@ YX6_MIXER       equ     7
 YX6_ENVELOPE    equ     13
 
 ; -----------------------------------------------------------------------------
-; YX6_WRITE: send one register's value straight from its ring to the sound
-; chip, then step a1 on to the next register's ring.
+; YX6_WRITE: send one register's value from its ring to the sound chip.
 ;
-; Two moves and an add, with the register number assembled in as an immediate:
-; nothing is tested, nothing is counted, and the value never passes through a
-; data register. Register k's ring byte sits k*N above the cursor, and N is
-; known at init: the displacement is patched into the instruction there,
-; once, so the burst never steps a pointer. The $7FFF placeholder is
+; Three moves, with the register number assembled in as an immediate: the
+; select byte goes to d1's high half, the ring byte to its low half, and one
+; movep.w sends both. Nothing is tested and nothing is counted. Register k's
+; ring byte sits k*N above the cursor, and N is known at init: the
+; displacement is patched into the instruction there, once, so the burst
+; never steps a pointer. The $7FFF placeholder is
 ; load-bearing - a zero displacement would let rmac's +o3 fold the extension
 ; word away and shift every patch site. Registers 7 and 13 need their values
 ; touched, so they are written out of line rather than through this macro.
@@ -784,8 +784,8 @@ yx6_open:
         bra     ST4_init
 
 ; -----------------------------------------------------------------------------
-; YX6_play: a0 = workspace. One frame: run the effect stage, write fourteen
-; registers, undo the stage's ring edits, refill one stream.
+; YX6_play: a0 = workspace. One frame: gate, write fourteen registers, run
+; the script's actions, refill one stream. No ring byte is ever edited.
 ; -----------------------------------------------------------------------------
 YX6_play:
         movea.l a0,a3

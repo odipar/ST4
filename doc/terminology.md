@@ -22,14 +22,17 @@ YM5 carries digidrum and SID voice; YM6 adds sync buzzer and sinus SID.
 streams in a compressed container. The 6 is YM6's; the X marks the
 departure. YM names stay in the code that reads YM files; everywhere else
 the names are plain digital ones, so the engine can be read without
-knowing the scene. This file maps one set to the other.
+knowing the scene. This file maps one set to the other. A second source,
+RhYMe's `.YMR`, has its own names for the same things; those are in **The
+rest of the mapping** below.
 
 A word in **bold** is a term with a precise meaning here, defined where
 it first appears. Words in quotes, like "digidrum" and "effect", belong
 to the YM format. The new names come from digital systems: counters,
 streams, rates, phases. None come from analogue synths - no carriers, no
 modulators, no LFOs, because the YM2149 has none of those. A piece of
-music is a **tune**; "song" is a tracker's word for its own file.
+music is a **tune**; "song" is what a **tracker** - the program a
+composer writes music in - calls its own file.
 
 ## The sound chip
 
@@ -46,7 +49,7 @@ a register holds its value until written again.
 | R2, R3 | 8 + 4 | voice B tone period |
 | R4, R5 | 8 + 4 | voice C tone period |
 | R6 | 5 | **noise period** |
-| R7 | 8 | the **mixer**: which generators reach which voice, plus the I/O port directions |
+| R7 | 8 | the mixer register: **mixing** - which generators reach which voice - plus the I/O port directions |
 | R8, R9, R10 | 5 | voice A, B, C **volume**: four bits of level, bit 4 meaning "follow the envelope" |
 | R11, R12 | 8 + 8 | **envelope period**, fine and coarse: one 16-bit number |
 | R13 | 4 | **envelope shape** |
@@ -85,7 +88,8 @@ which suits a decay and is useless as an oscillator.
 rises.** The divisor is 256, so neighbouring periods are far apart:
 period 18 is 434 Hz, period 17 is 460 Hz - nearly a semitone between
 adjacent settings. That is the limit on a buzzer part. A sync buzzer
-escapes it by taking its pitch from a timer instead.
+escapes it by taking its pitch from a timer instead, which at 440 Hz
+lands within a few cents.
 
 Three **voices**, A, B and C. Each has a **volume** and a **mixing**
 setting - which generator signals reach it: tone, noise, both or neither.
@@ -99,9 +103,10 @@ steps, the envelope walks 32, and the bottom of the ladder is irregular -
 hence a measured table rather than a formula (`YmEffects.CURVE`). This
 matters for **samples**: a recording is linear amplitudes, the register
 takes a logarithmic index, so filtering or resampling must happen on the
-amplitudes and convert afterwards. Four bits also means about 24 dB of
-range, so material with its peaks near the top of the ladder keeps the
-most detail.
+amplitudes and convert afterwards. The ladder spans about 54 dB top to
+bottom - about 45 dB if you count 3 dB a step, the two differing because
+the bottom step is a jump of 8 dB and the rest average nearer 3.3 - so
+material with its peaks near the top keeps the most detail.
 
 **Writing the envelope shape restarts the envelope.** Writing the same
 shape twice is not a wasted write; it is a restart, and that is the whole
@@ -145,8 +150,21 @@ A **timer channel** is one place a timer stream can run: a claimable
 clock, and the stream on it. A tune names the channels it uses and which
 timer each runs on.
 
+A stream's place in its own cycle is its **phase**. What becomes of that
+place across a stop is its **phase policy**: the cycle keeps running
+while the stream is off (**free-running**), or every start begins from
+the beginning (**zero-restart**). The difference is audible.
+
 (Trackers use "effect" for the per-row commands a composer types. Where
 both readings are possible, this file says **timer stream**.)
+
+(A warning for anyone reading `org.ymr`: the .YMR format uses "stream"
+for a change list - one entry per change, not one per frame - advanced by
+an explicit "pop" from a command stream rather than by a clock, and some
+of its streams carry timer settings rather than register values. That
+front end has to keep its own format's names, so this collision cannot be
+settled by choosing a word. Here a stream is the per-register value
+series, and it is ticked.)
 
 ## Three clocks
 
@@ -188,8 +206,7 @@ A property of the tune, fixed for the whole of it:
 - **60 a second** on NTSC machines.
 - **200 a second** for four times the detail in arpeggios, volume shapes
   and pitch slides. Not the screen but a timer in the **MFP**, the ST's
-  support chip - usually its Timer C, which the operating system already
-  runs at 200.
+  support chip - usually its Timer C.
 - **Anything else** a composer set: 25, 100 and 150 all exist.
 
 The rate belongs to the tune, not to the file carrying it: stepping the
@@ -226,22 +243,21 @@ anything above 25,600: on an 8 MHz 68000 the interrupt alone would take a
 quarter of the machine. For scale, 69 corpus tunes play samples, mostly
 between 5,000 and 6,100 a second.
 
-This is also where a sync buzzer gets its accuracy: at 440 Hz a timer
-lands within a few cents, where the envelope period is most of a semitone
-out.
-
 ### Conflicts between the two clocks
 
 The player takes the next value from each frame stream and writes them
 one after another. That burst is the **frame write**.
 
 YX6 writes all fourteen registers every frame, because a write costs
-about what the comparison to avoid it would cost. Two are exceptions: the
-envelope shape is left alone where a restart would be wrong, and a
-voice's volume is skipped while a timer stream holds it. A **tracker**,
-the program a composer writes music in, writes only what changed, because
-its own format records which registers those are. A YM file has no such
-record - a full row every frame, with nothing marking what is new.
+about what the comparison to avoid it would cost. Two rules bend it: the
+envelope shape is left alone where a restart would be wrong, and any
+voice's volume is skipped while a timer stream holds it. That skip is the
+voice's **gate**: `yx6_gates` overwrites the burst's write with two nops,
+so that byte never reaches the chip - though the player can still write
+the register outside the burst, and does. A tracker writes only what
+changed, because its own format records which registers those are. A YM
+file has no such record - a full row every frame, with nothing marking
+what is new.
 
 Most hard bugs come from a tick landing during a frame write, or both
 writing the same register:
@@ -255,10 +271,6 @@ writing the same register:
   Prevented by giving the register an owner and skipping it in the burst.
 - **quantisation**. Something happens between frames; only the next frame
   can act on it.
-- **phase**. A stream's place in its own cycle. What becomes of that
-  place across a stop is its **phase policy**: the cycle keeps running
-  while the stream is off (**free-running**), or every start begins from
-  the beginning (**zero-restart**). The difference is audible.
 
 ## What the old names mean
 
@@ -298,14 +310,12 @@ digidrum, a SID voice or a sinus SID is. Three things separate them:
 
 | YM5/YM6 | YX6 | the series | repeats? | the voice | rate |
 |---|---|---|---|---|---|
-| digidrum | **PCM stream** | a stored sample, any length | **no**, plays once and ends | **disconnected**: no generator reaches it, so the stream's values are all that is left | **independent** by default: the sample's own pitch |
+| digidrum | **PCM stream** | a stored sample, any length | **usually not**: it plays once unless its sample carries a loop point | **disconnected** by the YM dialect: no generator reaches it, so the stream's values are all that is left. A source that mixes its own samples leaves the voice to the tune's **mixing** stream | **independent** by default: the sample's own pitch |
 | SID voice | **toggle stream** | two values, a set level and off | **yes**, until stopped | **left connected**: the values chop its signal | **derived** from the note playing |
 | sinus SID | **wave stream** | a stored or computed waveform | **yes**, until stopped | **left connected**: the values shape its signal | **derived** from the note playing |
 
 The last two rows are special cases of the first: a toggle stream is a
 PCM stream two values long, a wave stream one whose sample is a waveform.
-Whether a waveform is computed or read from a table makes no difference
-to the sound.
 
 Two reasons for three codes rather than one, neither about sound:
 
@@ -323,7 +333,10 @@ That is a default, not a rule. YM6 stores one rate per trigger, so a
 digidrum in a YM file plays at a fixed rate; nothing in this model
 forbids a source that moves a sample's rate under a melody. The split
 does say when a rate may change in a given format: independent means
-**set once**, derived means **control-rate**, renewed each frame.
+**set once** - and, since v10, movable under a running stream where the
+source says so - derived means **per-frame**, renewed on every frame.
+(Not "control-rate": the frame clock already answers to **control
+rate**, and a policy and a clock should not share a word.)
 
 **The fourth kind is not a volume stream.** It writes the envelope shape,
 the same shape every tick, so the values say nothing - the point is the
@@ -347,12 +360,12 @@ voices there and both carry it, which real tunes do - 15 of the corpus's
 **Coupling** is "derived" said exactly: what a rate is set against -
 always something else on the same voice, with the ratio being what you
 hear. Nothing in the hardware enforces it; it is how the music was
-written, and what the **packer** - the tool that turns a YM file into a
-YX6 file - has to preserve.
+written, and what the **packer** - the tool that turns a source file, a
+`.ym` or a `.ymr`, into a YX6 file - has to preserve.
 
 | stream | coupled to | why |
 |---|---|---|
-| **PCM stream** | nothing, in a YM tune | its voice is disconnected, so there is nothing to be in ratio with. A source that transposes samples couples it to the note |
+| **PCM stream** | nothing, in a YM tune | a disconnected voice has nothing to be in ratio with. A source that transposes samples couples it to the note |
 | **toggle stream** | the voice's **tone period** | two square signals multiply and their ratio is the tone colour, so the rate must move with every note |
 | **wave stream** | the voice's **tone period** | the waveform shapes the signal instead of chopping it; the ratio still sets the result |
 | **retrigger stream** | the **envelope period** | the tick rate sets the pitch, the ratio sets how far into the shape the counter gets |
@@ -370,13 +383,24 @@ that boundary loses the place in the cycle.
 | action | meaning |
 |---|---|
 | **start** | begin from the beginning |
-| **hold** | carry on unchanged |
-| **retune** | change the rate, keep the place in the cycle |
+| **hold** | keep running, no restart: the count, the toggle level or the shape may be refreshed under it. Emitted only when one of them moved |
+| **retune** | change the rate, keep the place in the cycle. The timer is stopped to reprogram it, so the period in flight is cut short |
+| **live retune** | change the rate with the timer left running: control register, then data register, and the period in flight runs to its own end. Picked only where the source says a rate move was meant that way and the stream's parameter stood still |
 | **release** | stop writing |
 | **resume** | write again, from where it was |
-| **expire** | stop because the sample ran out. PCM streams only |
+| **expire** | stop because a one-shot sample ran out. PCM streams only |
+| **loop** | the same end, met by a sample that carries a loop point: go back to it and carry on |
 | **preempt** | take a register from a stream that was using it |
 | **suppress** | fail to start because the register is taken, and retry next frame |
+
+The code's word for an action the script hands the player is a **verb**:
+three bits of a timer channel's action byte, and all eight codes are
+spent - start alone takes four, one each for a toggle, a retrigger, a
+sample and a sample that preempts. Not every action above is a verb. A
+stream expires or loops inside its own tick handler, with nothing to hand
+it; a live retune is a retune addressed to no voice rather than a code of
+its own; and a suppressed start is a decision the packer took and never
+emitted.
 
 ## Common techniques
 
@@ -388,7 +412,7 @@ Most of what a composer does needs no timer stream at all:
 | SID lead | **toggle stream** over the tone generator's square wave |
 | SID bass | the same, slow enough to need a different prescaler: the retune case |
 | hard bass | no timer stream: **envelope period** and **shape** frame streams, voice following the envelope |
-| sync buzzer | **retrigger stream** on the shape register, voice following the envelope. Envelope period sets the colour, tick rate the pitch |
+| sync buzzer | **retrigger stream** on the shape register, voice following the envelope |
 | arpeggio | **tone period** frame stream, a new note each frame |
 | vibrato, portamento | **tone period** frame stream, small steps |
 | noise drums, hi-hat | **mixing** frame stream with noise on, plus a **volume** frame stream |
@@ -419,16 +443,35 @@ series of writes.
 | MFP timers A, B, C and D | what the file's map puts behind **timer channels** 0 to 3 |
 | the MFP's prescaler and data register | **prescaler** and **timer count** |
 
+RhYMe's `.YMR` is the second source, and its three effects - plus the
+field that sets their rate - are the same things under other names:
+
+| RhYMe .YMR | YX6 |
+|---|---|
+| PWM | **toggle stream** |
+| Sample | **PCM stream** |
+| RTE | **retrigger stream** |
+| counter | **timer count** |
+
+Beware two words that do not survive the crossing. A .YMR "stream" is a
+change list, not this file's value series, and its "pop" is what advances
+one - see the parenthetical in **Streams** above. The reasoning behind
+each row, and what the conversion costs, is in
+[yx6/README.md](../yx6/README.md) under **What the conversion is**; it is
+not repeated here.
+
 ## The names in the code
 
 | term | in the code |
 |---|---|
 | the four kinds | `KIND_PCM`, `KIND_TOGGLE`, `KIND_RETRIGGER`, `KIND_CURVE` - the **wave stream**, under its earlier name |
-| the actions a stream can be given | `VERB_START_PCM`, `VERB_START_TOGGLE`, `VERB_START_RETRIGGER`, `VERB_START_PCM_PREEMPT`, `VERB_HOLD`, `VERB_RETUNE`, `VERB_RELEASE`, `VERB_RESUME` |
+| the **verbs**, the actions a stream can be given | `VERB_START_PCM`, `VERB_START_TOGGLE`, `VERB_START_RETRIGGER`, `VERB_START_PCM_PREEMPT`, `VERB_HOLD`, `VERB_RETUNE`, `VERB_RELEASE`, `VERB_RESUME` |
 | the tick handlers | `yx6_pcm_a`, `yx6_toggle_a_on`, `yx6_toggle_a_off`, `yx6_retrigger_a`, and the same per timer - they belong to the timer, not the channel |
 | the timers and the map onto them | `yx6_timer_a` to `yx6_timer_d`, `yx6_desc_0` to `yx6_desc_3`, `yx6_assign` |
-| the actions the script runs | `yx6_pcm`, `yx6_pcm_preempt`, `yx6_toggle_start`, `yx6_retrigger_start`, `yx6_retune`, `yx6_resume`, `yx6_hold`, `yx6_release` |
-| the frame write, the mixer | `yx6_wA`, `yx6_w7`, `yx6_wB`, `YX6_MIXER` |
+| the actions the script runs | `yx6_pcm`, `yx6_pcm_preempt`, `yx6_toggle_start`, `yx6_retrigger_start`, `yx6_retune`, `yx6_live` - the live retune it branches to - `yx6_resume`, `yx6_hold`, `yx6_release` |
+| where a retrigger stream's shape comes from | `yx6_shape`, reading stream X's high nibble, because a shape belongs to the one envelope generator and not to a voice |
+| a sample's loop point | `YX6_ONE_SHOT` for one that has none, `yx6_pcmloop` for the address the tick jumps back to |
+| the frame write, the gates, the mixer | `yx6_wA`, `yx6_w7`, `yx6_wB`, `yx6_gates`, `YX6_MIXER` |
 | a tune as the engine has one | `Tune` - the frame streams, the timer streams, the samples and the rate, and nothing a format would recognise |
 
 `Ym6Reader` and `YmEffects` keep the YM names on their input side: those
@@ -462,14 +505,37 @@ Chiptune players are rarely explicit about it though each is consistent -
 which is why two players can disagree audibly on the same file and both
 be self-consistent.
 
-## Where this is going
+## Where this went
 
-The model is wider than YM5 and YM6 in two places, because the next
-formats will want the room: **a PCM stream whose rate moves**, so a
-sample can follow a melody, and **a PCM stream that loops**, so a sample
-can be an instrument's sustain. Together that is a wavetable in the
-ordinary sense. Both are a source and a rate policy, which is what the
-stream model is made of.
+The model is wider than YM5 and YM6 in two places. Format v10 spent both,
+and the room was there because a stream is a source and a rate policy and
+nothing else.
+
+**A PCM stream can loop.** A sample table entry carries a loop word
+beside the offset and the length: `$FFFF` means one-shot, and anything
+else is an offset the tick jumps back to on meeting the end marker
+instead of stopping the timer - 0 among them, the sample that repeats
+whole. `YX6_init` resolves each pair to addresses once, so the tick that
+meets the end has one long to load and no arithmetic to do. That makes a sample an instrument's sustain.
+
+**A rate can move under a running timer.** The action byte's voice field
+holds three voices in two bits, so 3 names none of them, and a retune
+addressed to it writes the control register and then the data register
+without ever stopping the timer: the period in flight runs to its own end
+and the reload lands at the next underflow. That is the **live retune**,
+and it is not a PCM thing - any kind's rate can move that way, keeping
+its place in the cycle *and* its place inside the half it is in.
+
+Neither reaches a YM tune. YM has no way to say a sample loops, so the YM
+front end marks every one of them one-shot, and a YM rate change stays
+the reference player's stop-load-run. Both arrive through the `.ymr`
+front end, which is what wanted them.
+
+Still ahead is the other half of the rate idea: a PCM stream with a
+**derived** rate, a sample tracking the note the way a toggle stream
+does. v10 carries a rate the source moves; nothing yet derives one from a
+melody. With the loop point, that would be a wavetable in the ordinary
+sense.
 
 ## Quick reference
 
@@ -506,7 +572,7 @@ stream model is made of.
 | **effect code** | the YM file's way of starting one: a trigger on that frame, never "still running" |
 | **rate** | how often a timer stream writes. Stored as prescaler and timer count |
 | **set once** | the rate is fixed when the stream starts |
-| **control-rate** | the rate is renewed each frame |
+| **per-frame** | the rate is renewed on every frame |
 | **independent rate** | set by nothing else: a sample's playback pitch |
 | **derived rate** | set against the note playing, so it moves with the melody |
 | **coupling** | what a derived rate is set against. The ratio is what you hear |
@@ -519,7 +585,9 @@ stream model is made of.
 | **phase policy** | what happens to phase across a stop: free-running, or zero-restart |
 | **disconnect** | mix no generator into a voice, leaving only its volume writes |
 | **frame write** | the once-a-frame round of register writes |
-| **packer** | the tool that turns a YM file into a YX6 file |
+| **verb** | the code's name for an action the script hands the player. Three bits of an action byte, all eight spent |
+| **packer** | the tool that turns a source file, a `.ym` or a `.ymr`, into a YX6 file. One per front end |
+| **front end** | the pair of classes that reads one source format and stops at a `Tune`. `org.ym6` for YM, `org.ymr` for RhYMe |
 | **tracker** | the program a composer writes music in, with its own file format |
 | **corpus** | the 544 YM files YX6 is tested against; 543 readable |
 | **script data** | per-frame instructions saying which streams start when. Stored like a stream, never written to a register |
@@ -528,15 +596,15 @@ stream model is made of.
 
 | term | meaning |
 |---|---|
-| **PCM stream** | a stored sample, played once, voice disconnected, rate independent. Was: digidrum |
+| **PCM stream** | a stored sample, played once or looped from a stored loop point, rate independent. The YM front end disconnects the voice; the `.ymr` front end leaves the mixer to the song. Was: digidrum |
 | **toggle stream** | a PCM stream of two values, repeating, voice connected. Cheap to run. Was: SID voice |
 | **wave stream** | a PCM stream of a waveform, repeating, voice connected. Was: sinus SID |
 | **retrigger stream** | not a volume stream: one shape written over and over, each write restarting the envelope. Was: sync buzzer |
 
 **What a stream can do**
 
-start, hold, retune, release, resume, expire, preempt, suppress - defined
-in the section of that name.
+start, hold, retune, live retune, release, resume, expire, loop, preempt,
+suppress - defined in the section of that name.
 
 **Conflicts between the two clocks**
 
@@ -544,4 +612,5 @@ in the section of that name.
 |---|---|
 | **tearing** | a tick splits a select from its value; the value lands in the wrong register. One instruction per write prevents it, masking hides it |
 | **contention** | frame write and timer stream target the same register |
+| **gate** | a voice's place in the frame write, shut while a timer stream owns its volume |
 | **quantisation** | something happens between frames; only the next frame can act |

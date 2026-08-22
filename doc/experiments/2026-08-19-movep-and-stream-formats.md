@@ -36,3 +36,10 @@ byte is the floor for values stored one byte per ring. What the question
 did surface: the displacement patch (init writes each register's k*N into
 the burst once; N capped at 2520 so 13*N fits a signed word) - adopted,
 99 to 96 harness ticks.
+
+**Postscript 2026-08-21.** `movep.w` shipped after all - not as the speed
+trick declined here (it costs about 4 cycles more per register than the
+plain pair) but because one instruction cannot be split by an interrupt.
+That made the burst's interrupt mask optional rather than necessary; it
+still ships on by default. See
+[the unmasked burst](2026-08-21-the-unmasked-burst.md).

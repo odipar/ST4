@@ -35,9 +35,10 @@ Timer A EOIs settled it: fully timer-driven.
 * **Melody: exact.** Every tone period matches the original replay -
   the offset measured 0.00 semitones. Nobody transposed anything.
 * **Drum timing: exact.** The original plays ~658/782-sample hits at
-  9,910 Hz (Timer A, TDR 62, /4) - 66-79 ms. The dump's drums are the
-  same durations at three times the sample count and three times the
-  rate (1,972 = 657 x 3 at 29,257 Hz). Pitch and length are preserved.
+  9,910 Hz (Timer A, TDR 62, /4) - 66-79 ms. The dump's drums hold those
+  durations by scaling both together - 1,972 samples at 29,257 Hz, just
+  under three times the count and just under three times the rate. Pitch
+  and length are preserved.
 * **Drum content: replaced.** The original's samples are nearly binary
   - two thirds 0s and 15s, a bright buzzing waveform. The dump's are
   smooth full-range data; aligned correlation ~0.1. The converter

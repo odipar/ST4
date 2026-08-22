@@ -6,7 +6,8 @@ repo has had, because every layer of verification - the corpus sweep, a
 byte-level differential, hardware-trace comparison, even a spectral audio
 diff - declared the two players equivalent while a musician could hear
 they were not. The fault, and each instrument's blind spot, are worth
-keeping. Companion: [2026-08-20-sid-phase-semantics.md] holds the player
+keeping. Companion:
+[SID phase semantics](2026-08-20-sid-phase-semantics.md) holds the player
 survey and the final semantics.
 
 ## The symptom

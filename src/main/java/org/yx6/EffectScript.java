@@ -182,11 +182,11 @@ public final class EffectScript {
     }
 
     /**
-     * The three decisions the codes cannot make for themselves, because they
-     * follow from how the source format triggers, mixes and stops rather than
-     * from anything in the bytes.
+     * The decisions the codes cannot make for themselves, because they
+     * follow from how the source format triggers, mixes, stops and retunes
+     * rather than from anything in the bytes.
      *
-     * <p>YM is the reason all three exist. A YM frame carries no trigger: a
+     * <p>YM is the reason the first three exist. A YM frame carries no trigger: a
      * digidrum is a code sitting in R1 or R3, repeated for as long as the
      * dump wants it, so the reference player re-fires the sample on every
      * one of those frames and the script has to compile the same stutter to
@@ -210,7 +210,7 @@ public final class EffectScript {
      * retrigger stream simply takes the voice instead of retrying for the rest
      * of the sample's computed length.
      *
-     * <p>{@link #YM} is the trio a YM tune is packed with. A tune carries the
+     * <p>{@link #YM} is the set a YM tune is packed with. A tune carries the
      * set its own source implies, because the answer is a property of the
      * format the codes were read out of and nothing later in the pipeline can
      * work it out again.

@@ -44,10 +44,11 @@ package org.yx6;
  * design.
  *
  * <p>The sample table is {@code count} entries of {byte offset (long),
- * sample length (word)}, each offset pointing at PSG-ready volume bytes
- * 0..15 followed by one end marker with bit 7 set. A PCM stream plays one
- * of these out, and its tick handler stops on the marker rather than
- * counting. YM calls them digidrums, and their numbering is the YM file's.
+ * sample length (word), loop point (word)}, each offset pointing at
+ * PSG-ready volume bytes 0..15 followed by one end marker with bit 7 set.
+ * A PCM stream plays one of these out, and its tick handler stops on the
+ * marker rather than counting - or, where the loop point is not
+ * {@link #SAMPLE_ONE_SHOT}, goes back to it and plays on. YM calls them digidrums, and their numbering is the YM file's.
  *
  * <p>Each section is a complete, standard ST4 container - twenty-byte header,
  * then its four streams - packed at unit size 1, placed on a long boundary so
@@ -71,7 +72,7 @@ public final class Yx6Format {
     /** {@code 'YX6!'}, the first four bytes of every file. */
     public static final int MAGIC = 0x59583621;
 
-    /** The only version this release writes or reads: 9 carries a retrigger
+    /** The only version this release writes or reads: 10 carries a PCM
      * stream's loop point in the sample table and a rate that reprograms a
      * running timer, 9 carried a retrigger stream's shape in the script
      * instead of leaving the player to find it,

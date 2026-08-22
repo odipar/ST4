@@ -28,9 +28,9 @@ bus contention adds 7 to 10 per cent.
 
 | tick rate | period | the mask, as a share |
 |---|---|---|
-| 25,600 a second, the ceiling | 312 cycles | **150%** |
-| 6,000, a typical drum | 1,333 | 36% |
-| 3,000, a SID | 2,666 | 18% |
+| 25,600 a second, the ceiling | 312 cycles | **160%** |
+| 6,000, a typical drum | 1,333 | 38% |
+| 3,000, a SID | 2,666 | 19% |
 
 The top row is the one that matters. At the ceiling the mask is longer
 than a whole tick period, and the MFP keeps **one** pending bit per
@@ -76,8 +76,12 @@ writes is harmless: the next write selects again.
 | harness, 1700 frames | 93 ticks | **91** |
 | longest interrupt-free span in a frame | ~500 cycles | **one instruction** |
 
-The frame got *cheaper*. A wider write costs a few cycles, and the
-save/mask/restore it replaced cost more. The chip checksum is unchanged -
+The frame got *cheaper* - the old masked build measured against the new
+unmasked one. A wider write costs a few cycles, and the save/mask/restore
+it replaced cost more. The build that shipped keeps the mask over the
+wider writes, and that one costs a tick more than the old build rather
+than less - 94 against 93, in the table below. The atomic write is what
+the tick bought. The chip checksum is unchanged -
 `sum=2941391492` - so the same values reach the same registers in the
 same order; only the timing of what happens between them changed.
 
@@ -113,7 +117,7 @@ the tick timing instead.
 
 That leaves the numbers as a menu rather than a verdict:
 
-| | masked (default) | -nomask |
+| | masked, atomic writes (default) | -nomask |
 |---|---|---|
 | player | 2,828 bytes | 2,820 |
 | harness, 1700 frames | 94 ticks | 91 |

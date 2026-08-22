@@ -1032,10 +1032,11 @@ def patched_shape(player, timer: str) -> int:
 def run_shape_source() -> str:
     """Where a retrigger stream reads the shape it restarts.
 
-    A sync-buzzer rewrites R13 with one shape at the timer's rate, and format
-    v8 lets the file say where that shape came from: YM6 keeps it in the low
-    nibble of the voice the channel names, and a .YMR keeps it with the
-    envelope, in R13 itself. The two are told apart here by making them
+    A sync-buzzer rewrites R13 with one shape at the timer's rate, and from
+    format v9 the file CARRIES that shape rather than leaving the player to
+    find it: the YM front end reads it out of the low nibble of the voice the
+    channel names, and the .ymr front end out of R13, where RhYMe keeps it.
+    The two are told apart here by making them
     DISAGREE - a voice whose nibble is one value while R13 holds another -
     and reading the tick's own patched immediate, which no chip write reveals
     and no other rig looks at.

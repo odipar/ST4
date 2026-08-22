@@ -526,8 +526,9 @@ class Stage:
         other side.
       * BUZZING - the voice is running an RTE, which drives R13 and leaves
         the volume register alone, so the frame write happens and carries
-        the dump's own byte. Under format v8 a .ymr's retrigger streams take
-        their shape from R13, so nothing is hidden in the nibble and this is
+        the dump's own byte. From format v9 the shape a retrigger stream
+        restarts is carried in the script, and the .ymr front end reads it
+        off R13, so nothing is hidden in the nibble and this is
         an ordinary open register: it is compared whole, which is a stricter
         check than the half-comparison a smuggled shape used to allow.
       * STARTED - a fresh square arms this frame. It restarts at phase zero,
