@@ -478,7 +478,7 @@ the gate is shut over it — `yx6_gates` has overwritten that write with two
 `nop`s, so it does not reach the chip at all. A retrigger stream's shape
 cannot: an RTE leaves the voice's volume to the song, so that byte is
 delivered, and a shape hidden in its low nibble would cost the voice its
-level on any frame not already following the envelope. Format v8 is the
+level on any frame not already following the envelope. Format v9 is the
 answer to that — see **Where a retrigger stream's shape comes from** — and
 a `.ymr` sets its flag, so the only parameter this conversion writes is a
 PCM stream's sample number.
@@ -521,33 +521,36 @@ difference paid in bytes, and what it buys is the flat frame.
 ### Where a retrigger stream's shape comes from
 
 A sync-buzzer restarts the hardware envelope at audio rate, so what a
-retrigger stream needs to know is which shape to restart. YM6 keeps that in
-the voice's own volume register, and the player reads it from there — which
-costs nothing for a YM file, because a voice following the envelope makes the
-chip ignore that register's low nibble, so the byte has one meaning and it is
-the shape.
+retrigger stream needs to know is which shape to restart. The two formats
+file it in different places, and neither of them is where the player looks.
 
-That is YM6's filing rather than the chip's. There is one envelope generator
-and any number of voices may follow it, so a shape is not per-voice data;
-YM6 had a spare nibble on a voice and nowhere better to put it. RhYMe files
-it where the chip does, keeps it in its own copy of R13, and puts the voice
-on the envelope the frame *after* it starts the buzzer. On that one frame the
-nibble is still a level, and the buzzer and the voice cannot both have it.
+A toggle stream's volume and a PCM stream's sample number are read off the
+voice's own register ring, and that is right, because both belong to the
+voice the effect took over: the level a SID chops is the level the tune put
+in that register. A shape belongs to nothing of the kind. There is one
+envelope generator and any number of voices may follow it, so the shape is
+not a voice's data — YM6 keeps it in a voice's nibble because the parameter
+field sits at one place for all three kinds and a buzzer's voice, following
+the envelope, leaves that nibble spare. RhYMe keeps it where the chip does,
+in its own copy of R13.
 
-Format **v8** lets the file say which. Header flag bit 5 clear is YM6's
-arrangement and the default; set, a retrigger stream takes its shape from the
-last value written to R13, which the player keeps as a shadow. The shadow is
-free: the frame write already loads R13's byte and branches on the marker
-that means *leave the envelope alone*, so keeping it is one `move.b` on the
-branch that already ran. Before a tune has written a shape at all the shadow
-reads `$08`, which is what RhYMe's player primes its own with and what the
-`.YMR` spec says to assume.
+So from **v9** the player does not look for it at all: the shape is CARRIED,
+in X's high nibble, one value per frame. Whichever front end read the file
+knows where its format filed it and simply writes the number down — the same
+way the other three source differences already reach the player, as different
+values rather than as a mode. `yx6_shape` is five instructions with no branch,
+there is no header flag, no shadow, and no priming: a tune that arms a buzzer
+before it has set a shape carries whatever its format assumes, `$08` for a
+`.ymr` and `0` for a YM dump, because that is the front end's fact to know.
 
-Both places that patch the retrigger tick go through one routine, so a shape
-that moves under a running buzzer is tracked from wherever its arm read it,
-and the packer keeps the same value on the same frames — the burst writes R13
-before the actions run, so a frame that writes a shape and arms a buzzer arms
-it on the new one.
+One nibble for the whole frame is not a budget compromise. Two retrigger
+streams cannot restart different shapes — there is one generator — and
+ST-Sound agrees: its `envShape` is a single variable, written by an R13 write
+and then by each buzzer in slot order, last one winning. Before v9 each
+channel patched its own tick from its own voice, which on a tune running two
+buzzers at once gave the generator two shapes at two rates. `jamblv1` does
+exactly that on 462 of its 972 buzzer frames, and the old arrangement
+restarted the wrong shape on 15 of them.
 
 ### What a .ymr gives up
 
@@ -697,8 +700,8 @@ MFP timer rather than by the frame.
 | offset | size | field |
 |---:|---:|---|
 | 0 | 4 | `'YX6!'` |
-| 4 | 2 | format version (8) |
-| 6 | 2 | flags: bit 0 set when the tune loops; bits 1-4, one per timer channel, set when the tune uses it; bit 5 set when its retrigger streams take their shape from R13 rather than from a voice |
+| 4 | 2 | format version (9) |
+| 6 | 2 | flags: bit 0 set when the tune loops; bits 1-4, one per timer channel, set when the tune uses it |
 | 8 | 4 | `O`, the frame count |
 | 12 | 2 | frame rate in Hz: how often the player is called |
 | 14 | 2 | `S`, the stream count: 25, being fourteen frame streams R0..R13 and eleven of script data, M X T and four A/P pairs |

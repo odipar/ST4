@@ -319,7 +319,9 @@ public final class Ymr {
     private static Tune trim(Tune tune, int start, int end, int loopFrame) {
         return new Tune(end - start, tune.frameRate(), tune.masterClock(), loopFrame,
                 slice(tune.registers(), start, end), slice(tune.codes(), start, end),
-                slice(tune.counts(), start, end), tune.samples(), tune.semantics(),
+                slice(tune.counts(), start, end),
+                java.util.Arrays.copyOfRange(tune.shapes(), start, end),
+                tune.samples(), tune.semantics(),
                 tune.name(), tune.author(), tune.comment(), tune.notes());
     }
 

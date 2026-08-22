@@ -71,12 +71,13 @@ public final class Yx6Format {
     /** {@code 'YX6!'}, the first four bytes of every file. */
     public static final int MAGIC = 0x59583621;
 
-    /** The only version this release writes or reads: 8 let a retrigger
-     * stream take its shape from R13 rather than from a voice, 7 made the
-     * channel count four and put the channel-to-timer map in the file, 6
-     * made room for a third timer channel, 5 replaced the interpreted
-     * effect streams with the compiled effect script. */
-    public static final int VERSION = 8;
+    /** The only version this release writes or reads: 9 carries a retrigger
+     * stream's shape in the script instead of leaving the player to find it,
+     * 8 let it come from R13 rather than from a voice and needed a mode to
+     * say which, 7 made the channel count four and put the channel-to-timer
+     * map in the file, 6 made room for a third timer channel, 5 replaced the
+     * interpreted effect streams with the compiled effect script. */
+    public static final int VERSION = 9;
 
     /** Flag bit 0: the tune loops back to {@code L} instead of ending. */
     public static final int FLAG_LOOPS = 1;
@@ -88,20 +89,6 @@ public final class Yx6Format {
         return 2 << channel;
     }
 
-    /**
-     * Flag bit 5: this file's retrigger streams read the envelope shape they
-     * restart out of R13's last written value, rather than out of the low
-     * nibble of the voice the channel names.
-     *
-     * <p>Clear is YM6's arrangement and stays the default, because that is
-     * where a YM file's bytes actually are: the format keeps a sync-buzzer's
-     * shape in the voice's volume register, where it costs nothing, since a
-     * voice following the envelope makes the chip ignore that nibble anyway.
-     * A source that files the shape with the envelope instead - as the chip
-     * does, there being one envelope generator and any number of voices
-     * following it - sets this and hands the player nothing to smuggle.
-     */
-    public static final int FLAG_SHAPE_FROM_R13 = 0x20;
 
     /** R0..R13 plus the script streams M, X, T and four A/P pairs. */
     public static final int STREAMS = 25;

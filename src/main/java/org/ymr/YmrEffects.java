@@ -67,12 +67,11 @@ import org.yx6.Yx6Format;
  *
  * <h2>What the script still reads off the chip</h2>
  *
- * <p>The compiler reads three of a stream's parameters out of the voice's own
- * volume register rather than out of a stream of their own, because that is
- * where the player finds them at run time: a PCM stream's sample number from
- * {@code R(8+voice) & 31}, a toggle stream's volume and a retrigger stream's
- * shape from {@code R(8+voice) & 15}. A front end has to present them there,
- * and this one does:
+ * <p>Two of a stream's parameters are read out of the voice's own volume
+ * register rather than out of a stream, because that is where the player
+ * finds them at run time and where they belong: they are the voice's, and
+ * the effect took the voice over. A front end has to present them there, and
+ * this one does:
  *
  * <ul>
  *   <li>A PWM needs nothing written. RhYMe's PWM handler toggles the voice
@@ -86,35 +85,14 @@ import org.yx6.Yx6Format;
  *       never reaches the chip. It is also load-bearing - the script recomputes a
  *       sample's length wherever its code changes, so the index has to be
  *       readable on every one of those frames and not only on the first.</li>
- *   <li>An RTE's shape is written into the LOW NIBBLE of the volume byte on
- *       every frame the retrigger code is armed. RhYMe's RTE handler rewrites
- *       R13 with the player's own copy of the envelope shape; yx6's retrigger
- *       tick does the same thing but reads the shape out of the voice's volume
- *       register, so the two have to be brought together, and the volume
- *       nibble is the only place to put it.</li>
  * </ul>
  *
- * <p>Overwriting a volume nibble is FREE precisely when the register's bit 4,
- * the envelope-mode bit, is set: the chip then takes the voice's level from the
- * envelope generator and ignores the nibble entirely. That is also the only
- * configuration in which a sync-buzzer is audible at all, so a song that means
- * its RTE has already set it. The nibble is written whether or not the bit is,
- * though, because the script does not offer the choice: it reads
- * {@code R(8+voice)} on every frame the retrigger code is armed and patches the
- * retrigger tick with what it finds, so declining to write is not declining to
- * be read. It only feeds the buzzer a volume as a shape - at audio rate, for as
- * long as the effect runs, which is the louder mistake by a wide margin.
+ * <p>An RTE's shape is the third parameter and is not one of them, because it
+ * is not a voice's: there is one envelope generator and any number of voices
+ * may follow it. From format v9 it is carried in the script instead - see
+ * {@link #shapes()} - so nothing is written over a volume register, and the
+ * volume byte a .YMR popped reaches the chip exactly as the dump had it.
  *
- * <p>The frames where the nibble is not free are the ARM frames and essentially
- * only those. An RTE is armed while the voice is still on a plain level and the
- * song puts it on the envelope from the frame after, which is where it has to be
- * for the buzzer to be heard at all; on every one of those later frames the
- * write costs nothing. So what the shape actually costs is one 20 ms frame at
- * whatever level its number happens to name, on a voice the very next frame
- * hands to the envelope generator. {@link Tune#notes()} counts the frames
- * where the byte actually moves - not the frames where bit 4 happens to be
- * clear, most of which write back the level that was already there - and says
- * what they cost.
  *
  * <h2>What a .YMR asks for and a .yx6 cannot give</h2>
  *
@@ -203,7 +181,7 @@ public final class YmrEffects {
      * ends on that frame, so the script must not leave it running to its marker.
      */
     public static final EffectScript.Semantics SEMANTICS =
-            new EffectScript.Semantics(false, false, true, true);
+            new EffectScript.Semantics(false, false, true);
 
     /** Code bit 3: flipped on every sample trigger, so that two pops of one
      * index at one rate are two different code bytes and the script starts the
@@ -233,6 +211,10 @@ public final class YmrEffects {
 
     /** The largest sample number a yx6 PCM action can name, from the five bits
      * the script reads it out of. */
+    /** The shape an RTE restarts before the song has popped one. The .YMR
+     * spec says to assume it and RhYMe's player primes its shadow with it. */
+    private static final int SHAPE_BEFORE_ANY_POP = 0x08;
+
     private static final int SAMPLES = Yx6Format.MAX_SAMPLES;
 
     private final YmrReader.Song source;
@@ -295,8 +277,38 @@ public final class YmrEffects {
         // come out empty and the caller's file stem is the only name there is.
         return new Tune(frames, source.frameRate(), source.ymClock(),
                 source.loops() ? source.loopFrame() : frames,
-                registers, codes, counts, samples, SEMANTICS,
+                registers, codes, counts, shapes(), samples, SEMANTICS,
                 name, "", "", notes);
+    }
+
+    /**
+     * The envelope shape a retrigger stream would restart, frame by frame.
+     *
+     * <p>RhYMe files it where the chip does. An RTE handler rewrites R13 with
+     * the player's own copy of the shape - {@code _ymr_shadow+R_ENVS}, primed
+     * with {@code $08} - so the shape in force is simply the last value the
+     * envelope-shape stream popped. The reader marks a frame that popped
+     * nothing with {@link YmrReader#NO_ENVELOPE_SHAPE}, which is the marker
+     * the frame write means by it, so what a retrigger wants is the last
+     * value before it rather than this frame's absence of one.
+     *
+     * <p>Before the song has popped a shape at all the spec says to assume
+     * {@code $08}, and RhYMe's player primes its shadow with the same. That
+     * assumption is a fact about the .YMR format, so it belongs here rather
+     * than in a player that would otherwise have to hold one assumption per
+     * format it might be fed.
+     */
+    private byte[] shapes() {
+        byte[] shapes = new byte[frames];
+        int shape = SHAPE_BEFORE_ANY_POP;
+        for (int frame = 0; frame < frames; frame++) {
+            int written = registers[R_ENVELOPE_SHAPE][frame] & 0xFF;
+            if (written != YmrReader.NO_ENVELOPE_SHAPE) {
+                shape = written & 15;
+            }
+            shapes[frame] = (byte) shape;
+        }
+        return shapes;
     }
 
     // ------------------------------------------------------------- the samples

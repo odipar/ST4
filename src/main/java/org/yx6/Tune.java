@@ -40,6 +40,15 @@ import org.jspecify.annotations.Nullable;
  * channel that never acts looks like, and the script compiler then walks
  * every channel the format has without asking where the bytes came from.
  *
+ * <p>{@code shapes} is the envelope shape a RETRIGGER STREAM would restart on
+ * each frame - one value, not one per channel, because the chip has one
+ * envelope generator and a shape is not per-voice data. It is a front end's
+ * to fill, and the two fill it from different places: a YM6 file keeps a
+ * buzzer's shape in the low nibble of the voice its code names, while RhYMe
+ * keeps it where the chip does, in R13. Resolving that here rather than in
+ * the compiler is what keeps the compiler and the player free of a mode -
+ * the value is simply carried, the way every other operand is.
+ *
  * <p>{@code samples} are the PCM streams' sources, PSG-ready volume values
  * 0..15 one per byte. {@code semantics} is what the source dialect implies
  * about triggering and stopping and cannot be read out of the codes - see
@@ -52,7 +61,7 @@ import org.jspecify.annotations.Nullable;
  */
 public record Tune(int frames, int frameRate, long masterClock, int loopFrame,
                    byte[][] registers, byte[][] codes, byte[][] counts,
-                   byte[][] samples, EffectScript.Semantics semantics,
+                   byte[] shapes, byte[][] samples, EffectScript.Semantics semantics,
                    String name, String author, String comment,
                    List<String> notes) {
 
@@ -101,6 +110,10 @@ public record Tune(int frames, int frameRate, long masterClock, int loopFrame,
         }
         codes = widen(codes, frames);
         counts = widen(counts, frames);
+        if (shapes.length != frames) {
+            throw new IllegalArgumentException("a tune carries one envelope shape a"
+                    + " frame, not " + shapes.length + " for " + frames);
+        }
         notes = List.copyOf(notes);
     }
 
@@ -147,7 +160,8 @@ public record Tune(int frames, int frameRate, long masterClock, int loopFrame,
         return new Tune(padding.total, tune.frameRate, tune.masterClock,
                 split > 0 ? split + splitPad : tune.loopFrame,
                 padding.stretch(tune.registers), padding.stretch(tune.codes),
-                padding.stretch(tune.counts), tune.samples, tune.semantics,
+                padding.stretch(tune.counts), padding.stretch(tune.shapes),
+                tune.samples, tune.semantics,
                 tune.name, tune.author, tune.comment, tune.notes);
     }
 
@@ -167,6 +181,13 @@ public record Tune(int frames, int frameRate, long masterClock, int loopFrame,
      * every stream, which is the only way they stay one timeline. */
     private record Padding(int frames, int atSplit, int splitPad, int atEnd,
                            int endPad, int total) {
+
+        /** One stream, duplicated frame for frame with the rest of them:
+         * a shape that did not follow its registers would arm a buzzer on
+         * the wrong one for as long as the padding lasts. */
+        byte[] stretch(byte[] values) {
+            return stretch(new byte[][] {values})[0];
+        }
 
         byte[][] stretch(byte[][] streams) {
             byte[][] out = new byte[streams.length][];

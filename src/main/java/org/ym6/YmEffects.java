@@ -2,6 +2,7 @@ package org.ym6;
 
 import org.yx6.EffectScript;
 import org.yx6.Tune;
+import org.yx6.Ym2149;
 import org.yx6.Yx6Format;
 
 /**
@@ -182,8 +183,50 @@ public final class YmEffects {
         return new Tune(song.frames(), song.playerHz(), song.masterClock(),
                 (int) Math.min(song.loopFrame(), Integer.MAX_VALUE),
                 java.util.Arrays.copyOf(song.registers(), Yx6Format.REGISTER_STREAMS),
-                fx.codes(), fx.counts(), fx.samples(), EffectScript.Semantics.YM,
+                fx.codes(), fx.counts(), shapes(song, fx), fx.samples(),
+                EffectScript.Semantics.YM,
                 song.name(), song.author(), song.comment(), fx.notes());
+    }
+
+    /**
+     * The envelope shape a retrigger stream would restart, frame by frame,
+     * as ST-Sound arrives at it.
+     *
+     * <p>Its {@code envShape} has two writers and the order is the whole of
+     * the answer. {@code readYm6} writes R13 first, and only when the frame
+     * does not carry the leave-it-alone marker; then {@code readYm6Effect}
+     * runs for slot 1 and slot 2, and a sync-buzzer in either calls
+     * {@code syncBuzzerStart(freq, pReg[voice+8] &amp; 15)} - unconditionally,
+     * on every frame the code is present, not only where it arrives. So a
+     * buzzer's own nibble overwrites R13's value, and where both slots carry
+     * one the second wins by arriving last.
+     *
+     * <p>That YM6 files a shape on a voice at all is its own decision rather
+     * than the chip's - the envelope generator is not a voice's - and it is
+     * a reasonable one, since the parameter field sits at one place for all
+     * three kinds and a buzzer's voice is following the envelope, which makes
+     * that nibble the one byte going spare. It is measured: on
+     * {@code jamblv1} R13 and the nibble disagree on hundreds of frames, and
+     * the nibble is what the reference player restarts.
+     */
+    private static byte[] shapes(Ym6Reader.Song song, Extraction fx) {
+        byte[] shapes = new byte[song.frames()];
+        int shape = 0;                      // ST-Sound's reset leaves it here
+        for (int frame = 0; frame < song.frames(); frame++) {
+            int written = song.registers()[Ym2149.ENVELOPE_SHAPE][frame] & 0xFF;
+            if (written != Ym2149.NO_ENVELOPE_CHANGE) {
+                shape = written & 15;
+            }
+            for (int slot = 0; slot < fx.codes().length; slot++) {
+                int code = fx.codes()[slot][frame] & 0xFF;
+                if (code != 0 && (code & 0xC0) == KIND_RETRIGGER) {
+                    int voice = ((code >> 4) & 3) - 1;
+                    shape = song.registers()[8 + voice][frame] & 15;
+                }
+            }
+            shapes[frame] = (byte) shape;
+        }
+        return shapes;
     }
 
     public static Extraction extract(Ym6Reader.Song song) {
