@@ -52,7 +52,7 @@ public final class Ymr {
             YmrReader.Song dump = read(args[1]);
             Tune converted = YmrEffects.convert(dump, stem(args[1]));
             EffectScript.Result script = EffectScript.compile(converted,
-                    dump.loops() ? dump.loopFrame() : -1, 1, false, YmrEffects.TIMERS);
+                    dump.loops() ? dump.loopFrame() : -1, 1, YmrEffects.TIMERS);
             System.out.printf("%d frames, split %d%n", script.frames(), script.split());
             for (int f = 0; f < script.frames(); f++) {
                 if (script.m()[f] == 0 && script.r7force()[f] == 0) {
@@ -280,7 +280,7 @@ public final class Ymr {
         Yx6Encoder.Result result;
         try {
             result = Yx6Encoder.encode(tune, ringSize, chunk, loopFrame, true, unit,
-                    false, YmrEffects.TIMERS);
+                    YmrEffects.TIMERS);
         } catch (IllegalArgumentException e) {
             // The encoder always says what it rejected, but getMessage() is
             // @Nullable, so give it something to fall back on - and where the

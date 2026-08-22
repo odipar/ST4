@@ -338,6 +338,13 @@ public final class Yx6 {
         // comes next, invents frames the file never had.
         YmEffects.Extraction effects = YmEffects.extract(song, drumHz);
         Tune tune = YmEffects.tune(song, effects);
+        // -sidresume is the one source semantic a listener picks rather than a
+        // format: no YM file records which gap model its own player used, so
+        // the front end's answer is a default and this overrides it, the way
+        // -lF overrides the loop frame the header carries.
+        if (sidResume) {
+            tune = tune.under(tune.semantics().resuming());
+        }
 
         // The default unit is 2, measured a few percent cheaper per frame for
         // little ratio. A tune whose length or loop frame is odd is PADDED to
@@ -373,7 +380,7 @@ public final class Yx6 {
         Yx6Encoder.Result result;
         try {
             result = Yx6Encoder.encode(tune, ringSize, chunk, loopFrame, true, unit,
-                    sidResume, timerMap);
+                    timerMap);
         } catch (IllegalArgumentException e) {
             // The encoder always says what it rejected, but getMessage() is
             // @Nullable, so give it something to fall back on.

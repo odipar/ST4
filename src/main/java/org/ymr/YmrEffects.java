@@ -181,7 +181,7 @@ public final class YmrEffects {
      * ends on that frame, so the script must not leave it running to its marker.
      */
     public static final EffectScript.Semantics SEMANTICS =
-            new EffectScript.Semantics(false, false, true);
+            new EffectScript.Semantics(false, false, true, false);
 
     /** Code bit 3: flipped on every sample trigger, so that two pops of one
      * index at one rate are two different code bytes and the script starts the

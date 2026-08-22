@@ -108,20 +108,8 @@ public final class Yx6Encoder {
      */
     public static Result encode(Tune tune, int ringSize, int chunk,
                                 int loopFrame, boolean progress, int unit) {
-        return encode(tune, ringSize, chunk, loopFrame, progress, unit, false);
-    }
-
-    /**
-     * As above, choosing the phase policy for toggle streams (the flag
-     * keeps the scene's name): {@code sidResume} packs the
-     * maxYMiser mask-and-resume semantics instead of the default ym2149-rs
-     * phase-zero restarts - see {@link EffectScript#compile}.
-     */
-    public static Result encode(Tune tune, int ringSize, int chunk,
-                                int loopFrame, boolean progress, int unit,
-                                boolean sidResume) {
         return encode(tune, ringSize, chunk, loopFrame, progress, unit,
-                sidResume, Yx6Format.DEFAULT_TIMERS);
+                Yx6Format.DEFAULT_TIMERS);
     }
 
     /**
@@ -133,8 +121,7 @@ public final class Yx6Encoder {
      * arrives with the tune as its {@link EffectScript.Semantics}.
      */
     public static Result encode(Tune tune, int ringSize, int chunk, int loopFrame,
-                                boolean progress, int unit, boolean sidResume,
-                                int timerMap) {
+                                boolean progress, int unit, int timerMap) {
         // The floor first, on what every tune decodes; the exact check waits
         // for the script, since a tune that leaves channels idle decodes
         // fewer streams and may use a smaller chunk.
@@ -169,7 +156,7 @@ public final class Yx6Encoder {
         // optimizer packs a repeat to nothing, and the player never reads
         // them.
         EffectScript.Result script = EffectScript.compile(tune,
-                loops ? loopFrame : -1, unit, sidResume, timerMap);
+                loops ? loopFrame : -1, unit, timerMap);
         int channels = channelsUsed(script);
         problem = Yx6Format.checkShape(ringSize, chunk, unit,
                 Yx6Format.liveStreams(channels));

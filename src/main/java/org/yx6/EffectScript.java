@@ -212,12 +212,22 @@ public final class EffectScript {
      * work it out again.
      */
     public record Semantics(boolean pcmHoldRetriggers, boolean forceMixerOnPcm,
-                            boolean channelEndsPcm) {
+                            boolean channelEndsPcm, boolean sidResume) {
 
         /** The YM dialect: a held PCM code retriggers its sample every
-         * frame, a voice a sample owns is forced off the mixer, and nothing
-         * ends a sample but its own marker tick. */
-        public static final Semantics YM = new Semantics(true, true, false);
+         * frame, a voice a sample owns is forced off the mixer, nothing ends
+         * a sample but its own marker tick, and a released toggle stream
+         * comes back at phase zero rather than resuming - the ym2149-rs
+         * model, which {@code -sidresume} swaps for maxYMiser's. */
+        public static final Semantics YM = new Semantics(true, true, false, false);
+
+        /** The same, with the maxYMiser gap model: a release only masks the
+         * timer interrupt and a re-arrival resumes the square where it got
+         * to. No YM file records which its own player used, so this is the
+         * one source semantic a listener picks rather than a format. */
+        public Semantics resuming() {
+            return new Semantics(pcmHoldRetriggers, forceMixerOnPcm, channelEndsPcm, true);
+        }
     }
 
     /**
@@ -289,7 +299,6 @@ public final class EffectScript {
     private int gates;                            // bit v = muted
     private final List<int[]> reopens = new ArrayList<>();
     private final List<String> notes = new ArrayList<>();
-    private boolean sidResume;          // the maxYMiser gap model
     private final Semantics semantics;  // what the source format decides
 
     // The emission arrays, over the full simulated horizon; cut at the end.
@@ -330,21 +339,7 @@ public final class EffectScript {
      * {@code unit} aligns the rotated split the way the encoder needs.
      */
     public static Result compile(Tune tune, int loopFrame, int unit) {
-        return compile(tune, loopFrame, unit, false);
-    }
-
-    /**
-     * As above, choosing the phase policy: {@code false} (the default) is
-     * the ym2149-rs model - a release stops the timer and every re-arrival
-     * restarts the square at phase zero; {@code true} is the maxYMiser
-     * model - a release only masks the interrupt and a re-arrival resumes
-     * the free-running phase. Both are verbs the player always carries;
-     * the model is purely which bytes this simulator emits, so it could
-     * even change mid-song if anything ever knew where to switch.
-     */
-    public static Result compile(Tune tune, int loopFrame, int unit,
-                                 boolean sidResume) {
-        return compile(tune, loopFrame, unit, sidResume, Yx6Format.DEFAULT_TIMERS);
+        return compile(tune, loopFrame, unit, Yx6Format.DEFAULT_TIMERS);
     }
 
     /**
@@ -360,10 +355,8 @@ public final class EffectScript {
      * arrive already normalized, and the semantics say only what the codes
      * leave open.
      */
-    public static Result compile(Tune tune, int loopFrame, int unit,
-                                 boolean sidResume, int timerMap) {
+    public static Result compile(Tune tune, int loopFrame, int unit, int timerMap) {
         EffectScript script = new EffectScript(tune, loopFrame);
-        script.sidResume = sidResume;
         java.util.Arrays.fill(script.timers, (byte) timerMap);
         return script.run(unit);
     }
@@ -615,7 +608,7 @@ public final class EffectScript {
         cut(p, index, -1);
         if (type == KIND_TOGGLE) {
             openOld(old);               // bsr yx6_burst_open_old
-            if (sidResume) {
+            if (tune.semantics().sidResume()) {
                 channel.masked = true;
                 emit(p, index, action(VERB_RELEASE, 0, RELEASE_MASK), 0);
                 return;

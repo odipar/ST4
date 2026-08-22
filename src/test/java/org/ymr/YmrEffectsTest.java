@@ -545,7 +545,7 @@ final class YmrEffectsTest {
     }
 
     private static EffectScript.Result compile(Tune tune) {
-        return EffectScript.compile(tune, -1, 1, false, YmrEffects.TIMERS);
+        return EffectScript.compile(tune, -1, 1, YmrEffects.TIMERS);
     }
 
     private static boolean note(Tune tune, String fragment) {
