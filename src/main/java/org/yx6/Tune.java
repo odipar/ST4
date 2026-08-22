@@ -54,7 +54,13 @@ import org.jspecify.annotations.Nullable;
  * about triggering and stopping and cannot be read out of the codes - see
  * {@link EffectScript.Semantics}. {@code loopFrame} is the SOURCE's loop
  * frame, which is a default and not a decision: a CLI may override it, drop
- * it, or find it outside the tune. {@code name}, {@code author} and
+ * it, or find it outside the tune. READ IT ONLY THROUGH A CLI THAT HAS DONE
+ * THAT: a front end whose format can say "no loop" has nowhere in an int to
+ * say it, and {@code org.ymr} writes {@code frames} there, while
+ * {@code org.ym6} writes whatever the header held even when that is past the
+ * end. Both are ranges the field cannot distinguish from a real loop frame,
+ * so a third consumer that trusts it will be wrong about one format or the
+ * other. {@code name}, {@code author} and
  * {@code comment} are what a report and the SNDH tags need, empty where a
  * format carries no such thing, and {@code notes} is what the front end had
  * to change on the way here, in the order it found it.
@@ -125,6 +131,26 @@ public record Tune(int frames, int frameRate, long masterClock, int loopFrame,
         if (shapes.length != frames) {
             throw new IllegalArgumentException("a tune carries one envelope shape a"
                     + " frame, not " + shapes.length + " for " + frames);
+        }
+        // A code names a kind in bits 7-6 and a voice PLUS ONE in bits 5-4, so
+        // zero voice bits mean the channel is idle and the whole byte must be
+        // 0. A code with a kind and no voice would compile to an action byte
+        // whose voice field is -1, and a negative voice does not stay in its
+        // three bits: it floods the verb above it and the player would read
+        // the result as another verb entirely. Nothing this repository writes
+        // can produce one - both front ends drop a voiceless code to idle -
+        // which is exactly why it is worth refusing here rather than trusting
+        // the next front end to remember.
+        for (int channel = 0; channel < codes.length; channel++) {
+            for (int frame = 0; frame < frames; frame++) {
+                int code = codes[channel][frame] & 0xFF;
+                if (code != 0 && (code & 0x30) == 0) {
+                    throw new IllegalArgumentException("channel " + channel
+                            + " carries the code " + String.format("$%02X", code)
+                            + " on frame " + frame + ", which names a kind but no"
+                            + " voice; an idle channel's code is 0");
+                }
+            }
         }
         notes = List.copyOf(notes);
     }
@@ -227,7 +253,14 @@ public record Tune(int frames, int frameRate, long masterClock, int loopFrame,
     }
 
     private static byte[][] widen(byte[][] streams, int frames) {
-        if (streams.length >= Yx6Format.CHANNELS) {
+        if (streams.length > Yx6Format.CHANNELS) {
+            throw new IllegalArgumentException("a tune offers " + streams.length
+                    + " timer channels and the format carries "
+                    + Yx6Format.CHANNELS + "; widening cannot drop the rest"
+                    + " quietly, so a front end with more to say has to say it"
+                    + " to a format that has room");
+        }
+        if (streams.length == Yx6Format.CHANNELS) {
             return streams;
         }
         byte[][] out = Arrays.copyOf(streams, Yx6Format.CHANNELS);

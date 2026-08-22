@@ -2,9 +2,17 @@ package org.ym6;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.io.ByteArrayOutputStream;
+import java.io.PrintStream;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import org.yx6.Tune;
 import org.yx6.Yx6Format;
 
@@ -50,5 +58,89 @@ final class Yx6Test {
         for (int r = 0; r < Yx6Format.REGISTER_STREAMS; r++) {
             assertEquals(source.registers()[r][0], padded.registers()[r][0]);
         }
+    }
+
+    @Test
+    void givesUpOnAShapeWithNoSafeFrameNearTheBoundary() {
+        // Every frame writes R13, so no frame may be duplicated: an envelope
+        // restarted twice is audible, which is the whole of the predicate.
+        byte[][] registers = Ym6TestData.registers(FRAMES);
+        for (int frame = 0; frame < FRAMES; frame++) {
+            registers[13][frame] = 0x0A;
+        }
+        Ym6Reader.Song dump = Ym6Reader.read(Ym6TestData.file(registers, FRAMES, true));
+
+        assertNull(Yx6.padToUnit(dump, YmEffects.tune(dump), 201, 2),
+                "no safe frame near the split, so the caller has to fall back to -k1");
+    }
+
+    // ------------------------------------------------------- the command line
+
+    /**
+     * The CLI's own arithmetic, which nothing exercised before: trimming,
+     * the loop-frame override, and what each does to a tune whose numbers do
+     * not fit. These run {@link Yx6#main} rather than reaching past it,
+     * because the bugs they are here for lived in the order its steps run in
+     * rather than in any one of them.
+     */
+    private static String pack(@TempDir Path dir, String name, String... options)
+            throws Exception {
+        Path input = dir.resolve("tune.ym");
+        if (!Files.exists(input)) {
+            Files.write(input, Ym6TestData.file(Ym6TestData.registers(FRAMES),
+                    FRAMES, true));
+        }
+        String[] argv = new String[options.length + 3];
+        argv[0] = "-f";
+        System.arraycopy(options, 0, argv, 1, options.length);
+        argv[options.length + 1] = input.toString();
+        argv[options.length + 2] = dir.resolve(name).toString();
+
+        PrintStream out = System.out;
+        var captured = new ByteArrayOutputStream();
+        System.setOut(new PrintStream(captured, true, StandardCharsets.ISO_8859_1));
+        try {
+            Yx6.main(argv);
+        } finally {
+            System.setOut(out);
+        }
+        return captured.toString(StandardCharsets.ISO_8859_1);
+    }
+
+    @Test
+    void aLoopFrameOffTheEndOfTheTuneIsRefusedRatherThanReachedFor(@TempDir Path dir)
+            throws Exception {
+        // The padding probes the frame BEFORE the split, so a -lF past the end
+        // used to walk off the register array with an index out of bounds. An
+        // ODD one is the case that did it: an even one leaves no split padding
+        // to do and reaches the encoder's own complaint instead.
+        String report = pack(dir, "far.yx6", "-l" + (FRAMES + 501));
+
+        assertTrue(report.contains("looping from the start instead"), report);
+        assertTrue(Files.exists(dir.resolve("far.yx6")), "it should still pack");
+    }
+
+    @Test
+    void aTrimWindowMovesTheLoopFrameWithIt(@TempDir Path dir) throws Exception {
+        String report = pack(dir, "cut.yx6", "-startframe300", "-frames500");
+
+        assertTrue(report.contains("Trimmed to frames 300-799: 500 frames"), report);
+        assertTrue(Files.exists(dir.resolve("cut.yx6")));
+    }
+
+    @Test
+    void theReportCountsTheBytesTheFileActuallyCarries(@TempDir Path dir)
+            throws Exception {
+        // A rotated split hands the file some frames twice. The tune's length
+        // is what a musician has and stays in the first line; the ratio has to
+        // be against what was packed, or it flatters itself by the rotation.
+        String report = pack(dir, "rot.yx6", "-l401");
+
+        int played = Integer.parseInt(report.replaceAll("(?s).*Packed (\\d+) register.*",
+                "$1")) / Yx6Format.STREAMS;
+        byte[] file = Files.readAllBytes(dir.resolve("rot.yx6"));
+        int header = ((file[8] & 0xFF) << 24) | ((file[9] & 0xFF) << 16)
+                | ((file[10] & 0xFF) << 8) | (file[11] & 0xFF);
+        assertEquals(header, played, "the report and the header must agree on O");
     }
 }

@@ -51,12 +51,14 @@ quietly skipped.
     sample's bytes are written by MFP interrupt handlers the rig never runs -
     it calls YX6_play and nothing else - so none of them is observed. That
     side is the directed effect test's (run_effects in emu/test_yx6.py).
-  * The low nibble of a volume register on a frame where an RTE is armed. It
-    is not a volume there: the .yx6 retrigger tick reads the envelope shape
-    out of it, so the front end writes the shape over it. Bit 4, the
-    envelope-mode bit, is still the song's and is checked; the nibble is
-    checked against the shape the SPEC says is in force - the last value
-    envelope_shape popped, or $08 before the song has popped one - which is a
+  * Nothing about a volume register under a running RTE. From format v9 the
+    retrigger stream's shape travels in the script, so the front end writes
+    nothing over that byte and it is the .YMR's own on every frame: it is
+    compared whole, like any other open register, which is stricter than the
+    half-comparison it replaced. What is NOT checked is the shape itself,
+    since the value only reaches the chip through a tick handler this rig
+    never runs - the last value envelope_shape popped, or $08 before the song
+    has popped one - which is a
     claim about the file rather than about the converter.
   * R14 and R15. They are the chip's I/O ports, a .YMR has no stream for
     them, and the rig faults on a write above R13 in any case.
