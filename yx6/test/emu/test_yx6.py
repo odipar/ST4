@@ -56,7 +56,7 @@ VECTORS = 0x000000              # $110/$134: the two timer vectors
 STREAMS = 25                    # what a v7 file carries
 CHANNELS = 4                    # timer channels; stream T maps them
 Yx6_DEFAULT_MAP = 0x9C          # what the packer emits: 0->A 1->D 2->B 3->C
-YX6_FIXED = 56 + STREAMS * 64   # the workspace before the rings
+YX6_FIXED = 54 + STREAMS * 64   # the workspace before the rings
 
 QUICK = '--quick' in sys.argv
 
@@ -1050,8 +1050,6 @@ def run_shape_source() -> str:
                     workspace_size(960))
     if player.init() != 0:
         return 'shape source: YX6_init rejected the YM tune'
-    if player.uc.mem_read(player.work + 55, 1)[0] != 0:
-        return 'shape source: a YM tune set the shape-from-R13 flag'
     for frame in range(6):
         player.frame()
     got = patched_shape(player, 'a')                # a YM tune's slot 1 is Timer A
@@ -1077,10 +1075,6 @@ def run_shape_source() -> str:
     player = Player(pack_ymr(image), workspace_size(960))
     if player.init() != 0:
         return 'shape source: YX6_init rejected the .ymr tune'
-    if player.uc.mem_read(player.work + 55, 1)[0] == 0:
-        return 'shape source: a .ymr left the shape-from-R13 flag clear'
-    if player.uc.mem_read(player.work + 54, 1)[0] != 8:
-        return 'shape source: the shadow was not primed with 8'
     player.frame()                                  # frame 0: R13 := 10, RTE arms
     got = patched_shape(player, 'b')                # channel 1 of a .ymr is Timer B
     if got != 10:

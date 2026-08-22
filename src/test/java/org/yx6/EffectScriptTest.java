@@ -292,15 +292,14 @@ final class EffectScriptTest {
     // ------------------------------------------- a source that can say stop
 
     /** The two dialects of {@link EffectScript.Semantics#channelEndsPcm},
-     * with the other three flags pinned so the tests below isolate that one:
-     * neither retriggers a held PCM code, neither forces the mixer, both
-     * take a retrigger stream's shape from the voice the way YM6 files it,
-     * and only {@link #STOPS} lets a channel's own action end its sample.
-     * The YM set sits on the {@link #RUNS_ON} side of this fork. */
+     * with the other two flags pinned so the tests below isolate that one:
+     * neither retriggers a held PCM code, neither forces the mixer, and only
+     * {@link #STOPS} lets a channel's own action end its sample. The YM trio
+     * sits on the {@link #RUNS_ON} side of this fork. */
     private static final EffectScript.Semantics RUNS_ON =
-            new EffectScript.Semantics(false, false, false, false);
+            new EffectScript.Semantics(false, false, false);
     private static final EffectScript.Semantics STOPS =
-            new EffectScript.Semantics(false, false, true, false);
+            new EffectScript.Semantics(false, false, true);
 
     private static EffectScript.Result compile(Ym6Reader.Song song,
                                                EffectScript.Semantics semantics) {
@@ -314,7 +313,7 @@ final class EffectScriptTest {
     private static Tune under(Tune tune, EffectScript.Semantics semantics) {
         return new Tune(tune.frames(), tune.frameRate(), tune.masterClock(),
                 tune.loopFrame(), tune.registers(), tune.codes(), tune.counts(),
-                tune.samples(), semantics, tune.name(), tune.author(),
+                tune.shapes(), tune.samples(), semantics, tune.name(), tune.author(),
                 tune.comment(), tune.notes());
     }
 

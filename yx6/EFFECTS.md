@@ -168,13 +168,21 @@ envelope makes the chip ignore that nibble anyway.
 
 It is not free for a source that files the shape with the envelope and puts
 the voice on it a frame later; there the nibble is still a level, and the
-buzzer and the voice cannot both have it. Format v8 lets the file choose: a
-header flag says a retrigger stream takes its shape from R13's last value
-instead, which the player keeps as a shadow at the cost of one `move.b` on a
-branch the frame write already ran. Clear stays the default and stays YM6's,
-so a YM tune's bytes are read where they were written. Only the buzzer's
-parameter moved; a SID voice's volume and a digidrum's number are still the
-voice's register, and still free.
+buzzer and the voice cannot both have it. From format v9 the player stops
+looking: a retrigger stream's shape is carried in stream X's high nibble, one
+value a frame, and whichever front end read the file resolves where its own
+format kept it. A SID voice's volume and a digidrum's number stay in the
+voice's register, because they belong to the voice the effect took over and
+are free where they are; only the buzzer's parameter moved, because only the
+buzzer's parameter was never a voice's to begin with.
+
+One nibble for the whole frame is what the chip has. Two retrigger streams
+cannot restart different shapes - there is one envelope generator - and
+ST-Sound's `envShape` is a single variable, written by an R13 write and then
+by each buzzer in slot order, the last winning. A per-channel shape could
+encode a state the machine cannot hold, and did: `jamblv1` runs two buzzers
+at once on 462 of its 972 buzzer frames, and reading each channel's own voice
+restarted the wrong shape on 15 of them.
 
 ## 2. What the corpus shows
 

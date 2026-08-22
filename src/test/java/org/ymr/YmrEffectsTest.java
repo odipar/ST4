@@ -168,20 +168,28 @@ final class YmrEffectsTest {
     }
 
     @Test
-    void aConvertedTuneAsksForItsShapeFromRegisterThirteen() {
-        // The one thing the front end must say, since nothing downstream can
-        // work it out: a .YMR files the shape with the envelope, not with a
-        // voice. The encoder turns this into the header flag the player reads.
+    void theShapeCarriedIsTheOneTheEnvelopeStreamLastPopped() {
+        // A .YMR files the shape where the chip does, so the front end
+        // resolves it here and the tune carries the answer: nothing
+        // downstream needs to know which format asked.
         byte[] image = new Ymr()
                 .frame(VOLUME_C, TIMER_D_EFFECT, TIMER_D_RATE)
+                .frame(ENVELOPE_SHAPE)
+                .frame()
                 .stream(VOLUME_C, 0x10)
+                .stream(ENVELOPE_SHAPE, 0x0A)
                 .stream(TIMER_D_EFFECT, YmrReader.TimerFrame.RTE)
                 .stream(TIMER_D_RATE, PRESCALER, COUNTER)
                 .build();
 
         Tune tune = convert(image);
 
-        assertTrue(tune.semantics().shapeFromR13());
+        // Frame 0 popped no shape, so the buzzer restarts the one the spec
+        // says to assume; frames 1 and 2 carry what the stream popped, the
+        // second of them because a shape stays in force until another comes.
+        assertEquals(0x08, tune.shapes()[0]);
+        assertEquals(0x0A, tune.shapes()[1]);
+        assertEquals(0x0A, tune.shapes()[2]);
         // and the voice keeps its own byte, envelope-mode bit and all
         assertEquals(0x10, tune.registers()[10][0] & 0xFF);
     }
