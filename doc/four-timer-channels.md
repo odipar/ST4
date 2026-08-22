@@ -1,5 +1,11 @@
 # Four timer channels, assigned by the file
 
+> **Shipped, in format v7.** What this note designs is the format as
+> built, and the format has gone on since: v8, v9 and v10 all sit on top
+> of it. See [../yx6/README.md](../yx6/README.md) for the container as it
+> stands. The note stays as the record of the decision, and says what was
+> known when the four channels were settled.
+
 Format v6 has three timer channels and a fixed map: channel 1 on Timer A,
 2 on Timer D, 3 on Timer B, written into the player. v7 makes it four
 channels, numbered 0 to 3, and moves the map into the file - a stream of
@@ -20,10 +26,12 @@ its own says which of the MFP's four timers each channel runs on.
 
 **T**, one byte per frame, two bits per channel:
 
-    bits 1-0   channel 0's timer     0 = Timer A
-    bits 3-2   channel 1's timer     1 = Timer B
-    bits 5-4   channel 2's timer     2 = Timer C
-    bits 7-6   channel 3's timer     3 = Timer D
+    bits 1-0   channel 0's timer
+    bits 3-2   channel 1's timer
+    bits 5-4   channel 2's timer
+    bits 7-6   channel 3's timer
+
+The value in each field: 0 = Timer A, 1 = B, 2 = C, 3 = D.
 
 One byte covers all four. A tune that never re-assigns emits the same
 byte every frame, which the event optimizer packs to nothing - the cost
@@ -36,7 +44,10 @@ timer in the same frame.** The packer enforces it; the player trusts it.
 
 Re-assigning a running stream restarts its phase: the new timer starts
 counting from its own reload. That is a real edit to the sound, not a
-free move, so the packer only does it between streams.
+free move. No source re-assigns mid-tune yet - each front end picks one
+map and the packer fills T with it for the whole tune. The rule is what a
+packer that did vary it would have to obey: move a channel only between
+streams.
 
 ## Why the handler blocks move to the timers
 
@@ -53,8 +64,10 @@ Make the map data and there are two ways to keep the handlers correct:
    live.
 2. **Give the blocks to the timers instead of the channels.** Four
    blocks, one per MFP timer, each with its own EOI, control register
-   and vector baked in exactly as now. A channel's descriptor points at
-   the row of the timer it was assigned. Assignment is a pointer.
+   and vector baked in exactly as now. A channel's descriptor takes a
+   copy of the row of the timer it was assigned - eighteen bytes, the
+   handler block's address among them. Assignment is a copy, never a
+   patch.
 
 v7 takes the second. Nothing in the interrupt path changes, no patching
 happens at assignment time, and the cost is one extra handler block:
@@ -67,18 +80,22 @@ the format speaks. The two never collide.
 ## Timer C is not free
 
 The other three timers cost the host something a demo can plan around.
-Timer C is different: it is the operating system's 200 Hz clock, and an
-SNDH host commonly calls PLAY from it. A tune that names Timer C:
+Timer C is different: it is the operating system's 200 Hz clock. A tune
+that names Timer C:
 
-- stops the system clock while it plays, so anything counting on `$4BA`
-  or `$466` stands still;
+- stops the system clock while it plays, so `$4BA` and anything TOS
+  schedules off the 200 Hz tick stand still;
 - **cannot be hosted from a Timer C hook**, because the player has taken
   the interrupt the host would call from.
 
 The player claims it when the file names it, on the same terms as the
-others - assumption 5 puts machine state with the host - and the SNDH
-wrapper's header says plainly that a Timer C tune needs a VBL-driven
-host. No YM tune names it: a YM frame starts at most two effects.
+others - assumption 5 puts machine state with the host. The SNDH wrapper
+saves Timer A and Timer D state alone - both vectors, TACR, TCDCR's
+Timer D nibble, TADR, TDDR and the four enable/mask bits - so a file
+whose T stream names Timer B or C has nothing saved for it at INIT and
+gets nothing back at EXIT. No YM tune claims Timer C: a YM frame starts
+at most two effects, so the channel the default map puts there is never
+named.
 
 ## The programming difference C brings
 
@@ -92,10 +109,10 @@ starting and stopping a timer is
 
 which is only right for a low nibble. Timer C needs `#$0F` and the
 prescaler shifted up four. So a timer's row carries, besides its
-registers, the **keep mask** and the **shift** its nibble needs, and the
-three places that stop or start a timer - the claim, the hand-back and
-the timer program - read both from the row. The ISR's own stop is inside
-the block, which is per timer, so it bakes its mask in for free.
+registers, the **keep mask** and the **shift** its nibble needs, and
+every place that stops or starts a timer takes its mask - and its shift,
+where it needs one - from the row. The ISR's own stop is inside the
+block, which is per timer, so it bakes its mask in for free.
 
 ## Cost
 

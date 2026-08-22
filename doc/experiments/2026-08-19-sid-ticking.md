@@ -61,12 +61,31 @@ the write back), at init and at stop. The rig asserts all of it: no
 volume write on gated frames, the write's return on release, the drum
 takeover reopening it.
 
+**Postscript 2026-08-21.** The gate survives, the mechanism does not. Once
+every register write became a single `movep.w d1,0(a2)` there is no
+destination displacement left to flip, so a muted write is two nops
+stamped over the movep and its displacement word, reopened by copying the
+instruction back from the `yx6_movep` template — a longword of SMC per
+voice, not one word. See
+[the unmasked burst](2026-08-21-the-unmasked-burst.md).
+
 **The sibling, known and deferred:** the burst also writes a sanitized 0
 to a DRUMMED voice's volume register every frame — one wrong sample per
 frame at drum rates (~one in 120 at 6 kHz). Masked by drum content so far;
 the same gate would fix it, but the drum's end is detected in an ISR,
 which makes the reopening messier. Written down so it is found on purpose, not
 by ear.
+
+**Postscript 2026-08-19, 56 minutes later.** Closed. A drum trigger CLOSES
+the same gate a SID does, so the fix above now reads backwards where it
+lists a drum takeover among the reopenings, and the rig asserts the
+opposite of what it asserted here — the drummed voice's volume must not be
+written. The reopening went INTO the ISR after all, as this entry feared:
+the marker tick reopens the gate through an address the trigger patches in,
+the same self-modified pattern as the sample pointer. Moving it out to the
+frame boundary, off a packer-computed sample end, came the next day with
+the ordering change — and brought a +1-frame bias of its own, found by ear:
+[the drum reopen click](2026-08-20-drum-reopen-click.md).
 
 ## The method that settled it
 
@@ -93,4 +112,5 @@ Ears settled the verdict, but the harness that fed them is reusable:
 Fixed by the retune plus the burst gate; confirmed by ear against
 ST-Sound with ym2149-rs as a second witness. The durable rule: **a frame
 player may not write any register a timer effect currently owns** — not
-volume registers under a SID, and (still open) not under a drum either.
+volume registers under a SID, and (closed the same day) not under a drum
+either.

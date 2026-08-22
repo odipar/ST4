@@ -27,7 +27,7 @@ other player including the format author's.
 | [`Ym6Reader`](../src/main/java/org/ym6/Ym6Reader.java) + [`YmEffects`](../src/main/java/org/ym6/YmEffects.java) | one boundary: YM's frames and effect slots in, a `Tune` out |
 | [`YmrReader`](../src/main/java/org/ymr/YmrReader.java) + [`YmrEffects`](../src/main/java/org/ymr/YmrEffects.java) | the other, a peer and not a client: .YMR's streams and pops in, the same `Tune` out |
 | [`Tune`](../src/main/java/org/yx6/Tune.java) | what a front end hands over and the engine works on: frame streams, timer streams, samples, rate - no format anywhere in it |
-| [YX6.S](YX6.S) | the player library, 2,002 bytes plus ST4_wrap's 292 |
+| [YX6.S](YX6.S) | the player library, 3,170 bytes plus ST4_wrap's 292 |
 | [YX6_sndh.S](YX6_sndh.S) + [`MkSndh`](../src/main/java/org/yx6/MkSndh.java) | the canonical container: an SNDH v2.2 file, subtunes included |
 | [`YmSndh`](../src/main/java/org/ym6/YmSndh.java) | `.ym` dumps straight to one SNDH, packer flags and all |
 | [YX6_player.S](YX6_player.S) + [`MkPrg`](../src/main/java/org/yx6/MkPrg.java) | a thin TOS shell around those same SNDH bytes |
@@ -139,10 +139,10 @@ the Hatari window still stops it — someone who has test driven a `.ym` has
 nothing new to learn. Two things differ, and both come from the format rather
 than from the tool. A `.YMR` carries no title, no author and no comment — it
 stores streams and a command stream, not credits — so each file's own stem is
-its subtune name and the SNDH's composer is left absent rather than invented;
-and the packer's per-stream table is left on the screen, which the `.ym` front
-ends filter out - a build script on its way to an SNDH does not want a screen
-of ratios per tune, and a test drive is the one moment you do. A set
+its subtune name and the SNDH's composer is left absent rather than invented.
+The second is on the screen: the packer's per-stream table stays, where the
+`.ym` front ends filter it out - a build script on its way to an SNDH does not
+want a screen of ratios per tune, and a test drive is the one moment you do. A set
 still has to share one frame rate, since one player build is called at one
 rate, and `rhyme.sh` checks before it packs anything - which for a `.YMR`
 costs a full read of each dump, there being no way into one but from the
@@ -187,29 +187,36 @@ yx6/mkprg.sh MYSET.PRG build/*.yx6                      # the same, runnable
 yx6/ym_sndh.sh -t"My Set" myset.sndh one.ym two.ym      # both steps in one
 ```
 
-The SNDH glue is the polite host the player's assumption 5 describes: INIT
-(subtune in `d0.w`, 1-based) saves exactly what the player touches and
-claims a timer per timer channel the tune names - two, for a YM tune -
-EXIT quiesces and hands everything back, PLAY runs
-one frame - every entry preserves `d0`-`a6`, nothing outside the blob is
-used, the USP is never touched, and INIT called twice without an EXIT
-cleans up after itself. The header carries `TC50` (play is driven at 50 Hz
-from whatever the host hangs on it), `FLAG ~ady`, and a `FRMS` table -
-looping tunes are marked endless, play-once tunes declare their frames -
-and the subtune names, which is what a jukebox shows as its track list:
-SNDH's subtunes ARE its multi-song format. Where the YM header carries
-metadata, [ym_sndh.sh](ym_sndh.sh) carries it across: each tune's YM name
-becomes its subtune name (the file stem when that field is "unknown"), a
-shared YM author becomes the SNDH composer (COMM), the YM player rate
-becomes the TC tag (one rate per file, validated), a lone tune's name
-becomes the title and a set titles itself with its songs joined - unless
--t overrides it - and CONV records the provenance: converted from YM.
-YEAR has no YM source and is honestly absent.
-The file is raw and position independent; pack it with ICE 2.4 for the
-archive if you like, players unpack that themselves.
+The SNDH glue is the polite host the player's assumption 5 describes. INIT
+takes the subtune in `d0.w`, 1-based, saves what a YM tune's player touches —
+both timer vectors, TACR, TCDCR's Timer D nibble, TADR, TDDR and the four
+enable and mask bits, Timers A and D being the two a YM tune uses —
+and claims a timer per timer channel the tune names - two, for a YM tune.
+EXIT quiesces and hands everything back, and PLAY runs one frame. Every entry
+preserves `d0`-`a6`, nothing outside the blob is used, the USP is never
+touched, and INIT called twice without an EXIT cleans up after itself. The
+header carries `TC50` (play is driven at 50 Hz from whatever the host hangs
+on it), `FLAG ~ady`, and a `FRMS` table - looping tunes are marked endless,
+play-once tunes declare their frames - and the subtune names, which is what a
+jukebox shows as its track list: SNDH's subtunes ARE its multi-song format.
+
+Where the YM header carries metadata, [ym_sndh.sh](ym_sndh.sh) carries it
+across:
+
+| YM field | SNDH tag |
+|---|---|
+| the tune's name | its subtune name - the file stem where that field is "unknown" |
+| the author, where a set shares one | `COMM`, the composer |
+| the player rate | the `TC` tag - one rate per file, validated |
+| a lone tune's name, or a set's songs joined | `TITL`, unless `-t` overrides it |
+| nothing | `CONV`, which records the provenance: converted from YM |
+
+`YEAR` has no YM source and is honestly absent. The file is raw and position
+independent; pack it with ICE 2.4 for the archive if you like, players unpack
+that themselves.
 
 One honest limitation, in the file's own header comment: a native host
-that dispatches PLAY from its Timer C hook delays timer channel 2's ticks
+that dispatches PLAY from its Timer C hook delays timer channel 1's ticks
 (Timer D, lower MFP priority) by up to the length of the call - pending,
 never lost. VBL
 and emulator hosts have no such window.
@@ -247,20 +254,23 @@ fixed state) and how far back the packer may reference, so it trades memory
 for compression; it stops at 2520, because the player reads register `k`'s
 ring through an assembled-in displacement of `k*N`. `C` must be at least
 one refill slot per stream the tune **decodes** — 17 when it drives no
-timer channel, 19, 21, 23 as it names more, 25 when it uses all four —
+timer channel, then 19, 21, 23, 25 by the HIGHEST channel it names, since
+the player stops at the last channel rather than counting them —
 and must divide `N`, which is what lets the player use ST4_wrap rather
-than the bigger general ring decoder. So the default 960/24 covers
-everything up to three channels; a tune on all four needs 25 slots and a
-ring that divides by them, 1000/25 say. The packer
+than the bigger general ring decoder. So the default 960/24 covers every
+tune that leaves channel 3 idle; one that names channel 3 needs 25 slots
+and a ring that divides by them, 1000/25 say. The packer
 enforces both, packs every stream with `-mN` so no back-reference reaches
 outside the ring, and with `-l65535` so no operation outruns the 68000
 decoder's word counters.
 
-On a synthetic 1500-frame tune, the twenty-five streams pack from 37500 bytes to
-about 2900 — the streams for registers that barely change cost a few bytes each,
-and a timer channel the tune never uses costs 28.
-On a real one they do far better: Wings of Death's level 6, digidrums and all,
-packs 188784 register bytes into 5064 (2.7%).
+On a synthetic 1500-frame tune packed at `-k1` with no loop split, the
+twenty-five streams pack from 37500 bytes to about 2900 — the streams for
+registers that barely change cost a few bytes each, and a timer channel the
+tune never uses costs 56, 28 each for its action stream and its count stream.
+At the packer's own defaults — split at the loop, `-k2` — the same tune costs
+5464. On a real one they do far better: Wings of Death's level 6, digidrums
+and all, packs 262250 register bytes into 6180 (2.4%), a 10476-byte file.
 
 ## Playing it
 
@@ -285,9 +295,12 @@ the USP under `YX6_SUPER_HOST`), with [YX6_player.S](YX6_player.S) as the
 worked example. Which timers a tune takes is its own map's business: the
 packer's default puts channels 0 and 1 on Timers A and D, so Timer B stays
 free for rasters and Timer C stays the system's 200 Hz clock. A tune whose
-map names those takes them — and a Timer C tune stops the system clock and
-cannot be hosted from a Timer C hook. No YM tune names either, since a YM
-frame can start at most two effects.
+map names those takes them, and what a Timer C tune costs its host is in
+[doc/four-timer-channels.md](../doc/four-timer-channels.md#timer-c-is-not-free).
+No YM tune packed with the default map names either, since a YM frame can
+start at most two effects and so only ever uses timer channels 0 and 1 —
+`-timers` is what it takes to move them, and why that option's help warns
+about Timer C.
 
 A timer the player does not claim is left exactly as the host had it,
 which includes **still running**: TOS leaves Timer D counting as its
@@ -295,8 +308,9 @@ RS232 baud generator. That is audible even though the player's chip
 writes are unchanged, so a host that takes the machine over should quiet
 it first. [YX6_player.S](YX6_player.S) does: it saves and stops all four
 MFP timers at takeover and restores them at exit. The story is in
-[doc/experiments/2026-08-21-the-timers-left-running.md](../doc/experiments/2026-08-21-the-timers-left-running.md). Include both `YX6.S` and `ST4_wrap.S`, with `ST4_UNIT equ 1`
-first.
+[doc/experiments/2026-08-21-the-timers-left-running.md](../doc/experiments/2026-08-21-the-timers-left-running.md). Include both `YX6.S` and `ST4_wrap.S`, with `ST4_UNIT`
+defined first and set to the unit the tune was packed at — 2 for the packer's
+default; `mkprg.sh` reads it out of the file's first section for you.
 
 ### The schedule
 
@@ -322,18 +336,18 @@ VBL 22: use value 22 from every stream; refill P2 - likewise
 VBL 23: use value 23 from every stream; refill A3 - if channel 3 is used
 ```
 
-The channels sit last on purpose. A tune that uses two of them never has
-to decode the other two pairs, and a tune with no effects at all stops
+The channels sit last on purpose. A tune that uses channels 0 and 1 never
+has to decode the other two pairs, and a tune with no effects at all stops
 after T: the player refills up to the last channel the header names, and
 the rest of the streams are in the file but never touched. That is also
 why `C` is measured against what a tune decodes rather than against the
-format's twenty-five - the default 960/24 shape still fits every tune
-that leaves a channel idle.
+format's twenty-five.
 
 Every stream is therefore one full group ahead of what is being read, and the
 work per frame is flat, and ordered so the chip writes never jitter: the
-burst gates, the fourteen register writes — at a fixed offset from the
-call, whatever the frame's effects cost — then the script's actions, then
+burst gates — which voices this frame's register writes must leave alone —
+then the fourteen register writes, at a fixed offset from the call whatever
+the frame's effects cost, then the script's actions, then
 one 24-byte decoder call.
 The player counts the calls itself and wraps a ring's write pointer when it
 lands on the ring end, which is exactly ST4_wrap's contract — there is no DONE
@@ -341,42 +355,48 @@ state to poll and no bound check inside the decoder.
 
 ### Looping
 
-A packed stream can only be restarted from its beginning, so a looping tune is
-packed as two sets of streams split at the loop frame `L`: an intro covering
-frames `[0, L)` and a loop covering `[L, O)`. When a register's section runs
-out mid-refill the player starts its loop stream over — a fresh decoder writing
-on into the same ring — so the rings hold one continuous sequence and the read
-side is unaffected by it. Nothing requires `L` to fall on a
-group boundary; a refill that straddles the split just decodes two pieces.
+A packed stream can only be restarted from its beginning, so a looping tune's
+streams are packed as two **sections** split at the loop frame `L`: an
+intro covering frames `[0, L)` and a loop covering `[L, O)`. When a register's
+intro section runs out mid-refill the player starts its loop section over — a
+fresh decoder writing on into the same ring — so the rings hold one continuous
+sequence and the read side is unaffected by it. Nothing requires `L` to fall
+on a group boundary; a refill that straddles the split just decodes two pieces.
+A tune that loops from frame 0 has no intro to split off: it gets one loop
+section per stream, and the intro half of the offset table is zero.
 
 `YX6_play` returns 1 on the frame that ends the tune (the next one is `L`), so
 a caller can count passes. A tune packed with `-o` has no loop section: after
 its last frame `YX6_play` returns -1 and writes nothing.
 
-The loop frame comes from the YM header by default. The split costs a little
-compression, since the loop half cannot reference the intro half — nothing at
-all for a tune that loops from frame 0, and about 19% on the synthetic test
-tune when it loops from the middle.
+The loop frame comes from the YM header by default. The split costs
+compression, since the loop section cannot reference the intro section —
+nothing at all for a tune that loops from frame 0, and about 37% on the
+synthetic test tune when it loops from the middle, where 2912 packed bytes
+become 3998.
 
 ### Writing the chip
 
-The fourteen writes are unrolled through a `YX6_WRITE` macro, one invocation per
-register, so the register number is an assembled-in immediate and the value goes
-straight from the ring to the chip without passing through a data register.
-Register k's ring byte sits `k*N` above the cursor, and N is known at init - so
-init patches each write's displacement into the instruction once, and the burst
-never steps a pointer:
+The fourteen writes are unrolled through a `YX6_WRITE` macro, one invocation
+per register. The register number is an assembled-in immediate that sits in
+`d1`'s high byte, the ring byte lands in its low byte, and one `movep.w` sends
+both. Nothing is tested and no pointer is stepped: register k's ring byte sits
+`k*N` above the cursor, and N is known at init, so init patches each write's
+displacement into the instruction once.
 
 ```
-        move.b  #\number,(a2)          ; select
-        move.b  $7FFF(a1),2(a2)         ; and write - k*N, patched at init
+        move.w  #\number<<8,d1          ; the select byte, in the high half
+        move.b  $7FFF(a1),d1            ; the value - k*N, patched at init
+        movep.w d1,0(a2)                ; select and write in ONE instruction
 ```
 
 That is also why `N` stops at 2520: `13*N` must fit the signed 16-bit
-displacement. Faster forms - `movep`, streams pre-formatted for it, streams
-of ready-to-run 68000 code - were measured and declined; the numbers are in
+displacement on that ring read. `movep` as a SPEED trick - the `.l` pairing,
+streams pre-formatted for it, streams of ready-to-run 68000 code - was
+measured and declined; the numbers are in
 [doc/experiments](../doc/experiments/README.md), next to the register
-clustering experiment.
+clustering experiment. `movep.w` came back a few paragraphs down for a
+different reason.
 
 Two registers are not written that way. R7 gets the ST's I/O port direction bits
 (`$C0`) back, because on an ST port A drives the floppy select lines. R13 is
@@ -448,14 +468,12 @@ effect for the same reason.
   from a timer interrupt, and the values say nothing: writing R13 sends the
   envelope generator back to the start of its shape, so the envelope becomes
   the waveform and the timer's rate becomes its pitch. The one difference is
-  where the shape comes from — RhYMe's handler keeps the player's own copy of
-  it, the retrigger tick reads it out of the voice's volume register — which
-  is why this is the single effect the converter has to write something for.
+  where each format FILES the shape — RhYMe in its own copy of R13, a YM dump
+  in a voice's spare nibble — and since v9 neither place is where the player
+  looks: the front end resolves it and stream X carries it. So nothing is
+  written over a volume register for an RTE either.
 
-Two more correspondences are worth naming, because between them they are why
-the register vector needs so little done to it: the first is why nothing has
-to be translated, the second is why the two parameters that must be written
-can be.
+Two more correspondences say why the register vector needs so little done to it.
 
 **R13 and the `$FF` marker.** A .YMR frame that does not pop
 `envelope_shape` must not write R13: the pop IS the retrigger, so writing the
@@ -480,20 +498,23 @@ cannot: an RTE leaves the voice's volume to the song, so that byte is
 delivered, and a shape hidden in its low nibble would cost the voice its
 level on any frame not already following the envelope. Format v9 is the
 answer to that — see **Where a retrigger stream's shape comes from** — and
-a `.ymr` sets its flag, so the only parameter this conversion writes is a
-PCM stream's sample number.
+the shape rides in X whatever the source, so the only parameter this
+conversion writes is a PCM stream's sample number.
 
-One engine reads both dialects, and three flags say which. A held PCM code
+One engine reads both dialects, and four flags say which. A held PCM code
 does not retrigger, because a .YMR's trigger is a pop and not the code's
 continued presence — that is what stops a sustained sample being chopped into
 frame-long pieces, where a YM dump's held drum code fires again every frame.
 A voice playing a sample keeps its mixer bits, because RhYMe's player never
 touches R7 for an effect: the mixer is the song's, and a song that wants its
 sample clean has already disconnected the voice itself, where a YM drum's
-voice is forced off the mixer for it. And a channel's own commands end the
+voice is forced off the mixer for it. A channel's own commands end the
 sample running on it — an effect pop of 0 stops the timer, an effect pop of
 anything else reprograms the one timer the sample was ticking on — where in a
-YM dump nothing ends a sample but its own marker tick. The one thing that
+YM dump nothing ends a sample but its own marker tick. And a rate pop that
+moves the prescaler reprograms a running timer instead of restarting it, where
+a YM dump has no live reprogram to be faithful to — see **Moving a prescaler
+under a running timer**. The one thing that
 needed inventing is the other half of "a pop is an event": the script acts
 where a code byte CHANGES, so bit 3 of the code is flipped on every sample
 trigger, and two pops of one sample at one rate become two different codes
@@ -508,11 +529,11 @@ generalisation and the T stream were built for. Packed with the default shape,
 java -ea -cp target/classes org.ymr.Ymr -f signals-grouped.ymr doc.yx6
 ```
 
-reports 249,600 bytes of register and script data packed into 12,432 (5.0%)
-in a 13,840-byte file, 25 rings of 960 bytes, decoding 23 of the 25 streams so
+reports 252,000 bytes of register and script data packed into 12,448 (4.9%)
+in a 13,860-byte file, 25 rings of 960 bytes, decoding 23 of the 25 streams so
 that one of the default `C`=24's slots is idle; the tune loops from its start,
 and the encoder rotated the split forward 96 frames so the effect state at the
-wrap matches its first arrival. 5,312 of those 12,432 packed bytes are the
+wrap matches its first arrival. 5,328 of those 12,448 packed bytes are the
 eleven script streams, which the `.YMR` — 10,488 bytes — does not carry at
 all: RhYMe's player reconciles its three timers every frame from what popped,
 and this one replays decisions taken at pack time. That is the bookkeeping
@@ -537,20 +558,18 @@ in its own copy of R13.
 So from **v9** the player does not look for it at all: the shape is CARRIED,
 in X's high nibble, one value per frame. Whichever front end read the file
 knows where its format filed it and simply writes the number down — the same
-way the other three source differences already reach the player, as different
+way the other four source differences already reach the player, as different
 values rather than as a mode. `yx6_shape` is five instructions with no branch,
 there is no header flag, no shadow, and no priming: a tune that arms a buzzer
 before it has set a shape carries whatever its format assumes, `$08` for a
 `.ymr` and `0` for a YM dump, because that is the front end's fact to know.
 
 One nibble for the whole frame is not a budget compromise. Two retrigger
-streams cannot restart different shapes — there is one generator — and
-ST-Sound agrees: its `envShape` is a single variable, written by an R13 write
-and then by each buzzer in slot order, last one winning. Before v9 each
-channel patched its own tick from its own voice, which on a tune running two
-buzzers at once gave the generator two shapes at two rates. `jamblv1` does
-exactly that on 462 of its 972 buzzer frames, and the old arrangement
-restarted the wrong shape on 15 of them.
+streams cannot restart different shapes — there is one generator, so there is
+one nibble. Before v9 each channel patched its own tick from its own voice,
+which on a tune running two buzzers at once gave the generator two shapes at
+two rates; [EFFECTS.md](EFFECTS.md#2-what-the-corpus-shows) has the corpus
+that settled it, and the tune that got it wrong.
 
 ### What a .ymr gives up
 
@@ -564,7 +583,7 @@ the rotation frames and the wrap included — with `YMR_FRAME_CAP` raised;
 at `-k1`, so the played frames are the .YMR's own and the padding the default
 `-k2` may insert is never walked, and it does not compare what a timer was
 PROGRAMMED to — that is the directed effect test's, and it is the dimension
-the two rate rows below are about.
+the rate row below is about.
 
 | What changes | What it costs | Reported |
 |---|---|---|
@@ -579,25 +598,18 @@ the two rate rows below are about.
 The four that are counted are named once per sample or once per channel
 rather than reported a frame at a time, because a song 9,984 frames long can
 break one rule on a thousand of them and still only be doing one thing wrong.
-The two that are not are the two there is nothing useful to say about: one is
-shorter than the frame it happens in, and the other cannot arise from a file
-RhYMe wrote.
+The three that are not divide: two there is nothing useful to say about — one
+is shorter than the frame it happens in, and the other cannot arise from a
+file RhYMe wrote — and the third, the rate pop that moves the effect's
+parameter too, is what the next paragraph is about.
 
 Rate pops are on almost none of these lines, because almost none of them cost
-anything. A pop that moves only the COUNTER leaves the code byte where it
-was, so it compiles to a HOLD carrying the reload flag, and `yx6_hold` writes
-the count to a timer it never stops. A pop that moves the PRESCALER changes
-the code byte, and from **v10** compiles to the live retune — RETUNE
-addressed to voice 3 — which writes the control register and then the data
-register with the timer still running. Both are RhYMe's own live reprogram,
-verb for verb. On `signals-grouped.ymr` the compiled script carries 3,827
-live reloads and 325 live retunes against no verb at all that stops a timer to
-change its rate; `bla-grouped.ymr` has 678 live retunes and 2 that stop,
-which are the two frames where the effect's parameter moved on the same
-frame as the rate. The live retune is addressed to no voice — that is the
-encoding room it is packed into — so it cannot repatch a volume or a shape on
-the way through, and on a frame where one of those moved the ordinary retune,
-which does repatch, is the honest verb and the truncated period is the price.
+anything; **Moving a prescaler under a running timer** below has the
+mechanism. The corpus bears it out: on `signals-grouped.ymr` the compiled
+script carries 3,827 live reloads and 325 live retunes against no verb at all
+that stops a timer to change its rate, and `bla-grouped.ymr` has 678 live
+retunes and 2 that stop — those 2 being the frames where the effect's
+parameter moved on the same frame as the rate, which is the row.
 
 * **Three timers bound to voices, against four channels and a map.** A .YMR
   names Timer A, Timer B and Timer D, and the spec fixes which voice each one
@@ -647,8 +659,8 @@ which does repatch, is the honest verb and the truncated period is the price.
   the code byte, so before v10 it had to compile to a program verb, and every
   verb that carries a rate goes through `yx6_program`, which stops the timer,
   loads the count and runs it again — the period in flight truncated, whichever
-  verb it was. v10 gives it a verb of its own instead. The action byte's voice
-  field addresses three voices in two bits, so 3 names none of them, and
+  verb it was. v10 gives it an encoding of its own instead. The action byte's
+  voice field addresses three voices in two bits, so 3 names none of them, and
   RETUNE spends that corner on a live rate change: `yx6_live` masks the
   timer's nibble out of the control byte it reads back, ORs the new prescaler
   in and writes it once — the timer's nibble never passes through zero — then
@@ -678,17 +690,18 @@ which does repatch, is the honest verb and the truncated period is the price.
   should not be playing at all. No ordering of the verbs closes it either:
   the actions sit after the burst so their varying cost cannot jitter the
   register writes, which is a promise worth more than this sliver costs.
-Everything else the conversion has to change, it counts and names rather than
-reporting a frame at a time, because a song 9,984 frames long can break one
-rule on a thousand of them and still only be doing one thing wrong: an effect
-type in the 4-255 the spec reserves, dropped rather than guessed at, since
-RhYMe's own player falls through to PWM for anything it does not recognise and
-a wrong guess is a wrong sound; a timer configured with a prescaler or counter
-of 0, the MFP's stopped state, which arms nothing; a sample index with no
-block behind it; and a sample trigger landing on the loop frame with the code
-the song's last frame already ends on, which the wrap swallows, since coming
-round from the end the code has not changed and the script acts on codes that
-change.
+
+Everything else the conversion has to change, it counts and names the same way:
+
+* an effect type in the 4-255 the spec reserves, dropped rather than guessed
+  at, since RhYMe's own player falls through to PWM for anything it does not
+  recognise and a wrong guess is a wrong sound;
+* a timer configured with a prescaler or counter of 0, the MFP's stopped
+  state, which arms nothing;
+* a sample index with no block behind it;
+* and a sample trigger landing on the loop frame with the code the song's last
+  frame already ends on, which the wrap swallows — coming round from the end
+  the code has not changed, and the script acts on codes that change.
 
 ## What it does not do
 
@@ -701,12 +714,13 @@ change.
 
 ## The `.yx6` container
 
-Big-endian, fixed header, then the packed streams in register order. The
+Big-endian, fixed header, then the packed sections in register order. The
 words below follow [doc/terminology.md](../doc/terminology.md): a
 **stream** is a series of values arriving at one register, the fourteen
 register streams are **frame streams** (one value per player call), and
 what the YM format calls an "effect" is a **timer stream**, driven by an
-MFP timer rather than by the frame.
+MFP timer rather than by the frame. A **section** is this format's own
+word: one ST4 container holding a stream's intro or its loop.
 
 | offset | size | field |
 |---:|---:|---|
@@ -722,9 +736,9 @@ MFP timer rather than by the frame.
 | 24 | 4 | YM master clock (informational) |
 | 28 | 4 | byte offset of the sample table; zero when there are none |
 | 32 | 2 | sample count |
-| 34 | 4·S | byte offset of each intro stream, covering frames `[0, L)` |
-| 134 | 4·S | byte offset of each loop stream, covering frames `[L, O)` |
-| 234 | … | the packed streams, then the sample table |
+| 34 | 4·S | byte offset of each intro section, covering frames `[0, L)` |
+| 134 | 4·S | byte offset of each loop section, covering frames `[L, O)` |
+| 234 | … | the packed sections, then the sample table |
 
 Packed sizes are not stored: ST4 counts output units, not input bytes, so the
 player never needs them.
@@ -733,29 +747,31 @@ Streams 14–24 are **script data** rather than frame streams: they are
 packed the same way, but their bytes never reach a chip register. They
 carry the compiled effect script — the packer replays the reference
 player's decisions over the whole timeline and writes down the outcomes.
-**M** records what acts this frame (bits 0–3 = one per timer channel,
-bit 4 + bits 7–5 = the burst-gate state, which registers the frame write
-must leave alone). **T** carries the channel-to-timer map, two bits each. **A** names the channel's action: a verb, a voice and a
-prescaler, the verbs being start, retune, stop, a **PCM stream** start,
-a PCM start that preempts a **toggle stream** on the same voice, or a
-hold that reloads or tracks. There are three voices in a two-bit field, so
-voice 3 names none, and RETUNE addressed to it is the live rate change:
-control register then data register, the timer never stopped. **P** carries the timer count, the other
-half of the **rate**. **X** is the operand a verb reads when its action
-byte has no room for one: today, which timer channels a preempting sample
-stops, one bit each.
 
-A timer channel is what the format names, and stream **T** says which MFP
-timer each one runs on — so the file, not the player, decides. The
-channels are the last streams for the same reason the flags name them: a
-tune that uses two leaves the other two pairs unread at the end.
+* **M** records what acts this frame: bits 0–3, one per timer channel, plus
+  bit 4 and bits 7–5, the burst-gate state — which voices' volume registers
+  the frame write must leave alone.
+* **T** carries the channel-to-timer map, two bits each.
+* **A** names the channel's action: a verb in three bits, a voice in two, and
+  a prescaler or a set of hold flags in the rest. The eight verbs are resume,
+  hold, release, a **toggle stream** start, retune, a retrigger stream start,
+  a **PCM stream** start, and a PCM start that preempts a toggle stream on
+  the same voice. There are three voices in a two-bit field, so voice 3 names
+  none, and RETUNE addressed to it is the live rate change: control register
+  then data register, the timer never stopped.
+* **P** carries the timer count, the other half of the **rate**.
+* **X** carries the operands an action byte has no room for: bits 7–4 the
+  envelope shape a retrigger stream restarts — one per frame, not one per
+  channel, since the chip has one envelope generator — and bits 3–0 the timer
+  channels a preempting sample stops, one bit each.
 
 `O` and `L` count PLAYED frames: when the effect state at the wrap
 differs from its first arrival, the split rotates forward until the two
 match, and the file carries those frames twice, compiled differently.
 
-The sample table holds what a PCM stream plays out: `{offset, length,
-loop}` entries pointing at PSG-ready volume bytes, each sample closed by a
+The sample table holds what a PCM stream plays out: eight-byte `{offset,
+length, loop}` entries — a long and two words — pointing at PSG-ready volume
+bytes, each sample closed by a
 byte with bit 7 set. `loop` is where the tick goes back to when it meets
 that byte, as a position in the sample, or `$FFFF` for one that stops
 there — 0 is a real loop point, the sample that repeats whole. YM calls
@@ -778,22 +794,30 @@ contents** after each frame — computed from the YM data with no knowledge of t
 packer or the player — plus the R13 writes themselves, since those restart the
 envelope and are observable in their own right. It covers the default 960/24
 shape, a 240-byte ring, the smallest ring that holds two groups, 64-value calls,
-the tightest legal 44/22 shape, tunes shorter than a ring, a group and a single
+the tightest legal 34/17 shape, tunes shorter than a ring, a group and a single
 frame, a loop point that is not on a group boundary, a loop section shorter than
 one group, several passes round the loop, playing a `-o` tune past its end,
-re-initialising for a second pass, and every unit size. A directed effect-stage
+re-initialising for a second pass, and every unit size. Four named tests
+follow: the SNDH container (subtunes, handback, re-init), v9's carried
+retrigger shape from both sources, v10's sample loop in the plain and `-perf`
+builds, and v10's live retune. A directed effect-stage
 test then walks a tune frame by frame past the MFP: SID start, hold, retrigger
 and release, a drum pair naming two samples on back-to-back frames, a drum
-seizing a SID's voice, the sync-buzzer, the sanitized burst and the forced
-mixer, and the ring getting every borrowed byte back - plus each tick handler
-run to its `rte`.
+seizing a SID's voice, the sync-buzzer, the burst gate and the forced
+mixer, and a drum number travelling through the ring unharmed - plus each tick
+handler run to its `rte`.
 
 [test/sweep.py](test/sweep.py) turns the same machinery on real tunes: it
 packs each one at k=1 and replays it under Unicorn, comparing every chip
 write against the YM data frame by frame - loop crossing included - one
-status line per tune. The whole 544-tune jatari collection verifies clean
-with it; the honest limits (effect-owned volume registers and R7 are
-excluded, long tunes play their first 1200 frames) are in its header.
+status line per tune. All 543 readable tunes of the 544-file jatari collection
+verify clean with it. The effect-owned volume registers are not excluded but
+checked against an independent Python model of the script semantics — a gated
+voice's must be absent from the frame's writes, an open one exact. The honest
+limits are in its header: long tunes play their first 1200 frames, and the
+tick handlers' own audio is not rendered. R7 is a limit the header does not
+admit to — 7 is missing from the rig's strict list, so the mixer check never
+runs.
 
 [test/ymr_sweep.py](test/ymr_sweep.py) does the same for the `.ymr` front end,
 and has to work harder to be worth anything: the truth side is an INDEPENDENT
@@ -809,11 +833,11 @@ never C. What it cannot see is what the tick handlers write, since it calls
 `YX6_play` and nothing else; that side is the directed effect test's. Its
 header names the rest.
 
-[test/run.sh](test/run.sh) goes further than emulation can: it plays a looping
-tune on the emulated chip and **reads all fourteen registers back off the YM2149
-after every frame**, folding them into a checksum the host computed from the YM
-data alone, and past the end so the loop is crossed. It then replays the tune
-and reports the cost:
+[test/run.sh](test/run.sh) goes further than the Unicorn rig can: on a whole
+emulated ST it plays a looping tune and **reads all fourteen registers back off
+the YM2149 after every frame**, folding them into a checksum the host computed
+from the YM data alone, and past the end so the loop is crossed. It then
+replays the tune and reports the cost:
 
 ```text
 SUM=OK wraps=1 sum=2941391492
@@ -825,21 +849,20 @@ T 1700 93
 7,864,630 cycles measured at 242 ticks, works out at about **1,790 cycles per
 frame** — roughly 1.1% of a 50 Hz frame on an 8 MHz ST, including the
 harness's own loop, the sound chip's bus wait states and the script finding
-nothing to do (the harness tune's effect codes are deliberately inert, so
-the checksum stays deterministic — and it is the same checksum the v1
-interpreter produced, which is the point — and, its script being inert, it
-names no timer channel, so the player decodes seventeen streams and skips
-the eight the four channels would need). The v1 player measured 96 ticks
+nothing to do. The harness tune's effect codes are deliberately inert, which
+keeps the checksum deterministic — it is the same checksum the v1 interpreter
+produced, which is the point — and leaves the player decoding seventeen
+streams: an inert script names no timer channel, so the eight the four
+channels would need are skipped. The v1 player measured 96 ticks
 on the same tune, v2 with two fixed channels 94, and v3 with three 88:
 replaying compiled decisions is cheaper than making them, and decoding
-only the streams a tune uses is cheaper still. A tune that uses two timer
-channels decodes twenty-one streams. Measure your own tune before budgeting: the
-byte limit is not a time limit, and how hard a chunk is to decode depends on
-the data.
+only the streams a tune uses is cheaper still. Measure your own tune before
+budgeting: the byte limit is not a time limit, and how hard a chunk is to
+decode depends on the data.
 
 Most of what is left is the decoder itself: at `C=24` a refill decodes 24 bytes
 on seventeen of every twenty-four frames for this tune, twenty-one for one
-that uses two timer channels. Raising `C` amortises the per-call
+that names channels 0 and 1. Raising `C` amortises the per-call
 cost over more bytes at the price of a refill frame that costs proportionally
 more, which is the wrong trade if your frame budget is tight.
 

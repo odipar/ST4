@@ -61,7 +61,7 @@ period, then loud, deterministic at every gap. HELD frees the phase;
 RETUNE keeps the installed half.
 
 Both gap models are now ordinary stream verbs the player always carries:
-verb 0 is the maxYMiser RESUME and STOP grew a mask flag. The packer
+verb 0 is the maxYMiser RESUME and RELEASE grew a mask flag. The packer
 is set per tune - `-sidresume` selects the mask/resume model, the
 ym2149-rs restarts are the default - and since the choice is per emitted
 byte, a future packer could even switch models mid-song; nothing in the

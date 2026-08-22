@@ -2,8 +2,8 @@
 
 `nt4` is the .NET 10 workbench for the ST4 project and a port of the Java
 `st4` tools. It packs and unpacks ST4 containers and independently mirrors the
-readable compressor, the two fast optimizers and the reference decoder the
-68000 code is verified against.
+compressor, the readable reference optimizer, the two fast ones and the
+reference decoder the 68000 code is verified against.
 
 ## Build and test
 
@@ -46,12 +46,16 @@ using Nt4;
 int[] units = Units.Split(input, 2);                        // k = 2
 Block parse = EventOptimizer.Optimize(units, 2, Format.MaxOffsetUnits(2), false);
 Compressor.Result result = Compressor.Compress(parse, units, 2, Format.MaxOp);
-byte[] container = Nt4.Container(result);
+byte[] container = Nt4.Nt4.Container(result);
 
 Format.Container read = Format.Read(container);
 byte[] restored = Decompressor.Decompress(read.Control, read.Literal,
     read.ByteOffsets, read.WordOffsets, read.Unit, read.Size);
 ```
+
+`Nt4.Nt4.Container` needs both names because the class and the namespace share
+one: inside a `using Nt4;` file the bare `Nt4` binds to the namespace, and the
+compiler goes looking for a type that is not there.
 
 `EventOptimizer` is the CLI's default engine and falls back to
 `FastOptimizer` on run-churny data; `Optimizer` is the readable reference both
@@ -62,10 +66,10 @@ are checked against. Malformed containers and streams throw
 
 | Project | Purpose |
 |---|---|
-| `src/Nt4` | Reusable packer and unpacker library |
-| `src/Nt4.Cli` | `nt4` packer executable |
-| `src/Dnt4.Cli` | `dnt4` unpacker executable |
-| `tests/Nt4.Tests` | Compatibility and behavior tests |
+| `csharp/src/Nt4` | Reusable packer and unpacker library |
+| `csharp/src/Nt4.Cli` | `nt4` packer executable |
+| `csharp/src/Dnt4.Cli` | `dnt4` unpacker executable |
+| `csharp/tests/Nt4.Tests` | Compatibility and behavior tests |
 
 ## Origin and attribution
 

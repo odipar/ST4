@@ -72,8 +72,9 @@ least 2 units long — which is why it stores gamma(length−1).
 Together with its flag, a block is an even number of bits: a gamma value is
 an odd count, and the flag or class bits make it even. That is why a new
 offset spends two class bits rather than one, and the even rhythm is what
-lets the decoders refill their bit queue a whole word at a time. Stream A is
-padded to an even length so the last refill finds a whole word.
+lets the decoders skip the refill check on every read but two: a gamma
+continuation bit, and the class bit right after a flag. Stream A is padded to
+an even length so the last refill finds a whole word.
 
 A container is twenty bytes of header, then the streams in order:
 
@@ -118,11 +119,15 @@ one. Measured on real streams, that is 12–14% fewer cycles for ST4_wrap in a
 small-budget streaming loop, 3–5% in bulk, with no case slower.
 
 State is held in registers: `a0`, `a2`, `a4`, `a5` walk the four streams, `a1`
-writes, `d0.w` holds the bit queue and `d1`/`d2` the counters. Only `a6`, `d6`
-and `d7` are preserved across a call. The destination, stream B and the
-ring size
-must be whole units, so a wide move never lands on an odd address. Each file
-documents its exact contract and numbered assumptions.
+writes, `d0.w` holds the bit queue, `d1.w` the units left in the operation and
+`d2.w` the offset — signed, so its sign is also the state. The two ring
+decoders keep those two as longs and pack the ring's bounds into the upper
+halves, which is how a match that reaches back past the ring start finds its
+source at the other end. Only `a6`, `d6` and `d7` are preserved across a
+call. The destination, stream B and the ring all start on a unit
+boundary, and the ring size is a whole number of units, so a wide move never
+lands on an odd address. Each file documents its exact contract and numbered
+assumptions.
 
 The decoders do not check their input. Use trusted files made at build time.
 The packers already keep every operation within the decoders' 16-bit counters;
@@ -156,13 +161,13 @@ Three optimizers select the blocks, all held to each other by tests:
   not always the same bytes; it falls back to the fast one when the data
   repeats in stretches too short to profit.
 
-Measured on the optimizer alone, k = 4:
+Measured on the optimizer alone:
 
 | corpus | reference | fast | event-driven |
 |---|---:|---:|---:|
-| 880 KB disk image, `-m1024` | 163s | 37s | **0.4s** |
-| 300 KB slice, full window | 24s | 5.7s | **0.12s** |
-| 32 KB of 68000 code (k = 1) | 9.8s | 1.5s | falls back to fast |
+| 880 KB disk image, `-m1024`, k = 4 | 163s | 37s | **0.4s** |
+| 300 KB slice, full window, k = 4 | 24s | 5.7s | **0.12s** |
+| 32 KB of 68000 code, k = 1 | 9.8s | 1.5s | falls back to fast |
 
 The jx1 and nx1 packers in [odipar/ST1](https://github.com/odipar/ST1) carry
 the same three optimizers but keep the event-driven one behind their `-q`
@@ -178,45 +183,42 @@ on real data at every unit size — and the tests are the Java suite, corpus for
 corpus.
 
 ```sh
-dotnet test csharp/Nt4.slnx -c Release
 dotnet run --project csharp/src/Nt4.Cli -- [-f] [-kK] [-mN] [-lN] input [output.st4]
 ```
 
 ## YX6: the YM chiptune player
 
-[yx6/](yx6/README.md) puts the streaming decoders to work: a Java packer turns
+[yx6/](yx6/README.md) puts the streaming decoders to work. A Java packer turns
 a YM chiptune dump — YM5 or YM6, LHA-archived or not — into twenty-five ST4
-containers: one per YM2149 sound register, plus the compiled effect script —
-eleven streams of pack-time-prepared actions — with the digidrum samples
-appended as a table. A
-2,800-byte 68000 player decodes them through small rings with
-ST4_wrap, one refill per frame, and plays the effects — digidrums, SID
-voices, the sync-buzzer — on timer channels, four of them, mapped onto the
-MFP's timers by a stream in the file and claimed only when a tune says it
-uses them. On one
-measured tune that costs about 1,790 cycles a frame under cycle-exact emulation, effects
-included — the effect decisions themselves were made at pack time: the
-packer simulates the reference player over the whole timeline and the
-player replays prepared actions.
-The packer picks k = 2 by itself, padding odd shapes with safe duplicate
-frames. Loop points restart a stream mid-refill. The canonical build is an
-SNDH v2.2 container - subtunes, tags and all - with the runnable .PRG a
-thin shell around the same bytes; a whole set of tunes packs with one
-configuration in one call. A second front end packs RhYMe's own `.YMR`
-register dumps into that same file - the two formats are the same idea with
-different bookkeeping, down to PWM, Sample and RTE being the toggle, PCM and
-retrigger streams under other names - and `yx6/rhyme.sh` test drives one the
-way `play.sh` test drives a `.ym`.
+streams: fourteen carrying the YM2149's sound registers, eleven a compiled
+effect script. Each stream is packed as its own container — two for a tune
+that loops, split at the loop frame, because restarting a stream means
+starting a decoder over — with the digidrum samples appended as a table. A
+small 68000 player decodes them through ST4_wrap rings, refilling exactly one
+stream per frame, and plays the effects — digidrums, SID voices, the
+sync-buzzer — on timer channels mapped onto the timers of the ST's MFP
+interrupt chip by a stream in the file. The effect decisions were all made at
+pack time: the packer
+simulates the reference player over the whole timeline, and the player replays
+prepared actions.
+
+A second front end packs RhYMe's own `.YMR` register dumps into that same
+`.yx6` — the two formats are the same idea with different bookkeeping. The
+numbers live downstream: [yx6/README.md](yx6/README.md) has the stream counts,
+the player's size, what a frame costs, and how to build a tune into an SNDH
+v2.2 file — the Atari ST's standard music container, and the canonical build —
+or into the `.PRG` that is a thin shell around those same bytes.
 
 ```sh
 mvn -q compile exec:exec@yx6 -Dargs="-f song.ym song.yx6"
-yx6/mkprg.sh SONG.PRG song.yx6        # -> SONG.PRG
+yx6/mksndh.sh song.sndh song.yx6
+yx6/mkprg.sh SONG.PRG song.yx6
 ```
 
 ## Tests
 
 ```sh
-mvn test                                  # round-trips, containers, optimizer equivalence
+mvn test                                  # round-trips, containers, optimizers, both YM front ends, the effect script
 dotnet test csharp/Nt4.slnx -c Release    # the C# port, same corpora
 python3 68k/test/emu/test_st4.py          # linear decoder vs the Java packer, k = 1, 2, 4
 python3 68k/test/emu/test_st4_wrap.py     # counted wrap, every unit size
@@ -251,11 +253,12 @@ ST1 — the ZX1 decoders this grew from, and the jx1 packer — is in
 [odipar/ST1](https://github.com/odipar/ST1). ST4 forked from it at
 `odipar/ST1@132aef0`; the shared emulator harness and the MC68000 cycle
 knowledge in the rigs are carried copies of that repository's, which remains
-authoritative for ST1's own timing tables. So is
-[`org.jx1.Decompressor`](src/main/java/org/jx1/README.md), the ZX1 decoder the
-`.ymr` front end reads RhYMe's streams with: somebody else's format is worth
-reading with the implementation that already exists rather than a second one
-written to match it.
+authoritative for ST1's own timing tables. The one carried copy that is not
+ST1's is [`org.jx1.Decompressor`](src/main/java/org/jx1/README.md), vendored
+from [jx1](https://github.com/odipar/jx1) — the ZX1 decoder the `.ymr` front
+end reads RhYMe's streams with: somebody else's format is worth reading with
+the implementation that already exists rather than a second one written to
+match it.
 
 ## License and attribution
 

@@ -539,12 +539,12 @@ public final class YmrEffects {
         if (code == 0) {
             return;
         }
-        // A retrigger stream needs nothing written. Format v8 lets a file
-        // say that its shape comes from R13 rather than from a voice, and a
-        // .YMR says so, because that is where RhYMe keeps it: the player
-        // primes its handler from the envelope shadow, not from a volume
-        // register it never touches. So the volume byte stays the .YMR's own
-        // on every frame, which is what it was before this front end existed.
+        // A retrigger stream needs nothing written. From format v9 the shape
+        // such a stream restarts is carried in the script, and this front end
+        // reads it off R13, because that is where RhYMe keeps it - not off a
+        // volume register it never touches. So the volume byte stays the
+        // .YMR's own on every frame, which is what it was before this front
+        // end existed.
         if ((code & 0xC0) == Tune.KIND_PCM) {
             registers[R_VOLUME_A + voice][frame] = (byte) sample;
         }

@@ -44,3 +44,10 @@ tunes on one disk), the cheap variant is fixed, menu-less, always-on
 clustering of (2,3), (4,5) and (11,12): one layout, two cursors, no
 adaptivity, -3.3% of register data. The E1:T1/E2:T2 effect pairs would
 likely join for the same correlation reason the envelope pair wins.
+
+**Postscript 2026-08-21.** Those effect pairs have different names now:
+since v5 they are the compiled script's A/P pairs, and four of them since
+v7 - A0:P0 .. A3:P3. The correlation argument survives the rename, twice
+over on a YM tune (a YM frame starts at most two effects, so the other two
+channels' streams pack to nothing) and four times for a source that names
+all four channels.

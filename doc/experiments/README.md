@@ -13,12 +13,12 @@ after the decline - the door left open.
 
 | date | experiment | verdict |
 |---|---|---|
-| 2026-08-19 | [movep and pre-formatted streams](2026-08-19-movep-and-stream-formats.md) | declined - ties at best, +25% bytes at worst |
+| 2026-08-19 | [movep and pre-formatted streams](2026-08-19-movep-and-stream-formats.md) | declined as a speed trick - ties at best, +25% bytes at worst; movep shipped later for atomicity |
 | 2026-08-19 | [register clustering](2026-08-19-register-clustering.md) | declined - real but marginal; fixed variant noted |
 | 2026-08-19 | [the SID ticking](2026-08-19-sid-ticking.md) | diagnosed and fixed - the burst may not write a register a timer effect owns |
 | 2026-08-20 | [SID phase semantics](2026-08-20-sid-phase-semantics.md) | surveyed - no two players implement re-start phase alike; v2 ships ym2149-rs's, -sidresume the alternative |
 | 2026-08-20 | [the Synergy Credits hunt](2026-08-20-synergy-credits-sid-phase.md) | diagnosed and fixed - a phase bug every write-level instrument called correct |
-| 2026-08-20 | [the drum reopen click](2026-08-20-drum-reopen-click.md) | diagnosed and fixed - one cautionary +1 frame in the packer, a click after every digidrum; differentials must compare event timing, and the capture chain must be validated before the player |
-| 2026-08-20 | [the CoS dump audit](2026-08-20-cos-dump-audit.md) | dump vs original replay - melody exact to 0.00 semitones, drum samples replaced by the converter; en route, the drum rescue became a windowed-sinc resample to the ceiling |
+| 2026-08-20 | [the drum reopen click](2026-08-20-drum-reopen-click.md) | diagnosed and fixed - one cautionary +1 frame in the packer, a click after every digidrum |
+| 2026-08-20 | [the CoS dump audit](2026-08-20-cos-dump-audit.md) | dump vs original replay - melody exact to 0.00 semitones, drum samples replaced by the converter |
 | 2026-08-21 | [the timers left running](2026-08-21-the-timers-left-running.md) | diagnosed and fixed - identical chip writes, different machine: the host must stop the timers the player does not claim |
-| 2026-08-21 | [the unmasked burst](2026-08-21-the-unmasked-burst.md) | changed - one instruction per register write makes the frame write's interrupt mask optional; it stays on by default, and -nomask trades 3 ticks a frame for 500 cycles of tick latency |
+| 2026-08-21 | [the unmasked burst](2026-08-21-the-unmasked-burst.md) | changed - one instruction per register write makes the frame write's interrupt mask optional; it stays on by default, and -nomask gives back 3 ticks over the harness's 1700 frames and ~500 cycles of tick latency |

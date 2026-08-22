@@ -1,9 +1,8 @@
 # org.jx1 — the vendored ZX1 decoder
 
-ST4 grew out of [ST1](https://github.com/odipar/ST1) and, through it, Einar
-Saukas's [ZX1](https://github.com/einar-saukas/ZX1). Its own format is a
-different one, so nothing here is on ST4's path — this is a single file kept
-for the one job ST4's own decoders cannot do: reading somebody else's ZX1.
+ST4's own format is not [ZX1](https://github.com/einar-saukas/ZX1), so nothing
+here is on ST4's path — this is a single file kept for the one job ST4's own
+decoders cannot do: reading somebody else's ZX1.
 
 RhYMe's `.YMR` register dumps are ZX1, one stream at a time, each packed
 against the ring its player will decode it through. [`org.ymr.Zx1`](../ymr/Zx1.java)
