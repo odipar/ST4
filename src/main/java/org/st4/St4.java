@@ -114,7 +114,7 @@ public final class St4 {
      * long boundary. Nothing says how long a stream is: it runs to the next.
      */
     // Public because a container is also how other formats embed an ST4
-    // stream: a yx6 file holds up to fifty of them.
+    // stream, many of them at once.
     public static byte[] container(St4Compressor.Result result) {
         int controlAt = St4Format.HEADER_SIZE;                  // already a multiple of 4
         int literalAt = align(controlAt + result.control().length);

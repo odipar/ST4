@@ -17,7 +17,7 @@
         <errorprone.version>2.36.0</errorprone.version>
         <nullaway.version>0.12.3</nullaway.version>
         <!-- Every package is null-marked and enforced. -->
-        <nullaway.packages>org.st4,org.yx6,org.ym6,org.ymr</nullaway.packages>
+        <nullaway.packages>org.st4</nullaway.packages>
         <nullaway.severity>ERROR</nullaway.severity>
         <!-- CLI arguments for exec:exec@st4 / exec:exec@dst4 (-Dargs="..."). -->
         <args></args>
@@ -98,16 +98,6 @@
                         <configuration>
                             <executable>java</executable>
                             <commandlineArgs>-ea -cp %classpath org.st4.St4 ${args}</commandlineArgs>
-                        </configuration>
-                    </execution>
-                    <execution>
-                        <id>yx6</id>
-                        <goals>
-                            <goal>exec</goal>
-                        </goals>
-                        <configuration>
-                            <executable>java</executable>
-                            <commandlineArgs>-ea -cp %classpath org.ym6.Yx6 ${args}</commandlineArgs>
                         </configuration>
                     </execution>
                     <execution>
