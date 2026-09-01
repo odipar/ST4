@@ -362,9 +362,9 @@ public sealed class RoundTripTests
             Assert.Equal(0, byteAt % 4);
             Assert.Equal(0, wordAt % 4);
 
-            // The layout is A, C, D, B: the literal payload runs to the end of
+            // The layout is A, B, C, D: the literal payload runs to the end of
             // the file, so it borders whatever the caller loads after it.
-            Assert.True(byteAt <= wordAt && wordAt <= literalAt, "streams run A, C, D, B");
+            Assert.True(byteAt <= wordAt && wordAt <= literalAt, "streams run A, B, C, D");
             Assert.Equal(file.Length, literalAt + packed.Literal.Length);
 
             // Stream A needs no field: it begins where the header ends. Every
@@ -435,7 +435,7 @@ public sealed class RoundTripTests
         strayStream[Format.OffsetByteOffsets + 1] = 0x7F;
         Assert.Throws<InvalidDataException>(() => Format.Read(strayStream));
 
-        byte[] outOfOrder = (byte[])good.Clone();   // C before the header ends
+        byte[] outOfOrder = (byte[])good.Clone();   // B before the header ends
         outOfOrder[Format.OffsetByteOffsets + 3] = 0;
         Assert.Throws<InvalidDataException>(() => Format.Read(outOfOrder));
 

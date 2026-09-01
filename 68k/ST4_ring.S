@@ -8,7 +8,7 @@
 ; ZX1 through ST4 (see LICENSE).
 ;
 ; ST4_ring is ST1_ring with ST4's four streams and units: literals come from
-; stream B in a2 and offsets from stream C in a4 (bytes) or D in a5 (words),
+; stream D in a2 and offsets from stream B in a4 (bytes) or C in a5 (words),
 ; budgets and lengths count units of ST4_UNIT bytes, and the copy moves a unit
 ; at a time. With the offsets gone, stream A holds nothing but bits, so the
 ; queue refills a word at a time. Set the unit size before including:
@@ -28,7 +28,7 @@
 ; for the measurements behind the split.
 ;
 ; The container is ST4.S's: twenty-four bytes of header - signature, O, where
-; streams B, C and D begin, and the rewind point - then A, C, D and B in
+; streams B, C and D begin, and the rewind point - then A, B, C and D in
 ; order, the literal payload last so it borders whatever the caller loads
 ; after the container. See ST4.S for the eight instructions that open one, and
 ; for the rewind: a loop longer than the window is replayed by saving the
@@ -38,8 +38,8 @@
 ; THE STATE IS YOUR REGISTERS:
 ;
 ;   a0.l  position in stream A          a1.l  write pointer
-;   a2.l  position in stream B          a4.l  stream C, the byte offsets
-;   a5.l  stream D, the word offsets    d0.w  bit queue ($8000 empty,
+;   a2.l  position in stream D          a4.l  stream B, the byte offsets
+;   a5.l  stream C, the word offsets    d0.w  bit queue ($8000 empty,
 ;                                            zero once a repeat is armed)
 ;   d1.l  -ring_start.low : units remaining
 ;   d2.l  ring_end.low : signed byte offset (+lastOffset*UNIT during literals,
@@ -60,7 +60,7 @@
 ;   2. no offset exceeds 32512 BYTES - the packer clamps -m to that
 ;   3. no operation is longer than 65535 units - compress with -l65535
 ;   4. the budget in d3.w is 1..65535 units
-;   5. streams A and D start on even addresses, and A holds an even number of
+;   5. streams A and C start on even addresses, and A holds an even number of
 ;      bytes: the bit queue is refilled with a move.w, and so is a word offset
 ;
 ; Compress with st4 -k<UNIT> -m<ring/UNIT> -l65535.
@@ -222,7 +222,7 @@ entry_special:                          ; d1.w = 0: only START or DONE survives 
         bra.w   begin_literals          ; START: once per stream
 
 literal_source:
-        movea.l a2,a3                   ; literals copy from stream B
+        movea.l a2,a3                   ; literals copy from stream D
         sub.w   d4,d1                   ; consume n from the operation
         sub.w   d4,d3                   ; and from this call's budget
 copy_slow:                              ; any n; the subs are already done
@@ -242,7 +242,7 @@ ladder_end:
         bcc.s   ladder                  ; costs 12 where dbf paid 14, and still
         tst.w   d2                      ; leaves d4.w = $ffff for byte_offset
         bmi.s   match_copied            ; an n>=17 match rejoins its epilogue
-        movea.l a3,a2                   ; literals do: stream B advanced
+        movea.l a3,a2                   ; literals do: stream D advanced
         tst.w   d1
         bne.s   resume_return           ; literals can stop only on the budget
 

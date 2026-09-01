@@ -176,8 +176,8 @@ public static class Nt4
         Console.WriteLine(string.Create(CultureInfo.InvariantCulture,
             $"Packed {input.Length} bytes{(padded == input.Length ? "" : $" padded to {padded}")} "
             + $"into {result.PackedSize} ({100.0 * result.PackedSize / input.Length:F1}%): "
-            + $"A {result.Control.Length}, B {result.Literal.Length}, "
-            + $"C {result.ByteOffsets.Length}, D {result.WordOffsets.Length}, "
+            + $"A {result.Control.Length}, B {result.ByteOffsets.Length}, "
+            + $"C {result.WordOffsets.Length}, D {result.Literal.Length}, "
             + $"{result.Operations} operations"
             + $"{(repeatIndex < 0 ? "" : $", loops from unit {repeatIndex}")}"
             + $"{(result.RewindIndex < 0 ? "" : " by rewind")}"));
@@ -197,7 +197,7 @@ public static class Nt4
     }
 
     /// <summary>
-    /// Twenty-four bytes of header, then A, C, D and B in order, each starting
+    /// Twenty-four bytes of header, then A, B, C and D in order, each starting
     /// on a long boundary. Nothing says how long a stream is: it runs to the
     /// next - and B, the literal payload, runs to the end of the file, so it
     /// borders whatever the caller loads after the container.

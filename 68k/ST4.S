@@ -12,8 +12,8 @@
 ;
 ;   1. the literal payload lives in a stream of its own, so its alignment is a
 ;      property of the file rather than of wherever the control bytes left it;
-;   2. the offsets live in streams of their own, split by width: bytes in C,
-;      words in D. That leaves stream A holding nothing but bits, so its queue
+;   2. the offsets live in streams of their own, split by width: bytes in B,
+;      words in C. That leaves stream A holding nothing but bits, so its queue
 ;      refills a WORD at a time - impossible while an offset byte can move the
 ;      same pointer by one - and it leaves a word offset stored exactly as the
 ;      decoder wants it, so installing one is a single move;
@@ -35,11 +35,12 @@
 ; same bits, the same speed. At 2 and 4 the copy is a move.w or move.l and the
 ; operation count falls with the unit size.
 ;
-; 68000 ALIGNMENT. Streams A and D are read a word at a time, so both must
+; 68000 ALIGNMENT. Streams A and C are read a word at a time, so both must
 ; start on an even address; the packer pads A to an even length so the last
-; refill finds a whole word, and D holds whole words by construction. At ST4_UNIT 2 or 4 the destination, stream B and every offset are
+; refill finds a whole word, and C holds whole words by construction. At
+; ST4_UNIT 2 or 4 the destination, stream D and every offset are
 ; whole units, so a wide move can never land on an odd address - provided the
-; caller starts the destination and stream B on a unit boundary. A real 68000
+; caller starts the destination and stream D on a unit boundary. A real 68000
 ; raises an address error if they do not.
 ;
 ; -----------------------------------------------------------------------------
@@ -48,13 +49,13 @@
 ;
 ;    0  4  signature: 'S', '4', format version, ST4_UNIT
 ;    4  4  O, the output size in bytes
-;    8  4  stream B, as a byte offset from the start of the header
-;   12  4  stream C
-;   16  4  stream D
+;    8  4  stream B, the byte offsets, as a byte offset from the header
+;   12  4  stream C, the word offsets
+;   16  4  stream D, the literals
 ;   20  4  the rewind point in bytes, or $FFFFFFFF when there is none
-;   24 ..  stream A, then C, then D, then B
+;   24 ..  streams A, B, C and D, in that order
 ;
-; Stream B comes last, so the literal payload runs to the end of the file and
+; Stream D, the literals, comes last, so it runs to the end of the file and
 ; borders whatever the caller loads after the container - a ring, say.
 ; Nothing else is stored, because nothing else has to be. Stream A begins where
 ; the header ends. No length is kept: a stream runs to the next one, and this
@@ -68,11 +69,11 @@
 ;       bne.s   wrong_asset
 ;       lea     24(a3),a0               ; stream A, where the header ends
 ;       movea.l a3,a2
-;       adda.l  8(a3),a2                ; stream B
+;       adda.l  16(a3),a2               ; stream D, the literals
 ;       movea.l a3,a4
-;       adda.l  12(a3),a4               ; stream C
+;       adda.l  8(a3),a4                ; stream B, the byte offsets
 ;       movea.l a3,a5
-;       adda.l  16(a3),a5               ; stream D
+;       adda.l  12(a3),a5               ; stream C, the word offsets
 ;
 ; -----------------------------------------------------------------------------
 ; THE STATE IS YOUR REGISTERS. ST4_init seeds it; preserve all seven between
@@ -80,9 +81,9 @@
 ;
 ;   a0.l  position in stream A, the bit stream
 ;   a1.l  write pointer - where the output ends, after every call
-;   a2.l  position in stream B, the literal stream
-;   a4.l  position in stream C, the byte offsets
-;   a5.l  position in stream D, the word offsets
+;   a2.l  position in stream D, the literal stream
+;   a4.l  position in stream B, the byte offsets
+;   a5.l  position in stream C, the word offsets
 ;   d0.w  bit queue ($8000 is the empty sentinel; zero once a repeat is armed)
 ;   d1.w  units remaining in the current operation
 ;   d2.w  signed byte offset: +lastOffset*UNIT during LITERALS,
@@ -122,8 +123,8 @@
 ;   2. no back-reference offset exceeds 32512 BYTES, which is 32512/ST4_UNIT
 ;      units - the st4 packer clamps -m to that. A word offset is stored as
 ;      -offset*UNIT, so the window is what fits the word it is kept in
-;   3. at ST4_UNIT 2 or 4 the destination and stream B start on a unit boundary
-;   4. streams A and D start on even addresses; A holds an even number of bytes
+;   3. at ST4_UNIT 2 or 4 the destination and stream D start on a unit boundary
+;   4. streams A and C start on even addresses; A holds an even number of bytes
 ;   5. the budget in d3.w is 1..65535 units; zero makes no progress
 ;
 ; TRUSTED INPUT ONLY. Neither stream, nor the destination, nor the budget is
@@ -155,15 +156,15 @@ ST4_SIGNATURE   equ     $53340500+ST4_UNIT
                 bra.w   ST4_decompress
                 bra.w   ST4_resume
 
-; ST4_init: a0 = stream A, a1 = destination, a2 = stream B, a4 = stream C,
-; a5 = stream D; seeds d0/d1/d2.
+; ST4_init: a0 = stream A, a1 = destination, a2 = stream D, a4 = stream B,
+; a5 = stream C; seeds d0/d1/d2.
 ST4_init:
         moveq   #-ST4_UNIT,d2           ; -lastOffset*UNIT, INITIAL_OFFSET = 1
         moveq   #0,d1                   ; remaining = 0
         move.w  #$8000,d0               ; an empty bit queue: $8000 is the sentinel
         rts
 
-; ST4_decompress: a0/a1/a2/a4/a5 = streams A, destination, B, C and D.
+; ST4_decompress: a0/a1/a2/a4/a5 = streams A, destination, D, B and C.
 ; One-shot convenience; returns with a1 = end of output. Not for a repeating
 ; stream: those have no DONE state, so this loop would never leave.
 ST4_decompress:
@@ -302,7 +303,7 @@ resume_return:
         rts                             ; a1 remains the output end
 
 literal_source:
-        movea.l a2,a3                   ; literals copy from stream B
+        movea.l a2,a3                   ; literals copy from stream D
         sub.w   d4,d1
         sub.w   d4,d3
 copy_slow:                              ; any n; the subs are already done
@@ -322,7 +323,7 @@ ladder_end:
         bcc.s   ladder                  ; costs 12 where dbf paid 14, and still
         tst.w   d2                      ; leaves d4.w = $ffff for byte_offset
         bmi.s   match_copied            ; an n>=17 match rejoins its epilogue
-        movea.l a3,a2                   ; literals do: stream B advanced
+        movea.l a3,a2                   ; literals do: stream D advanced
         tst.w   d1
         bne.s   resume_return           ; budget spent mid-op
 

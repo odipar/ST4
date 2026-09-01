@@ -11,8 +11,8 @@ namespace Nt4;
 /// <remarks>
 /// <para>Stream A holds nothing but bits - the block-type flags and the
 /// interlaced Elias gamma lengths - so its reservoir refills a word at a time.
-/// Stream B holds the literal payload, stream C the byte offsets and stream D
-/// the word offsets, so each stream is uniform and D is word-aligned by
+/// Stream B holds the byte offsets, stream C the word offsets and stream D the
+/// literal payload, so each stream is uniform and C is word-aligned by
 /// construction. Lengths and offsets count units of k bytes, where k is 1, 2
 /// or 4; the Java <c>St4Format</c> is the reference and documents the control
 /// codes and the reasoning at length.</para>
@@ -32,7 +32,7 @@ namespace Nt4;
 /// itself.</para>
 /// <para>The end marker carries one extra bit. A 0 ends the stream; a 1 means
 /// it repeats from a loop point R - the container encodes the infinite input
-/// <c>units[0..R) units[R..O)</c> repeated forever. Stream D stores the
+/// <c>units[0..R) units[R..O)</c> repeated forever. Stream C stores the
 /// distance O-R back to the loop point as its one last word, and the stream
 /// becomes an endless match at it.</para>
 /// </remarks>
@@ -42,8 +42,10 @@ public static class Format
     public const int Magic = 0x53340000;
 
     /// <summary>
-    /// Version 5 moved stream B behind the offsets and gave the end marker its
-    /// repeat bit. Version 4 cut the header to what cannot be derived.
+    /// Version 5 laid the streams out in file order with the literal payload
+    /// last - A, B, C, D as they lie - and gave the end marker its repeat bit
+    /// and the header its rewind point. Version 4 cut the header to what
+    /// cannot be derived.
     /// </summary>
     public const int Version = 5;
 
@@ -53,14 +55,14 @@ public static class Format
     /// <summary>Byte offset of the padded output size.</summary>
     public const int OffsetSize = 4;
 
-    /// <summary>Byte offset of stream B's header-relative position.</summary>
-    public const int OffsetLiteral = 8;
+    /// <summary>Byte offset of stream B's header-relative position: the byte offsets.</summary>
+    public const int OffsetByteOffsets = 8;
 
-    /// <summary>Byte offset of stream C's header-relative position.</summary>
-    public const int OffsetByteOffsets = 12;
+    /// <summary>Byte offset of stream C's header-relative position: the word offsets.</summary>
+    public const int OffsetWordOffsets = 12;
 
-    /// <summary>Byte offset of stream D's header-relative position.</summary>
-    public const int OffsetWordOffsets = 16;
+    /// <summary>Byte offset of stream D's header-relative position: the literals.</summary>
+    public const int OffsetLiteral = 16;
 
     /// <summary>Byte offset of the rewind point, in bytes like the size.</summary>
     public const int OffsetRewind = 20;
@@ -104,9 +106,9 @@ public static class Format
     /// <param name="Unit">Bytes per unit: 1, 2 or 4.</param>
     /// <param name="Size">The padded output size in bytes, a multiple of the unit.</param>
     /// <param name="Control">Stream A, the bits.</param>
-    /// <param name="Literal">Stream B, the literal payload.</param>
-    /// <param name="ByteOffsets">Stream C, one byte per offset.</param>
-    /// <param name="WordOffsets">Stream D, one word per offset.</param>
+    /// <param name="Literal">Stream D, the literal payload.</param>
+    /// <param name="ByteOffsets">Stream B, one byte per offset.</param>
+    /// <param name="WordOffsets">Stream C, one word per offset.</param>
     /// <param name="Rewind">The rewind point in bytes, or <see cref="NoRewind"/>.</param>
     public sealed record Container(int Unit, int Size, byte[] Control, byte[] Literal,
         byte[] ByteOffsets, byte[] WordOffsets, int Rewind);
@@ -158,7 +160,7 @@ public static class Format
             throw new InvalidDataException($"rewind point {rewind} is not a unit of the output");
         }
 
-        // The file lays the streams out as A, C, D, B: the literal payload
+        // The streams lie in the file as A, B, C, D: the literal payload
         // last, so it runs to the end of the file.
         int[] edge =
         {
@@ -170,11 +172,11 @@ public static class Format
             if (edge[i] % 4 != 0)
             {
                 throw new InvalidDataException(
-                    $"stream {"ACDB"[i]} does not start on a long boundary");
+                    $"stream {"ABCD"[i]} does not start on a long boundary");
             }
             if (edge[i] < edge[i - 1] || edge[i] > file.Length)
             {
-                throw new InvalidDataException($"stream {"ACDB"[i]} lies outside the file");
+                throw new InvalidDataException($"stream {"ABCD"[i]} lies outside the file");
             }
         }
         return new Container(unit, size,
