@@ -20,6 +20,11 @@ tables, speedcode, register streams — and a bad one elsewhere, which is why k
 is chosen per asset and recorded in the header. At k = 1 ST4 packs to within a
 percent of ZX1.
 
+A stream can also be endless. Packed with a loop point, it plays its intro
+once and its loop forever, through a ring far smaller than itself — by itself
+when the loop fits the decoder's window, and by rewinding the encoded stream
+when it does not.
+
 The name follows the family joke: ZX1 signs the ZX Spectrum, ST1 the Atari ST,
 and the 4 is both the widest unit and a nod to the Mega ST4.
 
@@ -27,14 +32,14 @@ and the 4 is both the widest unit and a nod to the Mega ST4.
 
 All lengths and offsets count units of k bytes. Input that is not a whole
 number of units is padded with zeros, and the padding is part of the stored
-output. A container holds four streams:
+output. A container holds four streams, in this order:
 
 | stream | holds |
 |---|---|
 | **A** | all the bits: flags, class bits and lengths |
-| **B** | the literal data, whole units |
 | **C** | byte offsets, one byte each |
 | **D** | word offsets, one word each |
+| **B** | the literal data, whole units — last, so it runs to the end of the file |
 
 Bits are read from stream A most significant first. Lengths use interlaced
 Elias gamma: each binary digit of the value below its leading 1 is written
@@ -49,43 +54,18 @@ match, last offset   gamma(length)    copy length units from the current offset
 match, new offset    2 class bits + one value from C or D, then gamma(length-1)
 ```
 
-A stream may end by repeating instead of stopping. `st4 -rR` names a loop
-point: the container then encodes the infinite input `[0,R)` `[R,O)*` — after
-the last unit, the output continues from unit R and never stops — which is
-how a small ring holds an 'infinite' stream: a looping sample, a register
-dump, a pattern. One repeat bit follows the end code, and when it is set one
-last word offset is read from stream D — the distance O−R back to the loop
-point — and the stream becomes an endless match at it. The distance obeys the
-same limits as any other offset, and that is also the mechanism's reach: the
-looped span `[R,O)` must fit the window the stream was packed for, since the
-endless match reads it back out of the ring.
-
-A loop longer than the window cannot loop by itself, so the packer makes it
-the caller's: the stream ends plainly and the header names a *rewind point*.
-Every decoder keeps its whole state in seven registers, so the caller saves
-them when the output reaches R and restores them — all but the write pointer
-— when it reaches O, every pass. That replays the encoded stream from the
-loop point through a ring of any size; the container is in memory anyway.
-What makes the replay sound is the parse: the loop `[R,O)` is packed on its
-own, so no match in it reaches before R or straddles R, and every pass sees
-the same history whatever came before it. The cost is confined to the first
-window's worth of the loop, which cannot reference the intro. `-rR` picks
-between the two by itself — the endless match when the loop fits the window,
-the rewind point when it does not — and the rewind field is set only when the
-caller has something to do.
-
 One flag bit says which block comes next. After literals, `0` starts a match
 at the last offset and `1` a match at a new offset — two literal runs in a row
 cannot happen. After a match, `0` starts literals and `1` a match at a new
 offset. The first block is always literals and has no flag bit.
 
-The two class bits of a new offset pick its stream and reach, or end the file:
+The two class bits of a new offset pick its stream and reach, or end the data:
 
 ```
 1 0   byte offset from stream C, 1..256 units back
 1 1   byte offset from stream C, 257..512 units back
 0 0   word offset from stream D
-0 1   end of stream, then the repeat bit: 0 ends it, 1 loops it forever
+0 1   end of the data, followed by one repeat bit
 ```
 
 A byte offset of n units in bank b is stored as the byte 256·(b+1) − n. A word
@@ -94,18 +74,25 @@ as the decoder keeps it, so installing one is a single move. No offset may
 reach further back than 32512 bytes, at any k, and a new-offset match is at
 least 2 units long — which is why it stores gamma(length−1).
 
+The repeat bit says whether the stream ends there. A `0` ends it. A `1` makes
+it loop: one last word offset is read from stream D and the stream becomes an
+endless match that far back — see [Loops](#loops).
+
 Together with its flag, a block is an even number of bits: a gamma value is
 an odd count, and the flag or class bits make it even. That is why a new
 offset spends two class bits rather than one, and the even rhythm is what
-lets the decoders skip the refill check on every read but two: a gamma
-continuation bit, and the class bit right after a flag. Stream A is padded to
-an even length so the last refill finds a whole word.
+lets the decoders skip the refill check on every read but three: a gamma
+continuation bit, the class bit right after a flag, and the repeat bit after
+the end code. Stream A is padded to an even length so the last refill finds a
+whole word.
 
-A container is twenty-four bytes of header, then the streams in order:
+### The container
+
+A container is twenty-four bytes of header, then the streams:
 
 ```
  0  4  signature: 'S', '4', format version (5), k
- 4  4  output size in bytes, a multiple of k
+ 4  4  O, the output size in bytes, a multiple of k
  8  4  where stream B starts, in bytes from the start of the header
 12  4  where stream C starts
 16  4  where stream D starts
@@ -113,12 +100,15 @@ A container is twenty-four bytes of header, then the streams in order:
 24 ..  stream A, then C, then D, then B, each starting on a long boundary
 ```
 
-Nothing else is stored because nothing else is needed: stream A begins where
-the header ends, each stream runs to the next, and no stream length is kept —
-the decoder stops at the end marker. The signature fits one long, so a decoder
-built for one k accepts or rejects an asset with a single `cmp.l`, and the
-stream starts are header-relative, so opening a container is one `adda.l` per
-stream. The eight instructions that do it are in [ST4.S](68k/ST4.S).
+The header holds only what cannot be worked out from the streams. Stream A
+begins where the header ends, so it needs no field; no stream length is kept,
+because each stream runs to the next and the decoder stops on the end code;
+and the rewind point is the one fact a caller cannot derive — where to save
+the decoder's state to replay a loop — so it is set only when a caller has
+that to do. The signature fits one long, so a decoder built for one k accepts
+or rejects an asset with a single `cmp.l`, and the stream starts are
+header-relative, so opening a container is one `adda.l` per stream. The eight
+instructions that do it are in [ST4.S](68k/ST4.S).
 
 Stream B sits last — version 5 moved it there from second — so the literal
 payload runs to the end of the file and ends on a unit boundary. A ring buffer
@@ -126,6 +116,35 @@ placed directly after the container therefore borders the literal data: at any
 moment during a decode, the literals not yet consumed occupy a known stretch
 of memory just below the ring, which a packer that knows the caller's layout
 can let matches reach into.
+
+### Loops
+
+`st4 -rR` names a loop point, a unit index. The container then stands for the
+infinite input `[0,R)` `[R,O)*`: after its last unit, the output continues
+from unit R and never stops. That is how a small ring holds an endless stream
+— a looping sample, a register dump, a pattern — and `-r0` loops the whole
+stream. There are two ways to loop, and the packer picks one by whether the
+loop fits the window it was packed for.
+
+**A loop that fits the window loops by itself.** The stream's repeat bit is
+set, and the word that follows it in stream D is the distance O−R back to the
+loop point. The decoder installs it as any other offset and matches it
+forever, so after one pass every unit is the one O−R units back. It costs the
+container two bytes and the pass is packed exactly as it would be without
+the loop. Its reach is the window's: the endless match reads the loop back out
+of the ring, so `[R,O)` must fit `-m`.
+
+**A loop longer than the window is replayed from the encoded stream.** The
+stream ends plainly and the header names the rewind point. Every decoder
+keeps its whole state in seven registers, so the caller saves them when the
+output reaches R and restores them — all but the write pointer — when it
+reaches O, every pass; the container is in memory anyway, so a ring of any
+size will do. What makes the replay sound is the parse. In pass one the loop
+follows the intro; in every later pass it follows itself; so the loop
+`[R,O)` is packed on its own, and no match in it reaches before R or
+straddles R — every pass sees the same history. The cost is confined to the
+first window's worth of the loop, which cannot reference the intro: on the
+test corpora, 0.4–1.3% of the packed size.
 
 ## 68000 decoders
 
@@ -145,21 +164,6 @@ are known and your caller counts the wraps; use
 [ST4_ring.S](68k/ST4_ring.S) for variable call sizes — it stops each call at
 the ring end.
 
-All three decode repeating streams: the end marker installs the repeat offset
-and the decoder re-arms the same match 65535 units at a time, forever. The
-bit queue is pinned to zero — a value no real read leaves it in — so the only
-cost to a stream that does end is one extra branch on a match-to-literals
-transition. A repeating stream never reaches DONE: drive it through
-`ST4_resume` with budgets and stop when you have enough. `ST4_decompress`,
-which drains until DONE, would never return.
-
-A loop longer than the window is the caller's to replay, and needs no decoder
-code at all: when the output reaches the header's rewind point, save `a0`,
-`a2`, `a4`, `a5`, `d0`, `d1` and `d2`; when it reaches O, restore them — `a1`
-stays where the ring has got to — and carry on, every pass. Arrange the
-budgets so a call ends exactly on both points; a state saved mid-operation
-replays like any other, because there is nothing else to it.
-
 Each decoder runs two copy ladders: match runs of at most sixteen units — on
 measured streams, four of every five — take a counter-free ladder that falls
 straight into what comes next, and literals and longer runs take a counted
@@ -177,10 +181,26 @@ boundary, and the ring size is a whole number of units, so a wide move never
 lands on an odd address. Each file documents its exact contract and numbered
 assumptions.
 
+Loops cost the decoders little. A stream that loops by itself arms its endless
+match at the end code and re-arms it 65535 units at a time, forever: the bit
+queue is pinned to zero, a value no real read leaves it in, so the transition
+that would parse the next block re-arms instead. That adds one branch to a
+match-to-literals transition and one checked bit to the end code; measured
+against the version 4 decoders on the same corpora, streams that end pay
+0.05–0.4% more cycles, and the loop itself runs at or below the pass's own
+rate, since it only copies. Such a stream never reaches DONE: drive it through
+`ST4_resume` with budgets and stop when you have enough — `ST4_decompress`,
+which drains until DONE, would never return. A loop the caller replays needs
+no decoder code at all: when the output reaches the header's rewind point,
+save `a0`, `a2`, `a4`, `a5`, `d0`, `d1` and `d2`; when it reaches O, restore
+them — `a1` stays where the ring has got to — and carry on. Arrange the
+budgets so a call ends exactly on both points; a state saved mid-operation
+replays like any other, because there is nothing else to it.
+
 The decoders do not check their input. Use trusted files made at build time.
 The packers already keep every operation within the decoders' 16-bit counters;
 for a ring of N units, pack with `-mN` so the decoder never needs data that
-has already left the ring.
+has already left the ring — which is also what decides how a loop is packed.
 
 ## Java tools
 
@@ -193,11 +213,10 @@ java -ea -cp target/classes org.st4.Dst4 [-f] input.st4 [output]
 `st4` packs, reporting progress and a time estimate as it works; `dst4`
 unpacks, and is the readable reference the 68000 decoders are checked against.
 Its output is padded to a whole number of units, which is what the format
-stores — for a repeating stream, one whole pass. `-kK` picks the unit size,
-`-mN` limits how far back matches may reach, `-lN` splits long matches — the
-default already fits the 68000 decoders — and `-rR` makes the stream loop:
-after the last unit, the output continues from unit R, forever. `-r0` loops
-the whole stream. A loop longer than `-m` is packed for rewind, and `st4`
+stores — for a looping stream, one whole pass, and it says where the loop is.
+`-kK` picks the unit size, `-mN` limits how far back matches may reach, `-lN`
+splits long matches — the default already fits the 68000 decoders — and `-rR`
+makes the stream loop from unit R. When the loop is longer than `-m`, `st4`
 says at which unit to save the decoder's state and at which to restore it.
 
 Three optimizers select the blocks, all held to each other by tests:
@@ -230,8 +249,8 @@ ZX1 C compressor.
 [csharp/](csharp/README.md) is `nt4`, a .NET 10 port of the Java tools: the
 same library classes, the same three optimizers, the same options. The
 containers are interchangeable — measured byte-identical to the Java packer's
-on real data at every unit size — and the tests are the Java suite, corpus for
-corpus.
+on real data at every unit size, looping or not — and the tests are the Java
+suite, corpus for corpus.
 
 ```sh
 dotnet run --project csharp/src/Nt4.Cli -- [-f] [-kK] [-mN] [-lN] [-rR] input [output.st4]
@@ -240,13 +259,13 @@ dotnet run --project csharp/src/Nt4.Cli -- [-f] [-kK] [-mN] [-lN] [-rR] input [o
 ## Tests
 
 ```sh
-mvn test                                  # round-trips, containers, optimizers
+mvn test                                  # round-trips, containers, loops, optimizers
 dotnet test csharp/Nt4.slnx -c Release    # the C# port, same corpora
 python3 68k/test/emu/test_st4.py          # linear decoder vs the Java packer, k = 1, 2, 4
 python3 68k/test/emu/test_st4_wrap.py     # counted wrap, every unit size
 python3 68k/test/emu/test_st4_ring.py     # general ring, both wrap modes, oversized budgets
-python3 68k/test/emu/test_st4_repeat.py   # -r streams through all three decoders, past two passes
-python3 68k/test/emu/test_st4_rewind.py   # loops longer than the ring, replayed by register rewind
+python3 68k/test/emu/test_st4_repeat.py   # streams that loop by themselves, past two passes
+python3 68k/test/emu/test_st4_rewind.py   # loops longer than the ring, replayed by rewind
 python3 68k/test/emu/bench_bits.py        # why the lengths are still Elias gamma
 ```
 
@@ -254,7 +273,9 @@ The Python rigs need `mvn compile`, [rmac](http://rmac.is-slick.com) and
 `pip install unicorn`: they pack every corpus with the real packer, assemble
 the real decoders, decode under emulation as a plain 68000, and check every
 output byte, exact consumption of all four streams, ring guard bands and the
-packed register metadata.
+packed register metadata. The two loop rigs drive all three decoders the way
+a caller would — budgets, snapshots and restores included — through more
+than two passes, against the infinite input the container stands for.
 
 ## ST1
 
