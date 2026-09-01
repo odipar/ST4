@@ -57,19 +57,21 @@ def assemble(unit: int) -> bytes:
         return binary.read_bytes()
 
 
-def pack(data: bytes, unit: int, window: int) -> tuple:
-    """Runs the real packer; returns the four streams and the padded size."""
+def pack(data: bytes, unit: int, window: int, repeat: int | None = None) -> tuple:
+    """Runs the real packer; repeat is the loop point as a unit index, 0 valid."""
     if not CLASSES.exists():
         raise SystemExit('target/classes is missing; run `mvn compile` first')
     CACHE.mkdir(exist_ok=True)
-    key = CACHE / f'{hashlib.sha1(data).hexdigest()[:16]}-k{unit}-m{window}.st4'
+    key = CACHE / (f'{hashlib.sha1(data).hexdigest()[:16]}-v5-k{unit}-m{window}'
+                   + (f'-at{repeat}' if repeat is not None else '') + '.st4')
     if not key.exists():
         with tempfile.TemporaryDirectory() as directory:
             source = Path(directory) / 'in'
             source.write_bytes(data)
             subprocess.run(['java', '-ea', '-cp', str(CLASSES), 'org.st4.St4', '-f',
-                            f'-k{unit}', f'-m{window}', '-l65535',
-                            str(source), str(key)],
+                            f'-k{unit}', f'-m{window}', '-l65535']
+                           + ([f'-r{repeat}'] if repeat is not None else [])
+                           + [str(source), str(key)],
                            check=True, capture_output=True)
     file = key.read_bytes()
 
@@ -78,13 +80,14 @@ def pack(data: bytes, unit: int, window: int) -> tuple:
 
     # Twenty bytes of header: signature, O, then where B, C and D begin. A
     # begins where the header ends, and no length is stored - each stream runs
-    # to the next, so a slice can carry up to three bytes of padding.
-    assert long(0) == 0x53340000 | (4 << 8) | unit, 'not an ST4 v4 file for this unit'
+    # to the next in file order A, C, D, B, so a slice can carry up to three
+    # bytes of padding; B, last, runs to the end of the file exactly.
+    assert long(0) == 0x53340000 | (5 << 8) | unit, 'not an ST4 v5 file for this unit'
     size = long(4)
     literal_at, bytes_at, words_at = long(8), long(12), long(16)
-    assert 20 <= literal_at <= bytes_at <= words_at <= len(file), 'streams out of order'
-    return (file[20:literal_at], file[literal_at:bytes_at],
-            file[bytes_at:words_at], file[words_at:], size)
+    assert 20 <= bytes_at <= words_at <= literal_at <= len(file), 'streams out of order'
+    return (file[20:bytes_at], file[literal_at:],
+            file[bytes_at:words_at], file[words_at:literal_at], size)
 
 
 def consumed(name: str, count: int, stream: bytes) -> str:

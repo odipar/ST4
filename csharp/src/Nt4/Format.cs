@@ -19,15 +19,26 @@ namespace Nt4;
 /// <para>The header is twenty bytes and holds only what cannot be worked out:
 /// a signature packing magic, version and k into one long, the padded output
 /// size, and where streams B, C and D begin relative to the header. Stream A
-/// begins where the header ends, and each stream runs to the next.</para>
+/// begins where the header ends, and each stream runs to the next. The file
+/// lays them out as A, C, D, B: the literal payload comes last, so it runs to
+/// the end of the file and borders whatever the caller loads after the
+/// container - a ring buffer, say.</para>
+/// <para>The end marker carries one extra bit. A 0 ends the stream; a 1 means
+/// it repeats from a loop point R - the container encodes the infinite input
+/// <c>units[0..R) units[R..O)</c> repeated forever. Stream D stores the
+/// distance O-R back to the loop point as its one last word, and the stream
+/// becomes an endless match at it.</para>
 /// </remarks>
 public static class Format
 {
     /// <summary><c>'S4'</c>, the top half of every signature.</summary>
     public const int Magic = 0x53340000;
 
-    /// <summary>Version 4 cut the header to what cannot be derived.</summary>
-    public const int Version = 4;
+    /// <summary>
+    /// Version 5 moved stream B behind the offsets and gave the end marker its
+    /// repeat bit. Version 4 cut the header to what cannot be derived.
+    /// </summary>
+    public const int Version = 5;
 
     /// <summary>Byte offset of the signature long in a container.</summary>
     public const int OffsetSignature = 0;
@@ -128,26 +139,28 @@ public static class Format
                 $"output size {size} is not a whole number of {unit}-byte units");
         }
 
+        // The file lays the streams out as A, C, D, B: the literal payload
+        // last, so it runs to the end of the file.
         int[] edge =
         {
-            HeaderSize, LongAt(file, OffsetLiteral), LongAt(file, OffsetByteOffsets),
-            LongAt(file, OffsetWordOffsets), file.Length,
+            HeaderSize, LongAt(file, OffsetByteOffsets), LongAt(file, OffsetWordOffsets),
+            LongAt(file, OffsetLiteral), file.Length,
         };
         for (int i = 1; i < edge.Length - 1; i++)
         {
             if (edge[i] % 4 != 0)
             {
                 throw new InvalidDataException(
-                    $"stream {"ABCD"[i]} does not start on a long boundary");
+                    $"stream {"ACDB"[i]} does not start on a long boundary");
             }
             if (edge[i] < edge[i - 1] || edge[i] > file.Length)
             {
-                throw new InvalidDataException($"stream {"ABCD"[i]} lies outside the file");
+                throw new InvalidDataException($"stream {"ACDB"[i]} lies outside the file");
             }
         }
         return new Container(unit, size,
-            file[edge[0]..edge[1]], file[edge[1]..edge[2]],
-            file[edge[2]..edge[3]], file[edge[3]..edge[4]]);
+            file[edge[0]..edge[1]], file[edge[3]..edge[4]],
+            file[edge[1]..edge[2]], file[edge[2]..edge[3]]);
     }
 
     private static int LongAt(byte[] file, int at) =>

@@ -47,8 +47,10 @@
 ;    8  4  stream B, as a byte offset from the start of the header
 ;   12  4  stream C
 ;   16  4  stream D
-;   20 ..  stream A, then B, then C, then D
+;   20 ..  stream A, then C, then D, then B
 ;
+; Stream B comes last, so the literal payload runs to the end of the file and
+; borders whatever the caller loads after the container - a ring, say.
 ; Nothing else is stored, because nothing else has to be. Stream A begins where
 ; the header ends. No length is kept: a stream runs to the next one, and this
 ; decoder reads no length anyway - it stops on the end marker. The signature
@@ -76,10 +78,15 @@
 ;   a2.l  position in stream B, the literal stream
 ;   a4.l  position in stream C, the byte offsets
 ;   a5.l  position in stream D, the word offsets
-;   d0.w  bit queue ($8000 is the empty sentinel)
+;   d0.w  bit queue ($8000 is the empty sentinel; zero once a repeat is armed)
 ;   d1.w  units remaining in the current operation
 ;   d2.w  signed byte offset: +lastOffset*UNIT during LITERALS,
 ;         -lastOffset*UNIT during MATCH, and zero once DONE
+;
+; A stream packed with st4 -r never reaches DONE: its end marker installs one
+; last offset and the decoder matches it forever, re-arming 65535 units at a
+; time. Drive such a stream through ST4_resume with budgets and stop when you
+; have enough - ST4_decompress, which drains until DONE, would never return.
 ;
 ; Calling convention, in full:
 ;
@@ -109,10 +116,10 @@
 ; validated. A wrong value can read or write arbitrary memory.
 ; -----------------------------------------------------------------------------
 
-; The asset's signature for this build: 'S4', format version 4, and the unit
+; The asset's signature for this build: 'S4', format version 5, and the unit
 ; size this decoder was assembled for. One cmp.l against a file's first long
 ; proves all three at once.
-ST4_SIGNATURE   equ     $53340400+ST4_UNIT
+ST4_SIGNATURE   equ     $53340500+ST4_UNIT
 
 ; One unit copied, at the width this build was made for. Everything else in
 ; this file is width-independent, which is the point of keeping the counts in
@@ -143,7 +150,8 @@ ST4_init:
         rts
 
 ; ST4_decompress: a0/a1/a2/a4/a5 = streams A, destination, B, C and D.
-; One-shot convenience; returns with a1 = end of output.
+; One-shot convenience; returns with a1 = end of output. Not for a repeating
+; stream: those have no DONE state, so this loop would never leave.
 ST4_decompress:
         bsr.s   ST4_init
 .drain:
@@ -174,6 +182,11 @@ gamma_refill:                           ; queue-empty continuations share one
         addx.w  d0,d0
         bcs.s   gamma_loop
         bra.s   gamma_done
+
+match_next:                             ; a 0 flag after a match means literals
+        bne.s   begin_literals          ; - unless the queue reads zero, which
+        subq.w  #1,d1                   ; only a pinned one does: the repeat
+        bra.s   resume_op               ; re-arms 65535 units, budget willing
 
 begin_literals:
         neg.w   d2                      ; positive lastOffset = State.LITERALS
@@ -224,7 +237,7 @@ match_copied:                           ; the match epilogue
         tst.w   d1
         bne.s   resume_return           ; budget spent mid-op
         add.w   d0,d0                   ; next(), case MATCH (bare read)
-        bcc.s   begin_literals          ; 0: literals; 1: falls into new offset
+        bcc.s   match_next              ; 0: literals - or the repeat's re-arm
 
 new_offset:                             ; beginMatchFromNewOffset() / readOffset()
 ; Two class bits: the first says byte or word, the second picks a byte offset's
@@ -271,8 +284,6 @@ scale_offset:
         moveq   #1,d4                   ; new-offset match: remaining = gamma+1
         bra.w   get_gamma               ; one branch, not two through have_offset
 
-end_marker:
-        clr.w   d2                      ; d1.w is already zero; normalize DONE
 resume_return:
         rts                             ; a1 remains the output end
 
@@ -306,3 +317,26 @@ literals_transition:
         bcs.s   new_offset              ; 1: new offset
         neg.w   d2                      ; from-last reuses the negated offset
         bra.w   gamma_seed0
+
+end_marker:
+; One more bit: 0 ends the stream, 1 repeats it. It sits at an even position,
+; where the queue can run dry, so this is the one other checked read.
+        add.w   d0,d0
+        beq.s   end_refill
+end_read:
+        bcs.s   arm_repeat
+        clr.w   d2                      ; d1.w is already zero; normalize DONE
+        rts                             ; a1 remains the output end
+end_refill:
+        move.w  (a0)+,d0
+        addx.w  d0,d0
+        bra.s   end_read
+
+arm_repeat:
+; The repeat: install one last word offset and match it forever. Pinning the
+; queue to zero - a value no real read leaves it at - makes every transition
+; that would parse the next block re-arm the match instead.
+        move.w  (a5)+,d2                ; -(O-R)*UNIT: back to the loop point
+        moveq   #0,d0
+        subq.w  #1,d1                   ; remaining = 65535, from zero
+        bra.w   resume_op               ; the budget may already be spent

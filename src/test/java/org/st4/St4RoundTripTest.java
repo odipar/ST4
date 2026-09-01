@@ -37,6 +37,14 @@ final class St4RoundTripTest {
                 packed.paddedSize(), offsetLimit);
     }
 
+    /** Packs a stream that loops: after its last unit it continues from unit {@code index}. */
+    private static St4Compressor.Result packRepeating(byte[] input, int unit, int index) {
+        int[] units = Units.split(input, unit);
+        return St4Compressor.compress(
+                St4Optimizer.optimize(units, unit, St4Format.maxOffsetUnits(unit), false),
+                units, unit, St4Format.MAX_OP, index);
+    }
+
     private static byte[] padded(byte[] input, int unit) {
         return Arrays.copyOf(input, Units.paddedLength(input.length, unit));
     }
@@ -132,6 +140,66 @@ final class St4RoundTripTest {
         }
     }
 
+    @Test
+    void aRepeatingStreamFillsAnyOutputBeyondOnePass() {
+        // A stream that loops from unit R decodes as the infinite input
+        // units[0..R) units[R..O)*: past one whole pass, every unit is the one
+        // O-R units back. Any output size from one pass up must decode, and
+        // every byte past the pass must obey that recurrence.
+        for (int unit : new int[] {1, 2, 4}) {
+            for (byte[] input : inputs()) {
+                int total = Units.paddedLength(input.length, unit) / unit;
+                for (int index : new java.util.TreeSet<>(
+                        List.of(0, total / 3, total - 1))) {
+                    St4Compressor.Result packed = packRepeating(input, unit, index);
+                    byte[] pass = padded(input, unit);
+                    byte[] expected = Arrays.copyOf(pass, pass.length
+                            + (2 * total + 3) * unit);
+                    for (int at = pass.length; at < expected.length; at++) {
+                        expected[at] = expected[at - (total - index) * unit];
+                    }
+                    String shape = "unit " + unit + ", " + input.length + " bytes, -r" + index;
+                    assertArrayEquals(expected, St4Decompressor.decompress(
+                            packed.control(), packed.literal(), packed.byteOffsets(),
+                            packed.wordOffsets(), unit, expected.length), shape);
+                    // One exact pass is still decodable: the repeat has no room
+                    // and the streams must come out fully consumed anyway.
+                    assertArrayEquals(pass, unpack(packed), shape);
+                }
+            }
+        }
+    }
+
+    @Test
+    void theDecoderReportsHowAStreamEnds() {
+        byte[] input = "the tail of this sentence loops. and loops. ".getBytes(
+                java.nio.charset.StandardCharsets.US_ASCII);
+        St4Compressor.Result plain = pack(input, 1);
+        assertEquals(-1, St4Decompressor.decode(plain.control(), plain.literal(),
+                plain.byteOffsets(), plain.wordOffsets(), 1, plain.paddedSize(),
+                St4Format.maxOffsetUnits(1)).repeatIndex());
+        St4Compressor.Result looped = packRepeating(input, 1, 12);
+        assertEquals(12, St4Decompressor.decode(looped.control(), looped.literal(),
+                looped.byteOffsets(), looped.wordOffsets(), 1, looped.paddedSize(),
+                St4Format.maxOffsetUnits(1)).repeatIndex());
+    }
+
+    @Test
+    void theLimitCheckingDecoderRefusesAWideRepeat() {
+        // The loop distance is a match offset like any other: one that reaches
+        // further back than the ring keeps must fail loudly, exactly as a wide
+        // offset does. Looping 400 units from unit 100 is 300 units back.
+        byte[] input = new byte[400];
+        new Random(3).nextBytes(input);
+        int[] units = Units.split(input, 1);
+        St4Compressor.Result wide = St4Compressor.compress(
+                St4Optimizer.optimize(units, 1, 64, false), units, 1,
+                St4Format.MAX_OP, 100);
+        assertThrows(IllegalStateException.class, () -> St4Decompressor.decompress(
+                wide.control(), wide.literal(), wide.byteOffsets(), wide.wordOffsets(),
+                1, 800, 64));
+    }
+
     /**
      * ZX1's packed size for each of {@link #inputs()}, recorded from jx1 in
      * odipar/ST1 at commit 132aef0. The inputs are deterministic, so these can
@@ -175,6 +243,11 @@ final class St4RoundTripTest {
             assertEquals(0, literalAt % 4, "stream B starts long-aligned");
             assertEquals(0, byteAt % 4, "stream C starts long-aligned");
             assertEquals(0, wordAt % 4, "stream D starts long-aligned");
+            // The layout is A, C, D, B: the literal payload runs to the end of
+            // the file, so it borders whatever the caller loads after it.
+            assertTrue(byteAt <= wordAt && wordAt <= literalAt, "streams run A, C, D, B");
+            assertEquals(file.length, literalAt + packed.literal().length,
+                    "stream B runs to the end of the file");
 
             // Stream A needs no field: it begins where the header ends. Every
             // other start is one adda.l from the asset's own address.
@@ -243,7 +316,7 @@ final class St4RoundTripTest {
         strayStream[St4Format.OFFSET_BYTE_OFFSETS + 1] = 0x7F;
         assertThrows(IllegalArgumentException.class, () -> St4Format.read(strayStream));
 
-        byte[] outOfOrder = good.clone();          // C before B
+        byte[] outOfOrder = good.clone();          // C before the header ends
         outOfOrder[St4Format.OFFSET_BYTE_OFFSETS + 3] = 0;
         assertThrows(IllegalArgumentException.class, () -> St4Format.read(outOfOrder));
 

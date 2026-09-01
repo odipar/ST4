@@ -3,11 +3,13 @@ package org.st4;
 /**
  * The reference ST4 decoder: what the 68000 versions have to agree with.
  *
- * <p>It is the ZX1 state machine with two changes. Literals come from stream B
- * and offsets from stream C or D - by width - rather than from the stream the
- * bits live in, and every length and offset is counted in units, so each step
- * moves k bytes. The parse is still ZX1's; only where the pieces are written
- * differs, and the two class bits that say which stream an offset came from.
+ * <p>It is the ZX1 state machine with three changes. Literals come from stream
+ * B and offsets from stream C or D - by width - rather than from the stream the
+ * bits live in; every length and offset is counted in units, so each step
+ * moves k bytes; and the end marker carries one more bit, which can turn the
+ * end into an endless match - the repeat. The parse is still ZX1's; only where
+ * the pieces are written differs, and the two class bits that say which stream
+ * an offset came from.
  */
 public final class St4Decompressor {
 
@@ -28,6 +30,7 @@ public final class St4Decompressor {
     private int bitMask;
     private int bitValue;
     private int lastOffset = St4Optimizer.INITIAL_OFFSET;
+    private int repeatIndex = -1;
     private State state = State.START;
 
     private St4Decompressor(byte[] control, byte[] literal, byte[] byteOffsets,
@@ -50,6 +53,16 @@ public final class St4Decompressor {
     }
 
     /**
+     * What a decode produced: the output, and how the stream ended. A stream
+     * that repeats reports its loop point - the unit the output continues
+     * from after the last one, so the stream decodes as
+     * {@code units[0..R) units[R..O)} forever; a stream that simply ends
+     * reports -1. For a repeating stream any {@code size} from one whole pass
+     * up is decodable - the repeat fills whatever the pass itself did not.
+     */
+    public record Decoded(byte[] output, int repeatIndex) {}
+
+    /**
      * As above, refusing any back-reference further than {@code offsetLimit}
      * units. An offset within the limit is exactly what makes a stream safe
      * for a ring of that many units, so this is how tests hold a {@code -mN}
@@ -60,12 +73,20 @@ public final class St4Decompressor {
     public static byte[] decompress(byte[] control, byte[] literal, byte[] byteOffsets,
                                     byte[] wordOffsets, int unit, int size,
                                     int offsetLimit) {
+        return decode(control, literal, byteOffsets, wordOffsets, unit, size,
+                offsetLimit).output();
+    }
+
+    /** As {@link #decompress}, also reporting whether the stream repeats. */
+    public static Decoded decode(byte[] control, byte[] literal, byte[] byteOffsets,
+                                 byte[] wordOffsets, int unit, int size,
+                                 int offsetLimit) {
         assert St4Format.isUnitSize(unit) : "unit size must be 1, 2 or 4";
         assert size % unit == 0 : "output size must be a whole number of units";
         var decoder = new St4Decompressor(control, literal, byteOffsets, wordOffsets,
                 new byte[size], unit, offsetLimit);
         decoder.run();
-        return decoder.output;
+        return new Decoded(decoder.output, decoder.repeatIndex);
     }
 
     private void run() {
@@ -115,14 +136,10 @@ public final class St4Decompressor {
             lastOffset = bank * 256 + 256 - (byteOffsets[byteOffsetIndex++] & 0xFF);
         } else {
             if (readBit()) {
-                state = State.DONE;
+                endOrRepeat();
                 return;
             }
-            assert wordOffsetIndex + 2 <= wordOffsets.length : "truncated word offsets";
-            int scaled = (wordOffsets[wordOffsetIndex] & 0xFF) << 8
-                    | (wordOffsets[wordOffsetIndex + 1] & 0xFF);
-            wordOffsetIndex += 2;
-            lastOffset = ((1 << 16) - scaled) / unit;   // stored as -offset * unit
+            lastOffset = readWordOffset();
         }
         assert lastOffset > 0 : "an offset must reach back at least one unit";
         if (lastOffset > offsetLimit) {
@@ -131,6 +148,41 @@ public final class St4Decompressor {
         }
         copy(readInterlacedEliasGamma() + 1);
         state = State.MATCH;
+    }
+
+    /**
+     * The end code's extra bit: a plain end, or the repeat - one last word
+     * offset from stream D, matched until the output the caller asked for is
+     * full. The 68000 decoders run the same match 65535 units at a time,
+     * re-armed forever.
+     */
+    private void endOrRepeat() {
+        if (readBit()) {
+            // Stream D holds the distance back to the loop point; the loop
+            // point itself is where the pass so far ends, minus that.
+            int distance = readWordOffset();
+            assert distance > 0 : "a repeat must reach back at least one unit";
+            if (distance > offsetLimit) {
+                throw new IllegalStateException("the loop distance " + distance
+                        + " units reaches past the " + offsetLimit + "-unit limit");
+            }
+            repeatIndex = outputIndex / unit - distance;
+            assert repeatIndex >= 0 : "the loop point must be a unit of the stream";
+            lastOffset = distance;
+            int remaining = (output.length - outputIndex) / unit;
+            if (remaining > 0) {
+                copy(remaining);
+            }
+        }
+        state = State.DONE;
+    }
+
+    private int readWordOffset() {
+        assert wordOffsetIndex + 2 <= wordOffsets.length : "truncated word offsets";
+        int scaled = (wordOffsets[wordOffsetIndex] & 0xFF) << 8
+                | (wordOffsets[wordOffsetIndex + 1] & 0xFF);
+        wordOffsetIndex += 2;
+        return ((1 << 16) - scaled) / unit;   // stored as -offset * unit
     }
 
     /** Copies {@code length} units from {@code lastOffset} units back. */

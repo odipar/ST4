@@ -33,6 +33,15 @@ public sealed class RoundTripTests
         Decompressor.Decompress(packed.Control, packed.Literal, packed.ByteOffsets,
             packed.WordOffsets, packed.Unit, packed.PaddedSize, offsetLimit);
 
+    /// <summary>Packs a stream that loops: after its last unit it continues from unit <paramref name="index"/>.</summary>
+    private static Compressor.Result PackRepeating(byte[] input, int unit, int index)
+    {
+        int[] units = Units.Split(input, unit);
+        return Compressor.Compress(
+            Optimizer.Optimize(units, unit, Format.MaxOffsetUnits(unit), false),
+            units, unit, Format.MaxOp, index);
+    }
+
     private static byte[] Padded(byte[] input, int unit)
     {
         byte[] padded = new byte[Units.PaddedLength(input.Length, unit)];
@@ -145,6 +154,69 @@ public sealed class RoundTripTests
         }
     }
 
+    [Fact]
+    public void ARepeatingStreamFillsAnyOutputBeyondOnePass()
+    {
+        // A stream that loops from unit R decodes as the infinite input
+        // units[0..R) units[R..O)*: past one whole pass, every unit is the one
+        // O-R units back. Any output size from one pass up must decode, and
+        // every byte past the pass must obey that recurrence.
+        foreach (int unit in new[] { 1, 2, 4 })
+        {
+            foreach (byte[] input in Inputs())
+            {
+                int total = Units.PaddedLength(input.Length, unit) / unit;
+                foreach (int index in new SortedSet<int> { 0, total / 3, total - 1 })
+                {
+                    Compressor.Result packed = PackRepeating(input, unit, index);
+                    byte[] pass = Padded(input, unit);
+                    byte[] expected = new byte[pass.Length + ((2 * total) + 3) * unit];
+                    pass.CopyTo(expected, 0);
+                    for (int at = pass.Length; at < expected.Length; at++)
+                    {
+                        expected[at] = expected[at - ((total - index) * unit)];
+                    }
+                    Assert.Equal(expected, Decompressor.Decompress(
+                        packed.Control, packed.Literal, packed.ByteOffsets,
+                        packed.WordOffsets, unit, expected.Length));
+                    // One exact pass is still decodable: the repeat has no room
+                    // and the streams must come out fully consumed anyway.
+                    Assert.Equal(pass, Unpack(packed));
+                }
+            }
+        }
+    }
+
+    [Fact]
+    public void TheDecoderReportsHowAStreamEnds()
+    {
+        byte[] input = Encoding.ASCII.GetBytes(
+            "the tail of this sentence loops. and loops. ");
+        Compressor.Result plain = Pack(input, 1);
+        Assert.Equal(-1, Decompressor.Decode(plain.Control, plain.Literal,
+            plain.ByteOffsets, plain.WordOffsets, 1, plain.PaddedSize,
+            Format.MaxOffsetUnits(1)).RepeatIndex);
+        Compressor.Result looped = PackRepeating(input, 1, 12);
+        Assert.Equal(12, Decompressor.Decode(looped.Control, looped.Literal,
+            looped.ByteOffsets, looped.WordOffsets, 1, looped.PaddedSize,
+            Format.MaxOffsetUnits(1)).RepeatIndex);
+    }
+
+    [Fact]
+    public void TheLimitCheckingDecoderRefusesAWideRepeat()
+    {
+        // The loop distance is a match offset like any other: one that reaches
+        // further back than the ring keeps must fail loudly, exactly as a wide
+        // offset does. Looping 400 units from unit 100 is 300 units back.
+        byte[] input = new byte[400];
+        new JavaRandom(3).NextBytes(input);
+        int[] units = Units.Split(input, 1);
+        Compressor.Result wide = Compressor.Compress(
+            Optimizer.Optimize(units, 1, 64, false), units, 1, Format.MaxOp, 100);
+        Assert.Throws<InvalidDataException>(() => Decompressor.Decompress(
+            wide.Control, wide.Literal, wide.ByteOffsets, wide.WordOffsets, 1, 800, 64));
+    }
+
     /// <summary>
     /// ZX1's packed size for each of <see cref="Inputs"/>, recorded from jx1
     /// in odipar/ST1 at commit 132aef0, exactly as the Java suite holds them.
@@ -190,6 +262,11 @@ public sealed class RoundTripTests
             Assert.Equal(0, literalAt % 4);
             Assert.Equal(0, byteAt % 4);
             Assert.Equal(0, wordAt % 4);
+
+            // The layout is A, C, D, B: the literal payload runs to the end of
+            // the file, so it borders whatever the caller loads after it.
+            Assert.True(byteAt <= wordAt && wordAt <= literalAt, "streams run A, C, D, B");
+            Assert.Equal(file.Length, literalAt + packed.Literal.Length);
 
             // Stream A needs no field: it begins where the header ends. Every
             // other start is one adda.l from the asset's own address.
@@ -259,7 +336,7 @@ public sealed class RoundTripTests
         strayStream[Format.OffsetByteOffsets + 1] = 0x7F;
         Assert.Throws<InvalidDataException>(() => Format.Read(strayStream));
 
-        byte[] outOfOrder = (byte[])good.Clone();   // C before B
+        byte[] outOfOrder = (byte[])good.Clone();   // C before the header ends
         outOfOrder[Format.OffsetByteOffsets + 3] = 0;
         Assert.Throws<InvalidDataException>(() => Format.Read(outOfOrder));
 

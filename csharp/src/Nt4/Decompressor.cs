@@ -8,11 +8,12 @@ namespace Nt4;
 /// C#.
 /// </summary>
 /// <remarks>
-/// It is the ZX1 state machine with two changes. Literals come from stream B
+/// It is the ZX1 state machine with three changes. Literals come from stream B
 /// and offsets from stream C or D - by width - rather than from the stream the
-/// bits live in, and every length and offset is counted in units, so each step
-/// moves k bytes. Malformed or truncated streams throw
-/// <see cref="InvalidDataException"/>, where the Java reference trips a
+/// bits live in; every length and offset is counted in units, so each step
+/// moves k bytes; and the end marker carries one more bit, which can turn the
+/// end into an endless match - the repeat. Malformed or truncated streams
+/// throw <see cref="InvalidDataException"/>, where the Java reference trips a
 /// <c>-ea</c> assertion.
 /// </remarks>
 public sealed class Decompressor
@@ -40,6 +41,7 @@ public sealed class Decompressor
     private int bitMask;
     private int bitValue;
     private int lastOffset = Optimizer.InitialOffset;
+    private int repeatIndex = -1;
     private State state = State.Start;
 
     private Decompressor(byte[] control, byte[] literal, byte[] byteOffsets,
@@ -68,6 +70,18 @@ public sealed class Decompressor
             Format.MaxOffsetUnits(unit));
 
     /// <summary>
+    /// What a decode produced: the output, and how the stream ended. A stream
+    /// that repeats reports its loop point - the unit the output continues
+    /// from after the last one, so the stream decodes as
+    /// <c>units[0..R) units[R..O)</c> forever; a stream that simply ends
+    /// reports -1. For a repeating stream any size from one whole pass up is
+    /// decodable - the repeat fills whatever the pass itself did not.
+    /// </summary>
+    /// <param name="Output">The decoded bytes, padding included.</param>
+    /// <param name="RepeatIndex">The loop point as a unit index, or -1.</param>
+    public sealed record Decoded(byte[] Output, int RepeatIndex);
+
+    /// <summary>
     /// As above, refusing any back-reference further than
     /// <paramref name="offsetLimit"/> units. An offset within the limit is
     /// exactly what makes a stream safe for a ring of that many units, so this
@@ -90,6 +104,27 @@ public sealed class Decompressor
     /// <paramref name="offsetLimit"/>.
     /// </exception>
     public static byte[] Decompress(byte[] control, byte[] literal, byte[] byteOffsets,
+        byte[] wordOffsets, int unit, int size, int offsetLimit) =>
+        Decode(control, literal, byteOffsets, wordOffsets, unit, size, offsetLimit).Output;
+
+    /// <summary>As <see cref="Decompress(byte[], byte[], byte[], byte[], int, int, int)"/>,
+    /// also reporting whether the stream repeats.</summary>
+    /// <param name="control">Stream A, the bits.</param>
+    /// <param name="literal">Stream B, the literal payload.</param>
+    /// <param name="byteOffsets">Stream C, one byte per offset.</param>
+    /// <param name="wordOffsets">Stream D, one word per offset.</param>
+    /// <param name="unit">Bytes per unit: 1, 2 or 4.</param>
+    /// <param name="size">The output size in bytes, a multiple of the unit.</param>
+    /// <param name="offsetLimit">The furthest back any offset may reach, in units.</param>
+    /// <returns>The decoded bytes and the repeat offset, zero when the stream ends.</returns>
+    /// <exception cref="ArgumentNullException">A stream is null.</exception>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="unit"/> is not 1, 2 or 4.</exception>
+    /// <exception cref="ArgumentException"><paramref name="size"/> is not a whole number of units.</exception>
+    /// <exception cref="InvalidDataException">
+    /// The streams are malformed or truncated, or reach further back than
+    /// <paramref name="offsetLimit"/>.
+    /// </exception>
+    public static Decoded Decode(byte[] control, byte[] literal, byte[] byteOffsets,
         byte[] wordOffsets, int unit, int size, int offsetLimit)
     {
         ArgumentNullException.ThrowIfNull(control);
@@ -109,7 +144,7 @@ public sealed class Decompressor
         var decoder = new Decompressor(control, literal, byteOffsets, wordOffsets,
             new byte[size], unit, offsetLimit);
         decoder.Run();
-        return decoder.output;
+        return new Decoded(decoder.output, decoder.repeatIndex);
     }
 
     private void Run()
@@ -189,17 +224,10 @@ public sealed class Decompressor
         {
             if (ReadBit())
             {
-                state = State.Done;
+                EndOrRepeat();
                 return;
             }
-            if (wordOffsetIndex + 2 > wordOffsets.Length)
-            {
-                throw new InvalidDataException("truncated word offsets");
-            }
-            int scaled = wordOffsets[wordOffsetIndex] << 8
-                | wordOffsets[wordOffsetIndex + 1];
-            wordOffsetIndex += 2;
-            lastOffset = ((1 << 16) - scaled) / unit;   // stored as -offset * unit
+            lastOffset = ReadWordOffset();
         }
         if (lastOffset <= 0)
         {
@@ -212,6 +240,56 @@ public sealed class Decompressor
         }
         Copy(ReadInterlacedEliasGamma() + 1);
         state = State.Match;
+    }
+
+    /// <summary>
+    /// The end code's extra bit: a plain end, or the repeat - one last word
+    /// offset from stream D, matched until the output the caller asked for is
+    /// full. The 68000 decoders run the same match 65535 units at a time,
+    /// re-armed forever.
+    /// </summary>
+    private void EndOrRepeat()
+    {
+        if (ReadBit())
+        {
+            // Stream D holds the distance back to the loop point; the loop
+            // point itself is where the pass so far ends, minus that.
+            int distance = ReadWordOffset();
+            if (distance <= 0)
+            {
+                throw new InvalidDataException("a repeat must reach back at least one unit");
+            }
+            if (distance > offsetLimit)
+            {
+                throw new InvalidDataException(
+                    $"the loop distance {distance} units reaches past the "
+                    + $"{offsetLimit}-unit limit");
+            }
+            repeatIndex = (outputIndex / unit) - distance;
+            if (repeatIndex < 0)
+            {
+                throw new InvalidDataException("the loop point must be a unit of the stream");
+            }
+            lastOffset = distance;
+            int remaining = (output.Length - outputIndex) / unit;
+            if (remaining > 0)
+            {
+                Copy(remaining);
+            }
+        }
+        state = State.Done;
+    }
+
+    private int ReadWordOffset()
+    {
+        if (wordOffsetIndex + 2 > wordOffsets.Length)
+        {
+            throw new InvalidDataException("truncated word offsets");
+        }
+        int scaled = wordOffsets[wordOffsetIndex] << 8
+            | wordOffsets[wordOffsetIndex + 1];
+        wordOffsetIndex += 2;
+        return ((1 << 16) - scaled) / unit;   // stored as -offset * unit
     }
 
     /// <summary>Copies <paramref name="length"/> units from <c>lastOffset</c> units back.</summary>
