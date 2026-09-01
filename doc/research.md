@@ -220,6 +220,23 @@ At k = 1:
 | random + its first 500 bytes | 33012 | 16 | 33150 (100.4%) | 32521 (98.5%) | 33018 (100.0%) | 32620 (98.8%) |
 | 32 KB of one byte | 32000 | 16 | 5 (0.0%) | 5 (0.0%) | 5 (0.0%) | 4500 (14.1%) |
 
+At k = 2:
+
+| corpus | bytes | ring | ring alone | class code | by magnitude |
+|---|---:|---:|---:|---:|---:|
+| far-match: a block, a run, the block | 2900 | 16 | 409 (14.1%) | 210 (7.2%) | 210 (7.2%) |
+| period-128: 128 random bytes × 8 | 1024 | 16 | 1027 (100.3%) | 151 (14.7%) | 149 (14.6%) |
+| period-128 | 1024 | 64 | 134 (13.1%) | 134 (13.1%) | 134 (13.1%) |
+| word-soup: 20 words, 400 draws | 2925 | 16 | 2736 (93.5%) | 998 (34.1%) | 921 (31.5%) |
+| word-soup | 2925 | 64 | 2157 (73.7%) | 965 (33.0%) | 912 (31.2%) |
+| word-soup | 2925 | 256 | 1241 (42.4%) | 910 (31.1%) | 896 (30.6%) |
+| class file | 11273 | 16 | 10747 (95.3%) | 9468 (84.0%) | 9350 (82.9%) |
+| class | 11273 | 64 | 9937 (88.1%) | 9176 (81.4%) | 9095 (80.7%) |
+| class | 11273 | 256 | 9132 (81.0%) | 8844 (78.5%) | 8819 (78.2%) |
+| README, prose | 15732 | 16 | 15440 (98.1%) | 11994 (76.2%) | 11441 (72.7%) |
+| README | 15732 | 64 | 14533 (92.4%) | 11644 (74.0%) | 11195 (71.2%) |
+| README | 15732 | 256 | 12934 (82.2%) | 11085 (70.5%) | 10861 (69.0%) |
+
 At k = 4:
 
 | corpus | bytes | ring | ring alone | class code | by magnitude |
@@ -245,6 +262,9 @@ ring today's decoders need to match a 16-unit ring with copies from D:
 | word-soup | 1 | 31.6% | between 256 (41.0%) and 1024 (27.9%) |
 | class file | 1 | 73.5% | between 64 (75.0%) and 256 (63.5%) |
 | README | 1 | 78.3% | between 64 (85.0%) and 256 (66.8%) |
+| class file | 2 | 82.9% | between 64 (88.1%) and 256 (81.0%) |
+| README | 2 | 72.7% | more than 256 units (82.2%) |
+| word-soup | 2 | 31.5% | more than 256 units (42.4%) |
 | class file | 4 | 93.1% | between 64 (96.0%) and 256 (92.6%) |
 | README | 4 | 96.8% | between 64 (97.9%) and 256 (96.0%) |
 | word-soup | 4 | 70.6% | 256 units (70.6%) |
@@ -275,7 +295,9 @@ to the most recent occurrence, which is usually match output, not a literal;
 a copy from D has to reach the first occurrence instead, often a word offset
 away, and has no rep form. On the README a 16-unit ring with copies from D
 packs to 78.3%, like a ring of about 120 units today at k = 1; the class file
-to 73.5%, like about 80 units.
+to 73.5%, like about 80 units. At k = 2 the same ring takes the README to
+72.7% where the ring alone gives 98.1%, and the class file to 82.9% against
+95.3%.
 
 **The cost model still has slack.** Copies are backward only, at least two
 units, without a rep form; a rep for the copy that continues the last one
