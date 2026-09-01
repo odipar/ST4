@@ -156,8 +156,8 @@ percent of the true optimum on those. What copies buy is the ring: measured
 on the test corpora at k = 1, a 16-unit ring with copies packs word-soup to
 31.6% of the input where the ring alone gives 95.6%, and block-shaped data to
 within a point or two of the full window; [doc/research.md](doc/research.md)
-has the tables. Decoding them needs a decoder built with copies; the ones
-here are coming.
+has the tables. The decoders take them when built with `ST4_WINDOW`; see
+[68000 decoders](#68000-decoders).
 
 ### Loops
 
@@ -191,7 +191,8 @@ test corpora, 0.4–1.3% of the packed size.
 ## 68000 decoders
 
 Three decoders, each built for one unit size with `ST4_UNIT` — nine builds, no
-runtime choice of width:
+runtime choice of width — and, when the stream has copies from the literal
+stream, for its window with `ST4_WINDOW`:
 
 | | k=1 | k=2 | k=4 | calls |
 |---|---:|---:|---:|---|
@@ -239,10 +240,29 @@ them — `a1` stays where the ring has got to — and carry on. Arrange the
 budgets so a call ends exactly on both points; a state saved mid-operation
 replays like any other, because there is nothing else to it.
 
+Copies from the literal stream cost one compare. A decoder built with
+`ST4_WINDOW` set to the stream's window M tells a copy from a match by
+magnitude — a `cmp.w` and a short branch per match segment — and a copy's
+source is then a `lea` from the stream D read pointer, in place of the ring
+arithmetic a match needs. There is no state and no install-time work: the
+window is a constant, so a stream with copies needs the build made for its
+header window, which is one `cmp.l` at offset 24, and a build without
+`ST4_WINDOW` is byte for byte the decoder above. A window build is 14–22
+bytes larger. Measured on the test corpora, streams without copies pay
+1.8–3.9% more cycles on a window build than on a plain one, and a stream
+with copies runs at the rate its operation count sets: word-soup at k = 1
+packed with copies for a 16-unit ring decodes in ST4_wrap at 65.9 cycles
+per unit, where the same data packed without them for a 256-unit ring takes
+64.8 — and for the 16-unit ring, almost all of it literals, 42.0 for three
+times the bytes. At one window a copy is a little cheaper than a match in
+the ring decoders, since it skips the wrap.
+
 The decoders do not check their input. Use trusted files made at build time.
 The packers already keep every operation within the decoders' 16-bit counters;
 for a ring of N units, pack with `-mN` so the decoder never needs data that
 has already left the ring — which is also what decides how a loop is packed.
+Add `-c`, and build the decoder with `ST4_WINDOW equ N`, to let the ring
+reach the literals it has already read.
 
 ## Java tools
 
@@ -311,6 +331,7 @@ python3 68k/test/emu/test_st4_wrap.py     # counted wrap, every unit size
 python3 68k/test/emu/test_st4_ring.py     # general ring, both wrap modes, oversized budgets
 python3 68k/test/emu/test_st4_repeat.py   # streams that loop by themselves, past two passes
 python3 68k/test/emu/test_st4_rewind.py   # loops longer than the ring, replayed by rewind
+python3 68k/test/emu/test_st4_copies.py   # copies from the literal stream, on window builds
 python3 68k/test/emu/bench_bits.py        # why the lengths are still Elias gamma
 ```
 

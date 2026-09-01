@@ -57,14 +57,17 @@ def assemble(unit: int) -> bytes:
         return binary.read_bytes()
 
 
-def pack_file(data: bytes, unit: int, window: int, repeat: int | None = None) -> bytes:
-    """Runs the real packer; repeat is the loop point as a unit index, 0 valid.
+def pack_file(data: bytes, unit: int, window: int, repeat: int | None = None,
+              copies: bool = False) -> bytes:
+    """Runs the real packer; repeat is the loop point as a unit index, 0 valid,
+    and copies lets a match past the window copy from the literal stream.
     Returns the whole container, cached by its inputs and the format version."""
     if not CLASSES.exists():
         raise SystemExit('target/classes is missing; run `mvn compile` first')
     CACHE.mkdir(exist_ok=True)
     key = CACHE / (f'{hashlib.sha1(data).hexdigest()[:16]}-v6-k{unit}-m{window}'
-                   + (f'-at{repeat}' if repeat is not None else '') + '.st4')
+                   + (f'-at{repeat}' if repeat is not None else '')
+                   + ('-c' if copies else '') + '.st4')
     if not key.exists():
         with tempfile.TemporaryDirectory() as directory:
             source = Path(directory) / 'in'
@@ -72,6 +75,7 @@ def pack_file(data: bytes, unit: int, window: int, repeat: int | None = None) ->
             subprocess.run(['java', '-ea', '-cp', str(CLASSES), 'org.st4.St4', '-f',
                             f'-k{unit}', f'-m{window}', '-l65535']
                            + ([f'-r{repeat}'] if repeat is not None else [])
+                           + (['-c'] if copies else [])
                            + [str(source), str(key)],
                            check=True, capture_output=True)
     return key.read_bytes()
