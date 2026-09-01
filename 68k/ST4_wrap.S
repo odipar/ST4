@@ -7,7 +7,7 @@
 ; freely, including commercially, as long as your documentation says you used
 ; ZX1 through ST4 (see LICENSE).
 ;
-; ST4_wrap is ST1_wrap with ST4's three streams and units: the literal payload
+; ST4_wrap is ST1_wrap with ST4's four streams and units: the literal payload
 ; comes from stream B in a2 and the offsets from stream C in a4 (bytes) or D in
 ; a5 (words), lengths and budgets count units of ST4_UNIT bytes, and the copy
 ; moves a unit at a time. With the offsets gone, stream A holds nothing but

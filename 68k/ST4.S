@@ -8,7 +8,7 @@
 ; your own programs, even commercially, as long as your documentation indicates
 ; that you used ZX1 through ST4 (see LICENSE).
 ;
-; ST4 differs from ZX1 in three ways, and this file in one more:
+; ST4 differs from ZX1 in four ways, and this file in one more:
 ;
 ;   1. the literal payload lives in a stream of its own, so its alignment is a
 ;      property of the file rather than of wherever the control bytes left it;
@@ -18,7 +18,11 @@
 ;      same pointer by one - and it leaves a word offset stored exactly as the
 ;      decoder wants it, so installing one is a single move;
 ;   3. lengths and offsets count UNITS of ST4_UNIT bytes, so one operation
-;      moves that many bytes at a time and there are that many fewer of them.
+;      moves that many bytes at a time and there are that many fewer of them;
+;   4. a stream can loop. Its end code carries a repeat bit, and a set one
+;      installs a last offset that the decoder matches forever - or the
+;      header names a rewind point, and the caller replays the streams from
+;      the state it saved there. See THE STATE below.
 ;
 ; ST4_UNIT is a build-time constant - 1, 2 or 4 - because a decoder that chose
 ; its copy width at run time would pay for the choice on every operation. Set

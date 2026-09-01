@@ -7,7 +7,7 @@
 ; freely, including commercially, as long as your documentation says you used
 ; ZX1 through ST4 (see LICENSE).
 ;
-; ST4_ring is ST1_ring with ST4's three streams and units: literals come from
+; ST4_ring is ST1_ring with ST4's four streams and units: literals come from
 ; stream B in a2 and offsets from stream C in a4 (bytes) or D in a5 (words),
 ; budgets and lengths count units of ST4_UNIT bytes, and the copy moves a unit
 ; at a time. With the offsets gone, stream A holds nothing but bits, so the

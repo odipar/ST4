@@ -1,7 +1,7 @@
 package org.st4;
 
 /**
- * ST4: ZX1's three block types at a chosen unit granularity, split across three
+ * ST4: ZX1's three block types at a chosen unit granularity, split across four
  * streams so a 68000 can read each of them the fastest way that exists for it.
  *
  * <p>A ZX1 stream interleaves everything: flag bits, gamma lengths, offset
