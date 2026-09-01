@@ -39,8 +39,8 @@
 ; through a zero-unit match segment and reads that flag as "begin literals"
 ; exactly where the old entry branch went.
 ;
-; The container is ST4.S's: twenty-four bytes of header - signature, O, where
-; streams B, C and D begin, and the rewind point - then A, B, C and D in
+; The container is ST4.S's: twenty-eight bytes of header - signature, O, where
+; streams B, C and D begin, the rewind point and the window - then A, B, C and D in
 ; order, the literal payload last so it borders whatever the caller loads
 ; after the container. See ST4.S for the eight instructions that open one, and
 ; for the rewind: a loop longer than the window is replayed by saving the
@@ -76,10 +76,10 @@
 ; Compress with st4 -k<UNIT> -m<ring/UNIT> -l65535.
 ; -----------------------------------------------------------------------------
 
-; The asset's signature for this build: 'S4', format version 5, and the unit
+; The asset's signature for this build: 'S4', format version 6, and the unit
 ; size this decoder was assembled for. One cmp.l against a file's first long
 ; proves all three at once.
-ST4_SIGNATURE   equ     $53340500+ST4_UNIT
+ST4_SIGNATURE   equ     $53340600+ST4_UNIT
 
 ; One unit copied, at the width this build was made for.
         .macro ST4_MOVE

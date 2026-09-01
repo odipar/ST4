@@ -8,12 +8,15 @@ namespace Nt4;
 /// C#.
 /// </summary>
 /// <remarks>
-/// It is the ZX1 state machine with three changes. Literals come from stream D
+/// It is the ZX1 state machine with four changes. Literals come from stream D
 /// and offsets from stream B or C - by width - rather than from the stream the
 /// bits live in; every length and offset is counted in units, so each step
-/// moves k bytes; and the end marker carries one more bit, which can turn the
-/// end into an endless match - the repeat. Malformed or truncated streams
-/// throw <see cref="InvalidDataException"/>, where the Java reference trips a
+/// moves k bytes; the end marker carries one more bit, which can turn the end
+/// into an endless match - the repeat; and an offset beyond the window is a
+/// copy from the literal stream, which reads behind the literal read pointer
+/// without moving it and advances the offset by what it copied, exactly as
+/// the 68000 decoders do. Malformed or truncated streams throw
+/// <see cref="InvalidDataException"/>, where the Java reference trips a
 /// <c>-ea</c> assertion.
 /// </remarks>
 public sealed class Decompressor
@@ -26,7 +29,7 @@ public sealed class Decompressor
         Done,
     }
 
-    private readonly int offsetLimit;
+    private readonly int window;
     private readonly int rewindAt;
     private readonly byte[] control;
     private readonly byte[] literal;
@@ -46,9 +49,9 @@ public sealed class Decompressor
     private State state = State.Start;
 
     private Decompressor(byte[] control, byte[] literal, byte[] byteOffsets,
-        byte[] wordOffsets, byte[] output, int unit, int offsetLimit, int rewindAt)
+        byte[] wordOffsets, byte[] output, int unit, int window, int rewindAt)
     {
-        this.offsetLimit = offsetLimit;
+        this.window = window;
         this.rewindAt = rewindAt;
         this.control = control;
         this.literal = literal;
@@ -84,11 +87,10 @@ public sealed class Decompressor
     public sealed record Decoded(byte[] Output, int RepeatIndex);
 
     /// <summary>
-    /// As above, refusing any back-reference further than
-    /// <paramref name="offsetLimit"/> units. An offset within the limit is
-    /// exactly what makes a stream safe for a ring of that many units, so this
-    /// is how tests hold a <c>-mN</c> stream to its ring without a ring in
-    /// sight.
+    /// As above, at the window the stream was packed for: a match reaches at
+    /// most <paramref name="window"/> units back, which is what makes a
+    /// stream safe for a ring of that many units, and an offset beyond it
+    /// copies from the literal stream.
     /// </summary>
     /// <param name="control">Stream A, the bits.</param>
     /// <param name="literal">Stream D, the literal payload.</param>
@@ -96,18 +98,18 @@ public sealed class Decompressor
     /// <param name="wordOffsets">Stream C, one word per offset.</param>
     /// <param name="unit">Bytes per unit: 1, 2 or 4.</param>
     /// <param name="size">The output size in bytes, a multiple of the unit.</param>
-    /// <param name="offsetLimit">The furthest back any offset may reach, in units.</param>
+    /// <param name="window">The window in units: matches within it, copies from D beyond.</param>
     /// <returns>The decoded bytes, padding included.</returns>
     /// <exception cref="ArgumentNullException">A stream is null.</exception>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="unit"/> is not 1, 2 or 4.</exception>
     /// <exception cref="ArgumentException"><paramref name="size"/> is not a whole number of units.</exception>
     /// <exception cref="InvalidDataException">
     /// The streams are malformed or truncated, or reach further back than
-    /// <paramref name="offsetLimit"/>.
+    /// <paramref name="window"/>.
     /// </exception>
     public static byte[] Decompress(byte[] control, byte[] literal, byte[] byteOffsets,
-        byte[] wordOffsets, int unit, int size, int offsetLimit) =>
-        Decode(control, literal, byteOffsets, wordOffsets, unit, size, offsetLimit).Output;
+        byte[] wordOffsets, int unit, int size, int window) =>
+        Decode(control, literal, byteOffsets, wordOffsets, unit, size, window).Output;
 
     /// <summary>As <see cref="Decompress(byte[], byte[], byte[], byte[], int, int, int)"/>,
     /// also reporting whether the stream repeats.</summary>
@@ -117,18 +119,18 @@ public sealed class Decompressor
     /// <param name="wordOffsets">Stream C, one word per offset.</param>
     /// <param name="unit">Bytes per unit: 1, 2 or 4.</param>
     /// <param name="size">The output size in bytes, a multiple of the unit.</param>
-    /// <param name="offsetLimit">The furthest back any offset may reach, in units.</param>
+    /// <param name="window">The window in units: matches within it, copies from D beyond.</param>
     /// <returns>The decoded bytes and the repeat offset, zero when the stream ends.</returns>
     /// <exception cref="ArgumentNullException">A stream is null.</exception>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="unit"/> is not 1, 2 or 4.</exception>
     /// <exception cref="ArgumentException"><paramref name="size"/> is not a whole number of units.</exception>
     /// <exception cref="InvalidDataException">
     /// The streams are malformed or truncated, or reach further back than
-    /// <paramref name="offsetLimit"/>.
+    /// <paramref name="window"/>.
     /// </exception>
     public static Decoded Decode(byte[] control, byte[] literal, byte[] byteOffsets,
-        byte[] wordOffsets, int unit, int size, int offsetLimit) =>
-        Decode(control, literal, byteOffsets, wordOffsets, unit, size, offsetLimit,
+        byte[] wordOffsets, int unit, int size, int window) =>
+        Decode(control, literal, byteOffsets, wordOffsets, unit, size, window,
             Format.NoRewind);
 
     /// <summary>
@@ -144,7 +146,7 @@ public sealed class Decompressor
     /// <param name="wordOffsets">Stream C, one word per offset.</param>
     /// <param name="unit">Bytes per unit: 1, 2 or 4.</param>
     /// <param name="size">The output size in bytes, a multiple of the unit.</param>
-    /// <param name="offsetLimit">The furthest back any offset may reach, in units.</param>
+    /// <param name="window">The window in units: matches within it, copies from D beyond.</param>
     /// <param name="rewindAt">The rewind point in bytes, or <see cref="Format.NoRewind"/>.</param>
     /// <returns>The decoded bytes and the repeat index, -1 when the stream ends.</returns>
     /// <exception cref="ArgumentNullException">A stream is null.</exception>
@@ -152,10 +154,10 @@ public sealed class Decompressor
     /// <exception cref="ArgumentException"><paramref name="size"/> is not a whole number of units.</exception>
     /// <exception cref="InvalidDataException">
     /// The streams are malformed or truncated, reach further back than
-    /// <paramref name="offsetLimit"/>, or reach before the rewind point.
+    /// <paramref name="window"/>, or reach before the rewind point.
     /// </exception>
     public static Decoded Decode(byte[] control, byte[] literal, byte[] byteOffsets,
-        byte[] wordOffsets, int unit, int size, int offsetLimit, int rewindAt)
+        byte[] wordOffsets, int unit, int size, int window, int rewindAt)
     {
         ArgumentNullException.ThrowIfNull(control);
         ArgumentNullException.ThrowIfNull(literal);
@@ -172,7 +174,7 @@ public sealed class Decompressor
                 nameof(size));
         }
         var decoder = new Decompressor(control, literal, byteOffsets, wordOffsets,
-            new byte[size], unit, offsetLimit, rewindAt);
+            new byte[size], unit, window, rewindAt);
         decoder.Run();
         return new Decoded(decoder.output, decoder.repeatIndex);
     }
@@ -233,7 +235,15 @@ public sealed class Decompressor
 
     private void BeginMatchFromLastOffset()
     {
-        Copy(ReadInterlacedEliasGamma());
+        int length = ReadInterlacedEliasGamma();
+        if (lastOffset > window)
+        {
+            CopyFromLiterals(length);
+        }
+        else
+        {
+            Copy(length);
+        }
         state = State.Match;
     }
 
@@ -263,13 +273,42 @@ public sealed class Decompressor
         {
             throw new InvalidDataException("an offset must reach back at least one unit");
         }
-        if (lastOffset > offsetLimit)
+        int length = ReadInterlacedEliasGamma() + 1;
+        if (lastOffset > window)
         {
-            throw new InvalidDataException(
-                $"offset {lastOffset} units reaches past the {offsetLimit}-unit limit");
+            CopyFromLiterals(length);
         }
-        Copy(ReadInterlacedEliasGamma() + 1);
+        else
+        {
+            Copy(length);
+        }
         state = State.Match;
+    }
+
+    /// <summary>
+    /// Copies <paramref name="length"/> units from the literal stream,
+    /// <c>lastOffset - window</c> units behind the read pointer, without
+    /// moving the pointer, and advances the offset by what it copied - as the
+    /// 68000 decoders do.
+    /// </summary>
+    private void CopyFromLiterals(int length)
+    {
+        int back = lastOffset - window;
+        if (back <= length)
+        {
+            throw new InvalidDataException($"a copy of {length} units from {back} units back "
+                + "does not stay behind the literal read pointer");
+        }
+        int source = literalIndex - back * unit;
+        if (source < 0)
+        {
+            throw new InvalidDataException("a copy reaches before the literal stream");
+        }
+        for (int i = 0; i < length * unit; i++)
+        {
+            output[outputIndex++] = literal[source + i];
+        }
+        lastOffset -= length;
     }
 
     /// <summary>
@@ -289,11 +328,11 @@ public sealed class Decompressor
             {
                 throw new InvalidDataException("a repeat must reach back at least one unit");
             }
-            if (distance > offsetLimit)
+            if (distance > window)
             {
                 throw new InvalidDataException(
                     $"the loop distance {distance} units reaches past the "
-                    + $"{offsetLimit}-unit limit");
+                    + $"{window}-unit window");
             }
             repeatIndex = (outputIndex / unit) - distance;
             if (repeatIndex < 0)

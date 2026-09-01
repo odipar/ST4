@@ -314,6 +314,92 @@ public sealed class RoundTripTests
             wide.Control, wide.Literal, wide.ByteOffsets, wide.WordOffsets, 1, 800, 64));
     }
 
+    [Fact]
+    public void CopiesFromTheLiteralStreamRoundTripAtSmallWindows()
+    {
+        // A parse whose matches keep within a small window and whose copies
+        // reach the literal stream beyond it must decode at that window, and
+        // is never dearer than the same window without copies.
+        foreach (int unit in new[] { 1, 2, 4 })
+        {
+            foreach (byte[] input in Inputs())
+            {
+                int[] units = Units.Split(input, unit);
+                foreach (int window in new[] { 4, 16, 64 })
+                {
+                    Block parse = LiteralCopyOptimizer.Optimize(units, unit, window, false);
+                    Compressor.Result packed = Compressor.Compress(parse, units, unit,
+                        Format.MaxOp, -1, window);
+                    Assert.Equal(Padded(input, unit), Decompressor.Decompress(
+                        packed.Control, packed.Literal, packed.ByteOffsets,
+                        packed.WordOffsets, unit, packed.PaddedSize, window));
+                    Assert.Equal(window, Format.Read(Nt4.Container(packed)).Window);
+                    Compressor.Result plain = Pack(input, unit, window, Format.MaxOp);
+                    Assert.True(packed.Bits <= plain.Bits,
+                        $"unit {unit}, window {window}: {packed.Bits} bits with copies, {plain.Bits} without");
+                }
+            }
+        }
+    }
+
+    [Fact]
+    public void TheOracleCostsExactlyWhatTheCompressorWrites()
+    {
+        // The oracle claims to know the format's every cost; the compressor is
+        // the authority. Every oracle parse must write to its own bit count
+        // and decode.
+        var random = new JavaRandom(17);
+        for (int trial = 0; trial < 60; trial++)
+        {
+            int count = 6 + random.NextInt(6);
+            int[] units = new int[count];
+            for (int i = 0; i < count; i++)
+            {
+                units[i] = random.NextInt(3);
+            }
+            byte[] input = new byte[count];
+            for (int i = 0; i < count; i++)
+            {
+                input[i] = (byte)units[i];
+            }
+            int window = 2 + random.NextInt(3);
+            Block parse = LiteralCopyOracle.Optimize(units, 1, window);
+            Compressor.Result packed = Compressor.Compress(parse, units, 1, Format.MaxOp, -1,
+                window);
+            Assert.Equal(parse.Bits, packed.Bits);
+            Assert.Equal(input, Decompressor.Decompress(packed.Control, packed.Literal,
+                packed.ByteOffsets, packed.WordOffsets, 1, count, window));
+        }
+    }
+
+    [Fact]
+    public void TheHeuristicIsMeasuredAgainstTheOracle()
+    {
+        // The optimizer chooses its dictionary first and is exact for it; the
+        // oracle tries everything. The heuristic can only be dearer, and how
+        // much dearer is a number.
+        var random = new JavaRandom(23);
+        int oracleBits = 0;
+        int heuristicBits = 0;
+        for (int trial = 0; trial < 60; trial++)
+        {
+            int count = 6 + random.NextInt(6);
+            int[] units = new int[count];
+            for (int i = 0; i < count; i++)
+            {
+                units[i] = random.NextInt(3);
+            }
+            int window = 2 + random.NextInt(3);
+            int oracle = LiteralCopyOracle.Optimize(units, 1, window).Bits;
+            Block parse = LiteralCopyOptimizer.Optimize(units, 1, window, false);
+            int heuristic = Compressor.Compress(parse, units, 1, Format.MaxOp, -1, window).Bits;
+            Assert.True(oracle <= heuristic, $"trial {trial}: the oracle is the optimum");
+            oracleBits += oracle;
+            heuristicBits += heuristic;
+        }
+        Assert.True(heuristicBits <= oracleBits * 1.5, "within reach of the optimum");
+    }
+
     /// <summary>
     /// ZX1's packed size for each of <see cref="Inputs"/>, recorded from jx1
     /// in odipar/ST1 at commit 132aef0, exactly as the Java suite holds them.
@@ -338,7 +424,7 @@ public sealed class RoundTripTests
     }
 
     [Fact]
-    public void TheHeaderIsTwentyFourBytesAndSaysOnlyWhatCannotBeDerived()
+    public void TheHeaderIsTwentyEightBytesAndSaysOnlyWhatCannotBeDerived()
     {
         byte[] input = Encoding.ASCII.GetBytes(
             "a header should hold nothing that follows from the rest");
@@ -347,9 +433,12 @@ public sealed class RoundTripTests
             Compressor.Result packed = Pack(input, unit);
             byte[] file = Nt4.Container(packed);
 
-            Assert.Equal(24, Format.HeaderSize);
+            Assert.Equal(28, Format.HeaderSize);
             // A stream that ends has no rewind point: nothing for a caller to do.
             Assert.Equal(Format.NoRewind, LongAt(file, Format.OffsetRewind));
+            // The window a decoder needs to tell a match from a copy: here the
+            // widest, since the pack had no limit.
+            Assert.Equal(Format.MaxOffsetUnits(unit), LongAt(file, Format.OffsetWindow));
             // One long carries magic, version and k, so a decoder built for one
             // unit size checks an asset against itself with a single cmp.l.
             Assert.Equal(Format.Signature(unit), LongAt(file, Format.OffsetSignature));
@@ -447,6 +536,11 @@ public sealed class RoundTripTests
         strayRewind[Format.OffsetRewind + 2] = 0x7F;
         strayRewind[Format.OffsetRewind + 3] = 0;
         Assert.Throws<InvalidDataException>(() => Format.Read(strayRewind));
+
+        byte[] noWindow = (byte[])good.Clone();     // a window no offset could keep to
+        noWindow[Format.OffsetWindow + 2] = 0;
+        noWindow[Format.OffsetWindow + 3] = 0;
+        Assert.Throws<InvalidDataException>(() => Format.Read(noWindow));
     }
 
     private static int LongAt(byte[] file, int at) =>

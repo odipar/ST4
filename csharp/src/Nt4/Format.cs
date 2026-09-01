@@ -16,13 +16,19 @@ namespace Nt4;
 /// construction. Lengths and offsets count units of k bytes, where k is 1, 2
 /// or 4; the Java <c>St4Format</c> is the reference and documents the control
 /// codes and the reasoning at length.</para>
-/// <para>The header is twenty-four bytes and holds only what cannot be worked
+/// <para>The header is twenty-eight bytes and holds only what cannot be worked
 /// out: a signature packing magic, version and k into one long, the padded
-/// output size, where streams B, C and D begin relative to the header, and
-/// the rewind point. Stream A begins where the header ends, and each stream
-/// runs to the next. The file lays them out as A, C, D, B: the literal payload
+/// output size, where streams B, C and D begin relative to the header, the
+/// rewind point, and the window. Stream A begins where the header ends, and
+/// each stream runs to the next, A, B, C, D as they lie: the literal payload
 /// comes last, so it runs to the end of the file and borders whatever the
 /// caller loads after the container - a ring buffer, say.</para>
+/// <para>An offset of at most the window M is a match; one beyond M copies
+/// from the literal stream, offset minus M units behind the literal read
+/// pointer, leaving the pointer where it was and advancing the offset by what
+/// it copied - so a rep after a copy resumes just past it, and a copy is
+/// strictly shorter than its distance. Streams packed without copies never
+/// exceed M and decode as they always did.</para>
 /// <para>The rewind point is how a stream loops when its loop is longer than
 /// the window: the caller saves the decoder's registers when the output
 /// reaches it and restores them, all but the write pointer, when it reaches O,
@@ -42,12 +48,13 @@ public static class Format
     public const int Magic = 0x53340000;
 
     /// <summary>
-    /// Version 5 laid the streams out in file order with the literal payload
-    /// last - A, B, C, D as they lie - and gave the end marker its repeat bit
-    /// and the header its rewind point. Version 4 cut the header to what
-    /// cannot be derived.
+    /// Version 6 let an offset beyond the window copy from the literal stream,
+    /// and recorded the window in the header. Version 5 laid the streams out
+    /// in file order with the literal payload last - A, B, C, D as they lie -
+    /// and gave the end marker its repeat bit and the header its rewind point.
+    /// Version 4 cut the header to what cannot be derived.
     /// </summary>
-    public const int Version = 5;
+    public const int Version = 6;
 
     /// <summary>Byte offset of the signature long in a container.</summary>
     public const int OffsetSignature = 0;
@@ -67,8 +74,11 @@ public static class Format
     /// <summary>Byte offset of the rewind point, in bytes like the size.</summary>
     public const int OffsetRewind = 20;
 
-    /// <summary>Twenty-four bytes; stream A begins where the header ends.</summary>
-    public const int HeaderSize = 24;
+    /// <summary>Byte offset of the window, in units.</summary>
+    public const int OffsetWindow = 24;
+
+    /// <summary>Twenty-eight bytes; stream A begins where the header ends.</summary>
+    public const int HeaderSize = 28;
 
     /// <summary>The rewind field of a stream that ends or loops by itself.</summary>
     public const int NoRewind = -1;
@@ -110,8 +120,9 @@ public static class Format
     /// <param name="ByteOffsets">Stream B, one byte per offset.</param>
     /// <param name="WordOffsets">Stream C, one word per offset.</param>
     /// <param name="Rewind">The rewind point in bytes, or <see cref="NoRewind"/>.</param>
+    /// <param name="Window">The window in units: matches within it, copies from D beyond.</param>
     public sealed record Container(int Unit, int Size, byte[] Control, byte[] Literal,
-        byte[] ByteOffsets, byte[] WordOffsets, int Rewind);
+        byte[] ByteOffsets, byte[] WordOffsets, int Rewind, int Window);
 
     /// <summary>
     /// Reads a container, checking everything a decoder would otherwise trust.
@@ -159,6 +170,11 @@ public static class Format
         {
             throw new InvalidDataException($"rewind point {rewind} is not a unit of the output");
         }
+        int window = LongAt(file, OffsetWindow);
+        if (window < 1 || window > MaxOffsetUnits(unit))
+        {
+            throw new InvalidDataException($"window {window} is not 1..{MaxOffsetUnits(unit)} units");
+        }
 
         // The streams lie in the file as A, B, C, D: the literal payload
         // last, so it runs to the end of the file.
@@ -181,7 +197,7 @@ public static class Format
         }
         return new Container(unit, size,
             file[edge[0]..edge[1]], file[edge[3]..edge[4]],
-            file[edge[1]..edge[2]], file[edge[2]..edge[3]], rewind);
+            file[edge[1]..edge[2]], file[edge[2]..edge[3]], rewind, window);
     }
 
     private static int LongAt(byte[] file, int at) =>

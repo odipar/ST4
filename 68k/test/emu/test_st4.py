@@ -63,7 +63,7 @@ def pack_file(data: bytes, unit: int, window: int, repeat: int | None = None) ->
     if not CLASSES.exists():
         raise SystemExit('target/classes is missing; run `mvn compile` first')
     CACHE.mkdir(exist_ok=True)
-    key = CACHE / (f'{hashlib.sha1(data).hexdigest()[:16]}-v5d-k{unit}-m{window}'
+    key = CACHE / (f'{hashlib.sha1(data).hexdigest()[:16]}-v6-k{unit}-m{window}'
                    + (f'-at{repeat}' if repeat is not None else '') + '.st4')
     if not key.exists():
         with tempfile.TemporaryDirectory() as directory:
@@ -78,23 +78,23 @@ def pack_file(data: bytes, unit: int, window: int, repeat: int | None = None) ->
 
 
 def streams(file: bytes, unit: int) -> tuple:
-    """The four streams, the padded size and the rewind point of a container."""
+    """The four streams, the padded size, the rewind point and the window."""
     def long(at):
         return int.from_bytes(file[at:at + 4], 'big')
 
-    # Twenty-four bytes of header: signature, O, where B, C and D begin, and
-    # the rewind point. A begins where the header ends, and no length is
-    # stored - each stream runs to the next in file order A, B, C, D, so a
-    # slice can carry up to three bytes of padding; D, last, runs to the end
-    # of the file exactly.
-    assert long(0) == 0x53340000 | (5 << 8) | unit, 'not an ST4 v5 file for this unit'
+    # Twenty-eight bytes of header: signature, O, where B, C and D begin, the
+    # rewind point and the window. A begins where the header ends, and no
+    # length is stored - each stream runs to the next in file order A, B, C,
+    # D, so a slice can carry up to three bytes of padding; D, last, runs to
+    # the end of the file exactly.
+    assert long(0) == 0x53340000 | (6 << 8) | unit, 'not an ST4 v6 file for this unit'
     size = long(4)
     bytes_at, words_at, literal_at = long(8), long(12), long(16)
-    assert 24 <= bytes_at <= words_at <= literal_at <= len(file), 'streams out of order'
+    assert 28 <= bytes_at <= words_at <= literal_at <= len(file), 'streams out of order'
     rewind = long(20)
     rewind = -1 if rewind == 0xFFFFFFFF else rewind
-    return (file[24:bytes_at], file[literal_at:],
-            file[bytes_at:words_at], file[words_at:literal_at], size, rewind)
+    return (file[28:bytes_at], file[literal_at:],
+            file[bytes_at:words_at], file[words_at:literal_at], size, rewind, long(24))
 
 
 def pack(data: bytes, unit: int, window: int, repeat: int | None = None) -> tuple:

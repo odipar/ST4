@@ -78,6 +78,14 @@ The repeat bit says whether the stream ends there. A `0` ends it. A `1` makes
 it loop: one last word offset is read from stream C and the stream becomes an
 endless match that far back — see [Loops](#loops).
 
+What an offset reaches depends on the window M the stream was packed for,
+which the header records. An offset of at most M is a match, and copies
+output from that many units back. An offset beyond M is a *copy from the
+literal stream*: it copies literal units from M less than that far behind
+the literal read pointer, in stream D, and leaves the pointer where it was —
+see [Copies from the literal stream](#copies-from-the-literal-stream).
+Streams packed without copies never exceed M and decode as they always did.
+
 Together with its flag, a block is an even number of bits: a gamma value is
 an odd count, and the flag or class bits make it even. That is why a new
 offset spends two class bits rather than one, and the even rhythm is what
@@ -88,27 +96,29 @@ whole word.
 
 ### The container
 
-A container is twenty-four bytes of header, then the streams:
+A container is twenty-eight bytes of header, then the streams:
 
 ```
- 0  4  signature: 'S', '4', format version (5), k
+ 0  4  signature: 'S', '4', format version (6), k
  4  4  O, the output size in bytes, a multiple of k
  8  4  where stream B, the byte offsets, starts, in bytes from the header
 12  4  where stream C, the word offsets, starts
 16  4  where stream D, the literal data, starts
 20  4  the rewind point in bytes, or $FFFFFFFF when there is none
-24 ..  streams A, B, C and D in that order, each starting on a long boundary
+24  4  M, the window in units: matches within it, copies from D beyond it
+28 ..  streams A, B, C and D in that order, each starting on a long boundary
 ```
 
 The header holds only what cannot be worked out from the streams. Stream A
 begins where the header ends, so it needs no field; no stream length is kept,
 because each stream runs to the next and the decoder stops on the end code;
-and the rewind point is the one fact a caller cannot derive — where to save
-the decoder's state to replay a loop — so it is set only when a caller has
-that to do. The signature fits one long, so a decoder built for one k accepts
-or rejects an asset with a single `cmp.l`, and the stream starts are
-header-relative, so opening a container is one `adda.l` per stream. The eight
-instructions that do it are in [ST4.S](68k/ST4.S).
+the rewind point is a fact a caller cannot derive — where to save the
+decoder's state to replay a loop — so it is set only when a caller has that
+to do; and the window is what tells a match from a copy. The signature fits
+one long, so a decoder built for one k accepts or rejects an asset with a
+single `cmp.l`, and the stream starts are header-relative, so opening a
+container is one `adda.l` per stream. The eight instructions that do it are
+in [ST4.S](68k/ST4.S).
 
 Stream D, the literal data, sits last — version 4 had it second — so it runs
 to the end of the file and ends on a unit boundary. A ring buffer
@@ -116,6 +126,38 @@ placed directly after the container therefore borders the literal data: at any
 moment during a decode, the literals not yet consumed occupy a known stretch
 of memory just below the ring, which a packer that knows the caller's layout
 can let matches reach into.
+
+### Copies from the literal stream
+
+A ring holds the last M units of output, and a match can reach no further.
+But every literal the stream ever had is still in memory, in stream D, in
+order, for as long as the container is — and a copy from the literal stream
+reaches them at any ring size. The packer writes one as an offset beyond M:
+the window plus the number of literal units between the copy's source and
+the copy, which is exactly what the decoder walks back from its literal read
+pointer. Nothing in the stream says which is which; the magnitude does, the
+control bits are the same three, and a byte offset reaches 512 − M literals.
+
+Two rules follow from the decoder, which has nothing but the offset register
+to remember a copy by. A copy interrupted by the budget or the ring end must
+continue where it stopped, so a copy advances its offset by what it copied,
+and a rep after a copy therefore resumes just past it, from wherever the read
+pointer has got to. And a copy must be strictly shorter than its distance, or
+the offset would reach zero; the packer keeps it so.
+
+`st4 -c` turns copies on. The parse behind them cannot be exactly optimal —
+the parse decides which units are literal, a copy is only valid if its source
+is, and its offset counts the literals between, so the best chain so far no
+longer decides the best parse and the optimum is NP-hard — so
+`St4LiteralCopyOptimizer` chooses the dictionary first, the literals of a
+full-window parse, and is exact for it; `St4LiteralCopyOracle` tries every
+parse on inputs small enough for that, and puts the heuristic within about a
+percent of the true optimum on those. What copies buy is the ring: measured
+on the test corpora at k = 1, a 16-unit ring with copies packs word-soup to
+31.6% of the input where the ring alone gives 95.6%, and block-shaped data to
+within a point or two of the full window; [doc/research.md](doc/research.md)
+has the tables. Decoding them needs a decoder built with copies; the ones
+here are coming.
 
 ### Loops
 
@@ -206,7 +248,7 @@ has already left the ring — which is also what decides how a loop is packed.
 
 ```sh
 mvn package
-java -ea -cp target/classes org.st4.St4  [-f] [-kK] [-mN] [-lN] [-rR] input [output.st4]
+java -ea -cp target/classes org.st4.St4  [-f] [-c] [-kK] [-mN] [-lN] [-rR] input [output.st4]
 java -ea -cp target/classes org.st4.Dst4 [-f] input.st4 [output]
 ```
 
@@ -218,6 +260,9 @@ stores — for a looping stream, one whole pass, and it says where the loop is.
 splits long matches — the default already fits the 68000 decoders — and `-rR`
 makes the stream loop from unit R. When the loop is longer than `-m`, `st4`
 says at which unit to save the decoder's state and at which to restore it.
+`-c` lets a match beyond `-m` copy from the literal stream; it runs the
+readable optimizer, which tries every offset at every position and is slow on
+large inputs.
 
 Three optimizers select the blocks, all held to each other by tests:
 
@@ -253,13 +298,13 @@ on real data at every unit size, looping or not — and the tests are the Java
 suite, corpus for corpus.
 
 ```sh
-dotnet run --project csharp/src/Nt4.Cli -- [-f] [-kK] [-mN] [-lN] [-rR] input [output.st4]
+dotnet run --project csharp/src/Nt4.Cli -- [-f] [-c] [-kK] [-mN] [-lN] [-rR] input [output.st4]
 ```
 
 ## Tests
 
 ```sh
-mvn test                                  # round-trips, containers, loops, optimizers
+mvn test                                  # round-trips, containers, loops, copies, optimizers
 dotnet test csharp/Nt4.slnx -c Release    # the C# port, same corpora
 python3 68k/test/emu/test_st4.py          # linear decoder vs the Java packer, k = 1, 2, 4
 python3 68k/test/emu/test_st4_wrap.py     # counted wrap, every unit size

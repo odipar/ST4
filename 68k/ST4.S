@@ -44,8 +44,8 @@
 ; raises an address error if they do not.
 ;
 ; -----------------------------------------------------------------------------
-; THE CONTAINER. An .st4 file is twenty-four bytes of header and then the four
-; streams, in order, each starting on a long boundary:
+; THE CONTAINER. An .st4 file is twenty-eight bytes of header and then the
+; four streams, in order, each starting on a long boundary:
 ;
 ;    0  4  signature: 'S', '4', format version, ST4_UNIT
 ;    4  4  O, the output size in bytes
@@ -53,7 +53,8 @@
 ;   12  4  stream C, the word offsets
 ;   16  4  stream D, the literals
 ;   20  4  the rewind point in bytes, or $FFFFFFFF when there is none
-;   24 ..  streams A, B, C and D, in that order
+;   24  4  M, the window in units: an offset past it copies from stream D
+;   28 ..  streams A, B, C and D, in that order
 ;
 ; Stream D, the literals, comes last, so it runs to the end of the file and
 ; borders whatever the caller loads after the container - a ring, say.
@@ -67,7 +68,7 @@
 ;       lea     asset(pc),a3
 ;       cmp.l   #ST4_SIGNATURE,(a3)     ; magic, version and k in one compare
 ;       bne.s   wrong_asset
-;       lea     24(a3),a0               ; stream A, where the header ends
+;       lea     28(a3),a0               ; stream A, where the header ends
 ;       movea.l a3,a2
 ;       adda.l  16(a3),a2               ; stream D, the literals
 ;       movea.l a3,a4
@@ -131,10 +132,10 @@
 ; validated. A wrong value can read or write arbitrary memory.
 ; -----------------------------------------------------------------------------
 
-; The asset's signature for this build: 'S4', format version 5, and the unit
+; The asset's signature for this build: 'S4', format version 6, and the unit
 ; size this decoder was assembled for. One cmp.l against a file's first long
 ; proves all three at once.
-ST4_SIGNATURE   equ     $53340500+ST4_UNIT
+ST4_SIGNATURE   equ     $53340600+ST4_UNIT
 
 ; One unit copied, at the width this build was made for. Everything else in
 ; this file is width-independent, which is the point of keeping the counts in

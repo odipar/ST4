@@ -25,7 +25,7 @@ public static class Dnt4
     public static int Run(string[] args)
     {
         ArgumentNullException.ThrowIfNull(args);
-        Console.WriteLine("DNT4: aligned split-stream unpacker v3.0 by Robbert van Dalen, "
+        Console.WriteLine("DNT4: aligned split-stream unpacker v4.0 by Robbert van Dalen, "
             + "based on ZX1 v1.5 by Einar Saukas");
 
         bool forcedMode = false;
@@ -94,7 +94,7 @@ public static class Dnt4
             // the container stores is the pass.
             decoded = Decompressor.Decode(container.Control, container.Literal,
                 container.ByteOffsets, container.WordOffsets, container.Unit,
-                container.Size, Format.MaxOffsetUnits(container.Unit), container.Rewind);
+                container.Size, container.Window, container.Rewind);
         }
         catch (InvalidDataException exception)
         {

@@ -18,7 +18,7 @@ public final class Dst4 {
     private Dst4() {}
 
     public static void main(String[] args) {
-        System.out.println("DST4: aligned split-stream unpacker v5.0 by Robbert van Dalen, "
+        System.out.println("DST4: aligned split-stream unpacker v6.0 by Robbert van Dalen, "
                 + "based on ZX1 v1.5 by Einar Saukas");
 
         boolean forcedMode = false;
@@ -76,8 +76,7 @@ public final class Dst4 {
             // the container stores is the pass.
             decoded = St4Decompressor.decode(container.control(), container.literal(),
                     container.byteOffsets(), container.wordOffsets(), container.unit(),
-                    container.size(), St4Format.maxOffsetUnits(container.unit()),
-                    container.rewind());
+                    container.size(), container.window(), container.rewind());
         } catch (AssertionError | IndexOutOfBoundsException | IllegalStateException e) {
             // With -ea a malformed stream trips a descriptive assertion; the
             // decoder trusts its input, so report rather than pretend.

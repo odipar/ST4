@@ -130,9 +130,10 @@ final class St4RoundTripTest {
 
     @Test
     void theLimitCheckingDecoderRefusesAWiderStream() {
-        // Decoding through an offset limit is how tests hold a -mN stream to
-        // its ring, so a stream that reaches further must fail loudly rather
-        // than pretend - random data repeated once guarantees one far match.
+        // Decoding at a window is how tests hold a -mN stream to its ring. A
+        // stream that reaches further reads as copies from the literal stream
+        // there, and random data repeated once makes one that cannot be: a
+        // thousand units copied from 992 literals back.
         byte[] half = new byte[1000];
         new Random(5).nextBytes(half);
         byte[] input = new byte[2000];
@@ -293,6 +294,92 @@ final class St4RoundTripTest {
                 1, 800, 64));
     }
 
+    @Test
+    void copiesFromTheLiteralStreamRoundTripAtSmallWindows() {
+        // A parse whose matches keep within a small window and whose copies
+        // reach the literal stream beyond it must decode at that window - and
+        // the compressor's bits are the parse's, unless a copy had to give a
+        // unit back to stay behind the read pointer.
+        for (int unit : new int[] {1, 2, 4}) {
+            for (byte[] input : inputs()) {
+                int[] units = Units.split(input, unit);
+                for (int window : new int[] {4, 16, 64}) {
+                    St4Block parse = St4LiteralCopyOptimizer.optimize(units, unit, window, false);
+                    St4Compressor.Result packed = St4Compressor.compress(parse, units, unit,
+                            St4Format.MAX_OP, -1, window);
+                    String shape = "unit " + unit + ", " + input.length + " bytes, window " + window;
+                    assertArrayEquals(padded(input, unit), St4Decompressor.decompress(
+                            packed.control(), packed.literal(), packed.byteOffsets(),
+                            packed.wordOffsets(), unit, packed.paddedSize(), window), shape);
+                    assertEquals(window, St4Format.read(St4.container(packed)).window(), shape);
+                    // Never dearer than the same window without copies.
+                    St4Compressor.Result plain = pack(input, unit, window, St4Format.MAX_OP);
+                    assertTrue(packed.bits() <= plain.bits(), shape + ": "
+                            + packed.bits() + " bits with copies, " + plain.bits() + " without");
+                }
+            }
+        }
+    }
+
+    @Test
+    void theOracleCostsExactlyWhatTheCompressorWrites() {
+        // The oracle claims to know the format's every cost, reps of copies and
+        // the offset a copy leaves behind included; the compressor is the
+        // authority. On inputs small enough to exhaust, every oracle parse
+        // must write to its own bit count and decode.
+        var random = new Random(17);
+        for (int trial = 0; trial < 60; trial++) {
+            int count = 6 + random.nextInt(6);
+            int[] units = new int[count];
+            for (int i = 0; i < count; i++) {
+                units[i] = random.nextInt(3);          // a small alphabet: matches abound
+            }
+            byte[] input = new byte[count];
+            for (int i = 0; i < count; i++) {
+                input[i] = (byte) units[i];
+            }
+            int window = 2 + random.nextInt(3);
+            St4Block parse = St4LiteralCopyOracle.optimize(units, 1, window);
+            St4Compressor.Result packed = St4Compressor.compress(parse, units, 1,
+                    St4Format.MAX_OP, -1, window);
+            String shape = "trial " + trial + ", window " + window + ", " + java.util.Arrays.toString(units);
+            assertEquals(parse.bits(), packed.bits(), shape);
+            assertArrayEquals(input, St4Decompressor.decompress(packed.control(),
+                    packed.literal(), packed.byteOffsets(), packed.wordOffsets(), 1, count,
+                    window), shape);
+        }
+    }
+
+    @Test
+    void theHeuristicIsMeasuredAgainstTheOracle() {
+        // The optimizer chooses its dictionary first and is exact for it; the
+        // oracle tries everything. On inputs small enough to exhaust, the
+        // heuristic can only be dearer, and how much dearer is a number.
+        var random = new Random(23);
+        int oracleBits = 0;
+        int heuristicBits = 0;
+        int worst = 0;
+        for (int trial = 0; trial < 60; trial++) {
+            int count = 6 + random.nextInt(6);
+            int[] units = new int[count];
+            for (int i = 0; i < count; i++) {
+                units[i] = random.nextInt(3);
+            }
+            int window = 2 + random.nextInt(3);
+            int oracle = St4LiteralCopyOracle.optimize(units, 1, window).bits();
+            St4Block parse = St4LiteralCopyOptimizer.optimize(units, 1, window, false);
+            int heuristic = St4Compressor.compress(parse, units, 1, St4Format.MAX_OP, -1, window)
+                    .bits();
+            assertTrue(oracle <= heuristic, "trial " + trial + ": the oracle is the optimum");
+            oracleBits += oracle;
+            heuristicBits += heuristic;
+            worst = Math.max(worst, heuristic - oracle);
+        }
+        System.out.printf("literal copies: heuristic %d bits, oracle %d bits, +%.1f%%, worst +%d bits%n",
+                heuristicBits, oracleBits, 100.0 * (heuristicBits - oracleBits) / oracleBits, worst);
+        assertTrue(heuristicBits <= oracleBits * 1.5, "within reach of the optimum");
+    }
+
     /**
      * ZX1's packed size for each of {@link #inputs()}, recorded from jx1 in
      * odipar/ST1 at commit 132aef0. The inputs are deterministic, so these can
@@ -317,16 +404,19 @@ final class St4RoundTripTest {
     }
 
     @Test
-    void theHeaderIsTwentyFourBytesAndSaysOnlyWhatCannotBeDerived() {
+    void theHeaderIsTwentyEightBytesAndSaysOnlyWhatCannotBeDerived() {
         byte[] input = "a header should hold nothing that follows from the rest".getBytes(
                 java.nio.charset.StandardCharsets.US_ASCII);
         for (int unit : new int[] {1, 2, 4}) {
             St4Compressor.Result packed = pack(input, unit);
             byte[] file = St4.container(packed);
 
-            assertEquals(24, St4Format.HEADER_SIZE);
+            assertEquals(28, St4Format.HEADER_SIZE);
             // A stream that ends has no rewind point: nothing for a caller to do.
             assertEquals(St4Format.NO_REWIND, longAt(file, St4Format.OFFSET_REWIND));
+            // The window a decoder needs to tell a match from a copy: here the
+            // widest, since the pack had no limit.
+            assertEquals(St4Format.maxOffsetUnits(unit), longAt(file, St4Format.OFFSET_WINDOW));
             // One long carries magic, version and k, so a decoder built for one
             // unit size checks an asset against itself with a single cmp.l.
             assertEquals(St4Format.signature(unit), longAt(file, St4Format.OFFSET_SIGNATURE));
@@ -423,6 +513,11 @@ final class St4RoundTripTest {
         strayRewind[St4Format.OFFSET_REWIND + 2] = 0x7F;
         strayRewind[St4Format.OFFSET_REWIND + 3] = 0;
         assertThrows(IllegalArgumentException.class, () -> St4Format.read(strayRewind));
+
+        byte[] noWindow = good.clone();             // a window no offset could keep to
+        noWindow[St4Format.OFFSET_WINDOW + 2] = 0;
+        noWindow[St4Format.OFFSET_WINDOW + 3] = 0;
+        assertThrows(IllegalArgumentException.class, () -> St4Format.read(noWindow));
     }
 
     private static int longAt(byte[] file, int at) {
