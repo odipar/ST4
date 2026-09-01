@@ -145,14 +145,12 @@ packing close to full-window quality.
 
 ## The experiment
 
-The packer half, in Java: `St4LiteralMatchExperiment`, a variant of the
-reference optimizer with the far candidates added, run on the test corpora
-plus this README and a Java class file. It reports each parse's bit cost,
-which is the packed size up to padding. Run it with
-
-```sh
-java -cp target/classes org.st4.St4LiteralMatchExperiment [-kK] [-rN,N,..] file...
-```
+The packer half, in Java: a variant of the reference optimizer with the far
+candidates added, run on the test corpora plus this README and a Java class
+file, reporting each parse's bit cost, which is the packed size up to
+padding. The experiment class has since become `St4LiteralCopyOptimizer`,
+the packer behind `st4 -c`, and `St4LiteralCopyOracle`, the exhaustive
+search that measures it; the numbers below are the experiment's.
 
 ### How the circularity was broken
 

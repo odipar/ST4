@@ -3,19 +3,26 @@ package org.st4;
 /**
  * The reference ST4 decoder: what the 68000 versions have to agree with.
  *
- * <p>It is the ZX1 state machine with three changes. Literals come from stream
+ * <p>It is the ZX1 state machine with four changes. Literals come from stream
  * D and offsets from stream B or C - by width - rather than from the stream the
  * bits live in; every length and offset is counted in units, so each step
- * moves k bytes; and the end marker carries one more bit, which can turn the
- * end into an endless match - the repeat. The parse is still ZX1's; only where
- * the pieces are written differs, and the two class bits that say which stream
- * an offset came from.
+ * moves k bytes; the end marker carries one more bit, which can turn the end
+ * into an endless match - the repeat; and an offset beyond the window is a
+ * copy from the literal stream rather than a match. The parse is still ZX1's;
+ * only where the pieces are written differs, and the two class bits that say
+ * which stream an offset came from.
+ *
+ * <p>The copy is what the 68000 decoders do, exactly: it reads {@code offset
+ * - window} units behind the literal read pointer, leaves the pointer where
+ * it was, and advances the offset by what it copied - so a rep after a copy
+ * resumes just past it. A copy must stay behind the pointer, strictly, or
+ * the offset would reach zero; the reference refuses one that does not.
  */
 public final class St4Decompressor {
 
     private enum State { START, LITERALS, MATCH, DONE }
 
-    private final int offsetLimit;
+    private final int window;
     private final int rewindAt;
     private final byte[] control;
     private final byte[] literal;
@@ -36,8 +43,8 @@ public final class St4Decompressor {
 
     private St4Decompressor(byte[] control, byte[] literal, byte[] byteOffsets,
                             byte[] wordOffsets, byte[] output, int unit,
-                            int offsetLimit, int rewindAt) {
-        this.offsetLimit = offsetLimit;
+                            int window, int rewindAt) {
+        this.window = window;
         this.rewindAt = rewindAt;
         this.control = control;
         this.literal = literal;
@@ -65,25 +72,27 @@ public final class St4Decompressor {
     public record Decoded(byte[] output, int repeatIndex) {}
 
     /**
-     * As above, refusing any back-reference further than {@code offsetLimit}
-     * units. An offset within the limit is exactly what makes a stream safe
-     * for a ring of that many units, so this is how tests hold a {@code -mN}
-     * stream to its ring without a ring in sight.
+     * As above, at the window the stream was packed for: a match reaches at
+     * most {@code window} units back, which is what makes a stream safe for a
+     * ring of that many units, and an offset beyond it copies from the
+     * literal stream. This is how tests hold a {@code -mN} stream to its ring
+     * without a ring in sight.
      *
-     * @throws IllegalStateException when the stream reaches further back
+     * @throws IllegalStateException when a copy does not stay behind the
+     *     literal read pointer, or a loop reaches past the window
      */
     public static byte[] decompress(byte[] control, byte[] literal, byte[] byteOffsets,
                                     byte[] wordOffsets, int unit, int size,
-                                    int offsetLimit) {
+                                    int window) {
         return decode(control, literal, byteOffsets, wordOffsets, unit, size,
-                offsetLimit).output();
+                window).output();
     }
 
     /** As {@link #decompress}, also reporting whether the stream repeats. */
     public static Decoded decode(byte[] control, byte[] literal, byte[] byteOffsets,
                                  byte[] wordOffsets, int unit, int size,
-                                 int offsetLimit) {
-        return decode(control, literal, byteOffsets, wordOffsets, unit, size, offsetLimit,
+                                 int window) {
+        return decode(control, literal, byteOffsets, wordOffsets, unit, size, window,
                 St4Format.NO_REWIND);
     }
 
@@ -95,15 +104,16 @@ public final class St4Decompressor {
      * so the reference refuses it instead.
      *
      * @throws IllegalStateException when the loop reaches before its rewind
-     *     point, or an offset reaches past the limit
+     *     point, a copy does not stay behind the literal read pointer, or a
+     *     loop reaches past the window
      */
     public static Decoded decode(byte[] control, byte[] literal, byte[] byteOffsets,
                                  byte[] wordOffsets, int unit, int size,
-                                 int offsetLimit, int rewindAt) {
+                                 int window, int rewindAt) {
         assert St4Format.isUnitSize(unit) : "unit size must be 1, 2 or 4";
         assert size % unit == 0 : "output size must be a whole number of units";
         var decoder = new St4Decompressor(control, literal, byteOffsets, wordOffsets,
-                new byte[size], unit, offsetLimit, rewindAt);
+                new byte[size], unit, window, rewindAt);
         decoder.run();
         return new Decoded(decoder.output, decoder.repeatIndex);
     }
@@ -142,7 +152,12 @@ public final class St4Decompressor {
     }
 
     private void beginMatchFromLastOffset() {
-        copy(readInterlacedEliasGamma());
+        int length = readInterlacedEliasGamma();
+        if (lastOffset > window) {
+            copyFromLiterals(length);
+        } else {
+            copy(length);
+        }
         state = State.MATCH;
     }
 
@@ -161,12 +176,34 @@ public final class St4Decompressor {
             lastOffset = readWordOffset();
         }
         assert lastOffset > 0 : "an offset must reach back at least one unit";
-        if (lastOffset > offsetLimit) {
-            throw new IllegalStateException("offset " + lastOffset
-                    + " units reaches past the " + offsetLimit + "-unit limit");
+        int length = readInterlacedEliasGamma() + 1;
+        if (lastOffset > window) {
+            copyFromLiterals(length);
+        } else {
+            copy(length);
         }
-        copy(readInterlacedEliasGamma() + 1);
         state = State.MATCH;
+    }
+
+    /**
+     * Copies {@code length} units from the literal stream, {@code lastOffset -
+     * window} units behind the read pointer, without moving the pointer, and
+     * advances the offset by what it copied - as the 68000 decoders do.
+     */
+    private void copyFromLiterals(int length) {
+        int back = lastOffset - window;
+        if (back <= length) {
+            throw new IllegalStateException("a copy of " + length + " units from " + back
+                    + " units back does not stay behind the literal read pointer");
+        }
+        int source = literalIndex - back * unit;
+        if (source < 0) {
+            throw new IllegalStateException("a copy reaches before the literal stream");
+        }
+        for (int i = 0; i < length * unit; i++) {
+            output[outputIndex++] = literal[source + i];
+        }
+        lastOffset -= length;
     }
 
     /**
@@ -181,9 +218,9 @@ public final class St4Decompressor {
             // point itself is where the pass so far ends, minus that.
             int distance = readWordOffset();
             assert distance > 0 : "a repeat must reach back at least one unit";
-            if (distance > offsetLimit) {
+            if (distance > window) {
                 throw new IllegalStateException("the loop distance " + distance
-                        + " units reaches past the " + offsetLimit + "-unit limit");
+                        + " units reaches past the " + window + "-unit window");
             }
             repeatIndex = outputIndex / unit - distance;
             assert repeatIndex >= 0 : "the loop point must be a unit of the stream";

@@ -18,18 +18,20 @@ public final class St4 {
     private St4() {}
 
     public static void main(String[] args) {
-        System.out.println("ST4: aligned split-stream packer v5.0 by Robbert van Dalen, "
+        System.out.println("ST4: aligned split-stream packer v6.0 by Robbert van Dalen, "
                 + "based on ZX1 v1.5 by Einar Saukas");
 
         int unit = 1;
         int offsetLimit = St4Format.MAX_OFFSET;
         int maxOpLength = St4Format.MAX_OP;
         int repeatIndex = -1;
+        boolean copies = false;
         boolean forcedMode = false;
         int i = 0;
         for (; i < args.length && args[i].startsWith("-"); i++) {
             switch (args[i]) {
                 case "-f" -> forcedMode = true;
+                case "-c" -> copies = true;
                 default -> {
                     if (args[i].startsWith("-k")) {
                         unit = parseNumber(args[i].substring(2));
@@ -53,8 +55,10 @@ public final class St4 {
             outputName = args[i + 1];
         } else {
             usage("""
-                    Usage: st4 [-f] [-kK] [-mN] [-lN] [-rR] input [output.st4]
+                    Usage: st4 [-f] [-c] [-kK] [-mN] [-lN] [-rR] input [output.st4]
                       -f      Force overwrite of output file
+                      -c      Let a match beyond the -m window copy from the
+                              literal stream; needs a decoder built with copies
                       -kK     Unit size: 1, 2 or 4 bytes (default 1). Lengths and
                               offsets count units, so the output is padded to a
                               whole number of them
@@ -96,6 +100,7 @@ public final class St4 {
                     + units.length + " units");
         }
         St4Compressor.Result result;
+        int window = offsetLimit;
         if (repeatIndex >= 0 && units.length - repeatIndex > offsetLimit) {
             // The loop is longer than the window, so no match can reach across
             // it and the decoder cannot loop it alone: the caller will replay
@@ -104,15 +109,14 @@ public final class St4 {
             int[] intro = Arrays.copyOfRange(units, 0, repeatIndex);
             int[] loop = Arrays.copyOfRange(units, repeatIndex, units.length);
             result = St4Compressor.compressRewinding(
-                    intro.length == 0 ? null : St4EventOptimizer.optimize(intro, unit, offsetLimit),
-                    St4EventOptimizer.optimize(loop, unit, offsetLimit),
-                    units, unit, maxOpLength, repeatIndex);
+                    intro.length == 0 ? null : parse(intro, unit, offsetLimit, copies),
+                    parse(loop, unit, offsetLimit, copies),
+                    units, unit, maxOpLength, repeatIndex, window);
         } else {
             // The loop fits the window, so the stream loops by itself: its end
             // becomes an endless match back to the loop point.
-            result = St4Compressor.compress(
-                    St4EventOptimizer.optimize(units, unit, offsetLimit), units, unit,
-                    maxOpLength, repeatIndex);
+            result = St4Compressor.compress(parse(units, unit, offsetLimit, copies), units,
+                    unit, maxOpLength, repeatIndex, window);
         }
 
         try {
@@ -129,8 +133,10 @@ public final class St4 {
                 result.control().length, result.byteOffsets().length,
                 result.wordOffsets().length, result.literal().length,
                 result.operations(),
-                repeatIndex < 0 ? "" : ", loops from unit " + repeatIndex
-                        + (result.rewindIndex() < 0 ? "" : " by rewind"));
+                (result.copies() == 0 ? "" : ", " + result.copies()
+                        + " copies from the literal stream")
+                        + (repeatIndex < 0 ? "" : ", loops from unit " + repeatIndex
+                        + (result.rewindIndex() < 0 ? "" : " by rewind")));
         if (result.rewindIndex() >= 0) {
             System.out.printf("The loop is longer than the -m%d window, so the decoder cannot "
                     + "loop it alone: save its state at unit %d and restore it at unit %d, "
@@ -144,10 +150,20 @@ public final class St4 {
     }
 
     /**
-     * Twenty-four bytes of header, then A, B, C and D in order, each starting
-     * on a long boundary. Nothing says how long a stream is: it runs to the
-     * next - and B, the literal payload, runs to the end of the file, so it
-     * borders whatever the caller loads after the container.
+     * The parse: the event-driven optimizer, or with {@code -c} the one that
+     * lets a match beyond the window copy from the literal stream, which is
+     * the readable reference and slow on large inputs.
+     */
+    private static St4Block parse(int[] units, int unit, int window, boolean copies) {
+        return copies ? St4LiteralCopyOptimizer.optimize(units, unit, window, true)
+                : St4EventOptimizer.optimize(units, unit, window);
+    }
+
+    /**
+     * Twenty-eight bytes of header, then A, B, C and D in order, each
+     * starting on a long boundary. Nothing says how long a stream is: it runs
+     * to the next - and D, the literal payload, runs to the end of the file,
+     * so it borders whatever the caller loads after the container.
      */
     // Public because a container is also how other formats embed an ST4
     // stream, many of them at once.
@@ -165,6 +181,7 @@ public final class St4 {
         putLong(file, St4Format.OFFSET_WORD_OFFSETS, wordAt);
         putLong(file, St4Format.OFFSET_REWIND, result.rewindIndex() < 0
                 ? St4Format.NO_REWIND : result.rewindIndex() * result.unit());
+        putLong(file, St4Format.OFFSET_WINDOW, result.window());
         System.arraycopy(result.control(), 0, file, controlAt, result.control().length);
         System.arraycopy(result.literal(), 0, file, literalAt, result.literal().length);
         System.arraycopy(result.byteOffsets(), 0, file, byteAt,

@@ -295,7 +295,7 @@ def main() -> int:
                 # start, a third in, and the shortest loop that still exceeds it.
                 for index in sorted({0, units_total // 3, units_total - ring_units - 1}):
                     file = st4.pack_file(data, unit, ring_units, index)
-                    control, literal, byte_offsets, word_offsets, size, rewind = \
+                    control, literal, byte_offsets, word_offsets, size, rewind, _ = \
                         st4.streams(file, unit)
                     if rewind != index * unit:
                         print(f'FAIL k={unit} {name} -r{index}: the header says rewind '

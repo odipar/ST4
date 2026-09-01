@@ -27,13 +27,14 @@ public static class Nt4
     public static int Run(string[] args)
     {
         ArgumentNullException.ThrowIfNull(args);
-        Console.WriteLine("NT4: aligned split-stream packer v3.0 by Robbert van Dalen, "
+        Console.WriteLine("NT4: aligned split-stream packer v4.0 by Robbert van Dalen, "
             + "based on ZX1 v1.5 by Einar Saukas");
 
         int unit = 1;
         int offsetLimit = Format.MaxOffset;
         int maxOpLength = Format.MaxOp;
         int repeatIndex = -1;
+        bool copies = false;
         bool forcedMode = false;
         int index = 0;
         for (; index < args.Length
@@ -43,6 +44,9 @@ public static class Nt4
             {
                 case "-f":
                     forcedMode = true;
+                    break;
+                case "-c":
+                    copies = true;
                     break;
                 default:
                     if (args[index].StartsWith("-r", StringComparison.Ordinal))
@@ -92,8 +96,10 @@ public static class Nt4
         else
         {
             return Cli.Usage(
-                "Usage: nt4 [-f] [-kK] [-mN] [-lN] [-rR] input [output.st4]\n"
+                "Usage: nt4 [-f] [-c] [-kK] [-mN] [-lN] [-rR] input [output.st4]\n"
                 + "  -f      Force overwrite of output file\n"
+                + "  -c      Let a match beyond the -m window copy from the\n"
+                + "          literal stream; needs a decoder built with copies\n"
                 + "  -kK     Unit size: 1, 2 or 4 bytes (default 1). Lengths and\n"
                 + "          offsets count units, so the output is padded to a\n"
                 + "          whole number of them\n"
@@ -141,6 +147,7 @@ public static class Nt4
                 + $"{units.Length} units");
         }
         Compressor.Result result;
+        int window = offsetLimit;
         if (repeatIndex >= 0 && units.Length - repeatIndex > offsetLimit)
         {
             // The loop is longer than the window, so no match can reach across
@@ -150,17 +157,16 @@ public static class Nt4
             int[] intro = units[..repeatIndex];
             int[] loop = units[repeatIndex..];
             result = Compressor.CompressRewinding(
-                intro.Length == 0 ? null : EventOptimizer.Optimize(intro, unit, offsetLimit),
-                EventOptimizer.Optimize(loop, unit, offsetLimit),
-                units, unit, maxOpLength, repeatIndex);
+                intro.Length == 0 ? null : Parse(intro, unit, offsetLimit, copies),
+                Parse(loop, unit, offsetLimit, copies),
+                units, unit, maxOpLength, repeatIndex, window);
         }
         else
         {
             // The loop fits the window, so the stream loops by itself: its end
             // becomes an endless match back to the loop point.
-            result = Compressor.Compress(
-                EventOptimizer.Optimize(units, unit, offsetLimit), units, unit, maxOpLength,
-                repeatIndex);
+            result = Compressor.Compress(Parse(units, unit, offsetLimit, copies), units, unit,
+                maxOpLength, repeatIndex, window);
         }
 
         try
@@ -179,6 +185,7 @@ public static class Nt4
             + $"A {result.Control.Length}, B {result.ByteOffsets.Length}, "
             + $"C {result.WordOffsets.Length}, D {result.Literal.Length}, "
             + $"{result.Operations} operations"
+            + $"{(result.Copies == 0 ? "" : $", {result.Copies} copies from the literal stream")}"
             + $"{(repeatIndex < 0 ? "" : $", loops from unit {repeatIndex}")}"
             + $"{(result.RewindIndex < 0 ? "" : " by rewind")}"));
         if (result.RewindIndex >= 0)
@@ -197,10 +204,19 @@ public static class Nt4
     }
 
     /// <summary>
-    /// Twenty-four bytes of header, then A, B, C and D in order, each starting
-    /// on a long boundary. Nothing says how long a stream is: it runs to the
-    /// next - and B, the literal payload, runs to the end of the file, so it
-    /// borders whatever the caller loads after the container.
+    /// The parse: the event-driven optimizer, or with <c>-c</c> the one that
+    /// lets a match beyond the window copy from the literal stream, which is
+    /// the readable reference and slow on large inputs.
+    /// </summary>
+    private static Block Parse(int[] units, int unit, int window, bool copies) =>
+        copies ? LiteralCopyOptimizer.Optimize(units, unit, window, true)
+            : EventOptimizer.Optimize(units, unit, window);
+
+    /// <summary>
+    /// Twenty-eight bytes of header, then A, B, C and D in order, each
+    /// starting on a long boundary. Nothing says how long a stream is: it runs
+    /// to the next - and D, the literal payload, runs to the end of the file,
+    /// so it borders whatever the caller loads after the container.
     /// </summary>
     /// <remarks>
     /// Public because a container is also how other formats embed an ST4
@@ -225,6 +241,7 @@ public static class Nt4
         PutLong(file, Format.OffsetWordOffsets, wordAt);
         PutLong(file, Format.OffsetRewind, result.RewindIndex < 0
             ? Format.NoRewind : result.RewindIndex * result.Unit);
+        PutLong(file, Format.OffsetWindow, result.Window);
         result.Control.CopyTo(file, controlAt);
         result.Literal.CopyTo(file, literalAt);
         result.ByteOffsets.CopyTo(file, byteAt);
