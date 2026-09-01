@@ -16,13 +16,20 @@ namespace Nt4;
 /// construction. Lengths and offsets count units of k bytes, where k is 1, 2
 /// or 4; the Java <c>St4Format</c> is the reference and documents the control
 /// codes and the reasoning at length.</para>
-/// <para>The header is twenty bytes and holds only what cannot be worked out:
-/// a signature packing magic, version and k into one long, the padded output
-/// size, and where streams B, C and D begin relative to the header. Stream A
-/// begins where the header ends, and each stream runs to the next. The file
-/// lays them out as A, C, D, B: the literal payload comes last, so it runs to
-/// the end of the file and borders whatever the caller loads after the
-/// container - a ring buffer, say.</para>
+/// <para>The header is twenty-four bytes and holds only what cannot be worked
+/// out: a signature packing magic, version and k into one long, the padded
+/// output size, where streams B, C and D begin relative to the header, and
+/// the rewind point. Stream A begins where the header ends, and each stream
+/// runs to the next. The file lays them out as A, C, D, B: the literal payload
+/// comes last, so it runs to the end of the file and borders whatever the
+/// caller loads after the container - a ring buffer, say.</para>
+/// <para>The rewind point is how a stream loops when its loop is longer than
+/// the window: the caller saves the decoder's registers when the output
+/// reaches it and restores them, all but the write pointer, when it reaches O,
+/// every pass. The packer parses the loop on its own so no match in it reaches
+/// before the rewind point, and every pass sees the same history. The field is
+/// $FFFFFFFF when the caller has nothing to do - the stream ends, or loops by
+/// itself.</para>
 /// <para>The end marker carries one extra bit. A 0 ends the stream; a 1 means
 /// it repeats from a loop point R - the container encodes the infinite input
 /// <c>units[0..R) units[R..O)</c> repeated forever. Stream D stores the
@@ -55,8 +62,14 @@ public static class Format
     /// <summary>Byte offset of stream D's header-relative position.</summary>
     public const int OffsetWordOffsets = 16;
 
-    /// <summary>Twenty bytes; stream A begins where the header ends.</summary>
-    public const int HeaderSize = 20;
+    /// <summary>Byte offset of the rewind point, in bytes like the size.</summary>
+    public const int OffsetRewind = 20;
+
+    /// <summary>Twenty-four bytes; stream A begins where the header ends.</summary>
+    public const int HeaderSize = 24;
+
+    /// <summary>The rewind field of a stream that ends or loops by itself.</summary>
+    public const int NoRewind = -1;
 
     /// <summary>
     /// The furthest any offset reaches, in BYTES. A word offset is stored as
@@ -94,8 +107,9 @@ public static class Format
     /// <param name="Literal">Stream B, the literal payload.</param>
     /// <param name="ByteOffsets">Stream C, one byte per offset.</param>
     /// <param name="WordOffsets">Stream D, one word per offset.</param>
+    /// <param name="Rewind">The rewind point in bytes, or <see cref="NoRewind"/>.</param>
     public sealed record Container(int Unit, int Size, byte[] Control, byte[] Literal,
-        byte[] ByteOffsets, byte[] WordOffsets);
+        byte[] ByteOffsets, byte[] WordOffsets, int Rewind);
 
     /// <summary>
     /// Reads a container, checking everything a decoder would otherwise trust.
@@ -138,6 +152,11 @@ public static class Format
             throw new InvalidDataException(
                 $"output size {size} is not a whole number of {unit}-byte units");
         }
+        int rewind = LongAt(file, OffsetRewind);
+        if (rewind != NoRewind && (rewind < 0 || rewind >= size || rewind % unit != 0))
+        {
+            throw new InvalidDataException($"rewind point {rewind} is not a unit of the output");
+        }
 
         // The file lays the streams out as A, C, D, B: the literal payload
         // last, so it runs to the end of the file.
@@ -160,7 +179,7 @@ public static class Format
         }
         return new Container(unit, size,
             file[edge[0]..edge[1]], file[edge[3]..edge[4]],
-            file[edge[1]..edge[2]], file[edge[2]..edge[3]]);
+            file[edge[1]..edge[2]], file[edge[2]..edge[3]], rewind);
     }
 
     private static int LongAt(byte[] file, int at) =>

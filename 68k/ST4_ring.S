@@ -27,10 +27,13 @@
 ; literals and longer segments take the classic counted one - see ST4_wrap.S
 ; for the measurements behind the split.
 ;
-; The container is ST4.S's: twenty bytes of header - signature, O, and where
-; streams B, C and D begin - then A, C, D and B in order, the literal payload
-; last so it borders whatever the caller loads after the container. See ST4.S
-; for the eight instructions that open one.
+; The container is ST4.S's: twenty-four bytes of header - signature, O, where
+; streams B, C and D begin, and the rewind point - then A, C, D and B in
+; order, the literal payload last so it borders whatever the caller loads
+; after the container. See ST4.S for the eight instructions that open one, and
+; for the rewind: a loop longer than the window is replayed by saving the
+; state registers - all but a1 - at the rewind point and restoring them at O,
+; every pass, which this decoder needs no code for.
 ;
 ; THE STATE IS YOUR REGISTERS:
 ;

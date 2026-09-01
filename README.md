@@ -60,6 +60,20 @@ same limits as any other offset, and that is also the mechanism's reach: the
 looped span `[R,O)` must fit the window the stream was packed for, since the
 endless match reads it back out of the ring.
 
+A loop longer than the window cannot loop by itself, so the packer makes it
+the caller's: the stream ends plainly and the header names a *rewind point*.
+Every decoder keeps its whole state in seven registers, so the caller saves
+them when the output reaches R and restores them — all but the write pointer
+— when it reaches O, every pass. That replays the encoded stream from the
+loop point through a ring of any size; the container is in memory anyway.
+What makes the replay sound is the parse: the loop `[R,O)` is packed on its
+own, so no match in it reaches before R or straddles R, and every pass sees
+the same history whatever came before it. The cost is confined to the first
+window's worth of the loop, which cannot reference the intro. `-rR` picks
+between the two by itself — the endless match when the loop fits the window,
+the rewind point when it does not — and the rewind field is set only when the
+caller has something to do.
+
 One flag bit says which block comes next. After literals, `0` starts a match
 at the last offset and `1` a match at a new offset — two literal runs in a row
 cannot happen. After a match, `0` starts literals and `1` a match at a new
@@ -87,7 +101,7 @@ lets the decoders skip the refill check on every read but two: a gamma
 continuation bit, and the class bit right after a flag. Stream A is padded to
 an even length so the last refill finds a whole word.
 
-A container is twenty bytes of header, then the streams in order:
+A container is twenty-four bytes of header, then the streams in order:
 
 ```
  0  4  signature: 'S', '4', format version (5), k
@@ -95,7 +109,8 @@ A container is twenty bytes of header, then the streams in order:
  8  4  where stream B starts, in bytes from the start of the header
 12  4  where stream C starts
 16  4  where stream D starts
-20 ..  stream A, then C, then D, then B, each starting on a long boundary
+20  4  the rewind point in bytes, or $FFFFFFFF when there is none
+24 ..  stream A, then C, then D, then B, each starting on a long boundary
 ```
 
 Nothing else is stored because nothing else is needed: stream A begins where
@@ -138,6 +153,13 @@ transition. A repeating stream never reaches DONE: drive it through
 `ST4_resume` with budgets and stop when you have enough. `ST4_decompress`,
 which drains until DONE, would never return.
 
+A loop longer than the window is the caller's to replay, and needs no decoder
+code at all: when the output reaches the header's rewind point, save `a0`,
+`a2`, `a4`, `a5`, `d0`, `d1` and `d2`; when it reaches O, restore them — `a1`
+stays where the ring has got to — and carry on, every pass. Arrange the
+budgets so a call ends exactly on both points; a state saved mid-operation
+replays like any other, because there is nothing else to it.
+
 Each decoder runs two copy ladders: match runs of at most sixteen units — on
 measured streams, four of every five — take a counter-free ladder that falls
 straight into what comes next, and literals and longer runs take a counted
@@ -175,7 +197,8 @@ stores — for a repeating stream, one whole pass. `-kK` picks the unit size,
 `-mN` limits how far back matches may reach, `-lN` splits long matches — the
 default already fits the 68000 decoders — and `-rR` makes the stream loop:
 after the last unit, the output continues from unit R, forever. `-r0` loops
-the whole stream.
+the whole stream. A loop longer than `-m` is packed for rewind, and `st4`
+says at which unit to save the decoder's state and at which to restore it.
 
 Three optimizers select the blocks, all held to each other by tests:
 
@@ -223,6 +246,7 @@ python3 68k/test/emu/test_st4.py          # linear decoder vs the Java packer, k
 python3 68k/test/emu/test_st4_wrap.py     # counted wrap, every unit size
 python3 68k/test/emu/test_st4_ring.py     # general ring, both wrap modes, oversized budgets
 python3 68k/test/emu/test_st4_repeat.py   # -r streams through all three decoders, past two passes
+python3 68k/test/emu/test_st4_rewind.py   # loops longer than the ring, replayed by register rewind
 python3 68k/test/emu/bench_bits.py        # why the lengths are still Elias gamma
 ```
 

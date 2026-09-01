@@ -37,6 +37,22 @@ final class St4RoundTripTest {
                 packed.paddedSize(), offsetLimit);
     }
 
+    /**
+     * Packs a stream that loops by rewind: the intro and the loop from unit
+     * {@code index} parsed on their own, as the packer does when the loop is
+     * longer than the window.
+     */
+    private static St4Compressor.Result packRewinding(byte[] input, int unit, int window,
+                                                      int index) {
+        int[] units = Units.split(input, unit);
+        int[] intro = Arrays.copyOfRange(units, 0, index);
+        int[] loop = Arrays.copyOfRange(units, index, units.length);
+        return St4Compressor.compressRewinding(
+                intro.length == 0 ? null : St4Optimizer.optimize(intro, unit, window, false),
+                St4Optimizer.optimize(loop, unit, window, false), units, unit,
+                St4Format.MAX_OP, index);
+    }
+
     /** Packs a stream that loops: after its last unit it continues from unit {@code index}. */
     private static St4Compressor.Result packRepeating(byte[] input, int unit, int index) {
         int[] units = Units.split(input, unit);
@@ -171,6 +187,83 @@ final class St4RoundTripTest {
     }
 
     @Test
+    void aRewindStreamDecodesToItsPassAndNeverReachesBeforeTheLoop() {
+        // The loop is parsed on its own, so replaying it from the state saved
+        // at the loop point sees the same history every pass. The reference
+        // holds a stream to that: from the rewind point on, no match may reach
+        // before it - and the pass must still be the input.
+        for (int unit : new int[] {1, 2, 4}) {
+            for (byte[] input : inputs()) {
+                int total = Units.paddedLength(input.length, unit) / unit;
+                for (int index : new java.util.TreeSet<>(
+                        List.of(0, total / 3, Math.max(0, total - 65)))) {
+                    if (index >= total) {
+                        continue;
+                    }
+                    St4Compressor.Result packed = packRewinding(input, unit, 64, index);
+                    assertEquals(index, packed.rewindIndex());
+                    String shape = "unit " + unit + ", " + input.length + " bytes, -r" + index;
+                    St4Decompressor.Decoded decoded = St4Decompressor.decode(
+                            packed.control(), packed.literal(), packed.byteOffsets(),
+                            packed.wordOffsets(), unit, packed.paddedSize(), 64, index * unit);
+                    assertArrayEquals(padded(input, unit), decoded.output(), shape);
+                    assertEquals(-1, decoded.repeatIndex(), "a rewind stream ends plainly");
+
+                    // The container names the rewind point, in bytes like O.
+                    St4Format.Container read = St4Format.read(St4.container(packed));
+                    assertEquals(index * unit, read.rewind(), shape);
+                }
+            }
+        }
+    }
+
+    @Test
+    void theSeamOfARewindStreamIsAbsorbed() {
+        // The loop's parse assumes the stream's initial offset at its start, so
+        // its first match may be a one-unit rep of offset one - which, after an
+        // intro that left another offset behind, the format cannot write. The
+        // compressor turns that unit into a literal; the stream must still
+        // decode, and still hold to its rewind point.
+        byte[] input = "xyzxyzxyzxyzabb".getBytes(java.nio.charset.StandardCharsets.US_ASCII);
+        St4Compressor.Result packed = packRewinding(input, 1, 512, 12);
+        assertArrayEquals(input, St4Decompressor.decode(packed.control(), packed.literal(),
+                packed.byteOffsets(), packed.wordOffsets(), 1, input.length, 512, 12).output());
+        // And two literal runs meeting at the seam become one, which the
+        // format demands: 256 distinct bytes hold no match at all, so an
+        // intro and a loop cut from them are one literal run each - and one
+        // together.
+        byte[] distinct = new byte[256];
+        for (int i = 0; i < distinct.length; i++) {
+            distinct[i] = (byte) i;
+        }
+        St4Compressor.Result merged = packRewinding(distinct, 1, 512, 100);
+        assertArrayEquals(distinct, St4Decompressor.decode(merged.control(), merged.literal(),
+                merged.byteOffsets(), merged.wordOffsets(), 1, distinct.length, 512, 100)
+                .output());
+        assertEquals(1, merged.operations(), "one literal run, not two");
+    }
+
+    @Test
+    void theRewindCheckRefusesALoopThatReachesBeforeItsPoint() {
+        // A stream packed without the rewind constraint lets its second half
+        // match its first; replayed from the halfway point it would read what
+        // the ring held instead, so the reference must refuse it there.
+        byte[] half = new byte[1000];
+        new Random(5).nextBytes(half);
+        byte[] input = new byte[2000];
+        System.arraycopy(half, 0, input, 0, 1000);
+        System.arraycopy(half, 0, input, 1000, 1000);
+        St4Compressor.Result plain = pack(input, 1);
+        assertThrows(IllegalStateException.class, () -> St4Decompressor.decode(
+                plain.control(), plain.literal(), plain.byteOffsets(), plain.wordOffsets(),
+                1, 2000, St4Format.maxOffsetUnits(1), 1000));
+        // The same data packed for rewind at 1000 passes the same check.
+        St4Compressor.Result rewound = packRewinding(input, 1, 512, 1000);
+        assertArrayEquals(input, St4Decompressor.decode(rewound.control(), rewound.literal(),
+                rewound.byteOffsets(), rewound.wordOffsets(), 1, 2000, 512, 1000).output());
+    }
+
+    @Test
     void theDecoderReportsHowAStreamEnds() {
         byte[] input = "the tail of this sentence loops. and loops. ".getBytes(
                 java.nio.charset.StandardCharsets.US_ASCII);
@@ -224,14 +317,16 @@ final class St4RoundTripTest {
     }
 
     @Test
-    void theHeaderIsTwentyBytesAndSaysOnlyWhatCannotBeDerived() {
+    void theHeaderIsTwentyFourBytesAndSaysOnlyWhatCannotBeDerived() {
         byte[] input = "a header should hold nothing that follows from the rest".getBytes(
                 java.nio.charset.StandardCharsets.US_ASCII);
         for (int unit : new int[] {1, 2, 4}) {
             St4Compressor.Result packed = pack(input, unit);
             byte[] file = St4.container(packed);
 
-            assertEquals(20, St4Format.HEADER_SIZE);
+            assertEquals(24, St4Format.HEADER_SIZE);
+            // A stream that ends has no rewind point: nothing for a caller to do.
+            assertEquals(St4Format.NO_REWIND, longAt(file, St4Format.OFFSET_REWIND));
             // One long carries magic, version and k, so a decoder built for one
             // unit size checks an asset against itself with a single cmp.l.
             assertEquals(St4Format.signature(unit), longAt(file, St4Format.OFFSET_SIGNATURE));
@@ -323,6 +418,11 @@ final class St4RoundTripTest {
         byte[] misaligned = good.clone();
         misaligned[St4Format.OFFSET_LITERAL + 3] += 1;
         assertThrows(IllegalArgumentException.class, () -> St4Format.read(misaligned));
+
+        byte[] strayRewind = good.clone();          // a rewind point past the output
+        strayRewind[St4Format.OFFSET_REWIND + 2] = 0x7F;
+        strayRewind[St4Format.OFFSET_REWIND + 3] = 0;
+        assertThrows(IllegalArgumentException.class, () -> St4Format.read(strayRewind));
     }
 
     private static int longAt(byte[] file, int at) {

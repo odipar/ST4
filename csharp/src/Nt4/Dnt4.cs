@@ -94,7 +94,7 @@ public static class Dnt4
             // the container stores is the pass.
             decoded = Decompressor.Decode(container.Control, container.Literal,
                 container.ByteOffsets, container.WordOffsets, container.Unit,
-                container.Size, Format.MaxOffsetUnits(container.Unit));
+                container.Size, Format.MaxOffsetUnits(container.Unit), container.Rewind);
         }
         catch (InvalidDataException exception)
         {
@@ -113,8 +113,9 @@ public static class Dnt4
 
         Console.WriteLine($"File decompressed from {file.Length} to {output.Length} bytes, "
             + $"k={container.Unit}{(container.Unit == 1 ? "" : " (a whole number of units)")}"
-            + $"{(decoded.RepeatIndex < 0 ? ""
-                : $", looping from unit {decoded.RepeatIndex}")}!");
+            + $"{(decoded.RepeatIndex >= 0 ? $", looping from unit {decoded.RepeatIndex}"
+                : container.Rewind < 0 ? ""
+                : $", looping from unit {container.Rewind / container.Unit} by rewind")}!");
         return 0;
     }
 }

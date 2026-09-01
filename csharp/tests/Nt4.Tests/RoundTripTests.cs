@@ -33,6 +33,21 @@ public sealed class RoundTripTests
         Decompressor.Decompress(packed.Control, packed.Literal, packed.ByteOffsets,
             packed.WordOffsets, packed.Unit, packed.PaddedSize, offsetLimit);
 
+    /// <summary>
+    /// Packs a stream that loops by rewind: the intro and the loop from unit
+    /// <paramref name="index"/> parsed on their own, as the packer does when the
+    /// loop is longer than the window.
+    /// </summary>
+    private static Compressor.Result PackRewinding(byte[] input, int unit, int window, int index)
+    {
+        int[] units = Units.Split(input, unit);
+        int[] intro = units[..index];
+        int[] loop = units[index..];
+        return Compressor.CompressRewinding(
+            intro.Length == 0 ? null : Optimizer.Optimize(intro, unit, window, false),
+            Optimizer.Optimize(loop, unit, window, false), units, unit, Format.MaxOp, index);
+    }
+
     /// <summary>Packs a stream that loops: after its last unit it continues from unit <paramref name="index"/>.</summary>
     private static Compressor.Result PackRepeating(byte[] input, int unit, int index)
     {
@@ -188,6 +203,88 @@ public sealed class RoundTripTests
     }
 
     [Fact]
+    public void ARewindStreamDecodesToItsPassAndNeverReachesBeforeTheLoop()
+    {
+        // The loop is parsed on its own, so replaying it from the state saved
+        // at the loop point sees the same history every pass. The reference
+        // holds a stream to that: from the rewind point on, no match may reach
+        // before it - and the pass must still be the input.
+        foreach (int unit in new[] { 1, 2, 4 })
+        {
+            foreach (byte[] input in Inputs())
+            {
+                int total = Units.PaddedLength(input.Length, unit) / unit;
+                foreach (int index in new SortedSet<int> { 0, total / 3, Math.Max(0, total - 65) })
+                {
+                    if (index >= total)
+                    {
+                        continue;
+                    }
+                    Compressor.Result packed = PackRewinding(input, unit, 64, index);
+                    Assert.Equal(index, packed.RewindIndex);
+                    Decompressor.Decoded decoded = Decompressor.Decode(
+                        packed.Control, packed.Literal, packed.ByteOffsets,
+                        packed.WordOffsets, unit, packed.PaddedSize, 64, index * unit);
+                    Assert.Equal(Padded(input, unit), decoded.Output);
+                    Assert.Equal(-1, decoded.RepeatIndex);
+
+                    // The container names the rewind point, in bytes like O.
+                    Format.Container read = Format.Read(Nt4.Container(packed));
+                    Assert.Equal(index * unit, read.Rewind);
+                }
+            }
+        }
+    }
+
+    [Fact]
+    public void TheSeamOfARewindStreamIsAbsorbed()
+    {
+        // The loop's parse assumes the stream's initial offset at its start, so
+        // its first match may be a one-unit rep of offset one - which, after an
+        // intro that left another offset behind, the format cannot write. The
+        // compressor turns that unit into a literal; the stream must still
+        // decode, and still hold to its rewind point.
+        byte[] input = Encoding.ASCII.GetBytes("xyzxyzxyzxyzabb");
+        Compressor.Result packed = PackRewinding(input, 1, 512, 12);
+        Assert.Equal(input, Decompressor.Decode(packed.Control, packed.Literal,
+            packed.ByteOffsets, packed.WordOffsets, 1, input.Length, 512, 12).Output);
+        // And two literal runs meeting at the seam become one, which the
+        // format demands: 256 distinct bytes hold no match at all, so an
+        // intro and a loop cut from them are one literal run each - and one
+        // together.
+        byte[] distinct = new byte[256];
+        for (int i = 0; i < distinct.Length; i++)
+        {
+            distinct[i] = (byte)i;
+        }
+        Compressor.Result merged = PackRewinding(distinct, 1, 512, 100);
+        Assert.Equal(distinct, Decompressor.Decode(merged.Control, merged.Literal,
+            merged.ByteOffsets, merged.WordOffsets, 1, distinct.Length, 512, 100).Output);
+        Assert.Equal(1, merged.Operations);
+    }
+
+    [Fact]
+    public void TheRewindCheckRefusesALoopThatReachesBeforeItsPoint()
+    {
+        // A stream packed without the rewind constraint lets its second half
+        // match its first; replayed from the halfway point it would read what
+        // the ring held instead, so the reference must refuse it there.
+        byte[] half = new byte[1000];
+        new JavaRandom(5).NextBytes(half);
+        byte[] input = new byte[2000];
+        half.CopyTo(input, 0);
+        half.CopyTo(input, 1000);
+        Compressor.Result plain = Pack(input, 1);
+        Assert.Throws<InvalidDataException>(() => Decompressor.Decode(
+            plain.Control, plain.Literal, plain.ByteOffsets, plain.WordOffsets,
+            1, 2000, Format.MaxOffsetUnits(1), 1000));
+        // The same data packed for rewind at 1000 passes the same check.
+        Compressor.Result rewound = PackRewinding(input, 1, 512, 1000);
+        Assert.Equal(input, Decompressor.Decode(rewound.Control, rewound.Literal,
+            rewound.ByteOffsets, rewound.WordOffsets, 1, 2000, 512, 1000).Output);
+    }
+
+    [Fact]
     public void TheDecoderReportsHowAStreamEnds()
     {
         byte[] input = Encoding.ASCII.GetBytes(
@@ -241,7 +338,7 @@ public sealed class RoundTripTests
     }
 
     [Fact]
-    public void TheHeaderIsTwentyBytesAndSaysOnlyWhatCannotBeDerived()
+    public void TheHeaderIsTwentyFourBytesAndSaysOnlyWhatCannotBeDerived()
     {
         byte[] input = Encoding.ASCII.GetBytes(
             "a header should hold nothing that follows from the rest");
@@ -250,7 +347,9 @@ public sealed class RoundTripTests
             Compressor.Result packed = Pack(input, unit);
             byte[] file = Nt4.Container(packed);
 
-            Assert.Equal(20, Format.HeaderSize);
+            Assert.Equal(24, Format.HeaderSize);
+            // A stream that ends has no rewind point: nothing for a caller to do.
+            Assert.Equal(Format.NoRewind, LongAt(file, Format.OffsetRewind));
             // One long carries magic, version and k, so a decoder built for one
             // unit size checks an asset against itself with a single cmp.l.
             Assert.Equal(Format.Signature(unit), LongAt(file, Format.OffsetSignature));
@@ -343,6 +442,11 @@ public sealed class RoundTripTests
         byte[] misaligned = (byte[])good.Clone();
         misaligned[Format.OffsetLiteral + 3] += 1;
         Assert.Throws<InvalidDataException>(() => Format.Read(misaligned));
+
+        byte[] strayRewind = (byte[])good.Clone();  // a rewind point past the output
+        strayRewind[Format.OffsetRewind + 2] = 0x7F;
+        strayRewind[Format.OffsetRewind + 3] = 0;
+        Assert.Throws<InvalidDataException>(() => Format.Read(strayRewind));
     }
 
     private static int LongAt(byte[] file, int at) =>
