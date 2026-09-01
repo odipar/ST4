@@ -20,7 +20,9 @@ ring. The decoders need little. The parse is the work: the exact problem is in
 an NP-complete class, so the packer needs a heuristic - and one is measured
 below. With the dictionary chosen first, a 16-unit ring with copies from D
 packs block-shaped data like a ring of 256 units and more does today, and
-prose like a ring of 50 to 130 units; the no-class-code variant loses.
+prose like a ring of 80 to 120 units. No class code is needed: the offset's
+magnitude says which, and that form packs best; the ring-behind-D form
+loses.
 
 ## What the idea is, precisely
 
@@ -87,21 +89,27 @@ Version 5 put D last for exactly this.
 
 **The ring decoders: not free by adjacency alone.** Today a source below the
 ring start means "wrap to the other end", and the same condition cannot also
-mean "read D". Two ways out:
+mean "read D". Three ways out:
 
 1. A no-wrap variant: the write pointer wraps, sources are linear, everything
-   below the ring is D. The previous lap becomes unreachable, but D covers
-   what it held, except self-overlapping periods, which stay within the
-   current phase anyway.
-2. A *literal-stream match*: a class code for a copy relative to `a2`, the
-   literal read pointer, with a signed offset from stream B or C. About twenty
-   bytes of decoder, two more control bits per such match, and the even
-   rhythm survives with one extra bit. It needs no layout constraint, so
-   requirement (1) stops being a must, and the packer never needs to know D's
-   final length.
+   below the ring is D, anchored at its end. The previous lap becomes
+   unreachable, so no match may cross a lap, and D's length must be known
+   before any offset into it can be written.
+2. A *literal-stream match* with a class code of its own: a copy relative to
+   `a2`, the literal read pointer, two more control bits per such match, no
+   layout constraint.
+3. The same by magnitude, with no class code at all. The packer never writes
+   a ring offset above `-m` = N, so an offset of at most N units is a ring
+   match exactly as today, and one beyond N copies from the literal stream,
+   offset minus N literals back from the read pointer. Same three control
+   bits, same byte-or-word encoding, no layout constraint. The decoder
+   compares an offset against N once, when it installs it, and copies from
+   the read pointer instead of the write pointer, without a wrap; the
+   existing streams, which never exceed N, decode unchanged.
 
-The class code is the better design, and it is what makes the packer
-tractable.
+The third is the design: it anchors at the read pointer, which the packer
+knows at every point, keeps the ring's whole history, and costs the stream
+nothing.
 
 **The packer: the work.** The dictionary depends on the parse, because the
 parse decides which units are literals, and a reference into D depends on how
@@ -170,12 +178,16 @@ copy's offset depends only on the literals between target and copy, which the
 chain prefix fixes, and the DP needs just the cost class, byte or word, which
 it estimates from the previous pass and can only mis-cost by eight bits.
 
-Two addressings were costed side by side. **A2**: a class code of its own,
-five control bits, the offset relative to the literal read pointer, and ring
-matches as the ring decoders make them today. **END**: no class code, the
-ring directly behind D, an ordinary offset reading D past the ring start,
-anchored at D's end; the write pointer wraps by lap, sources never do, so no
-match may cross a lap and ring matches reach only into the current lap.
+Three addressings were costed. **A2**: a class code of its own, five
+control bits, the offset relative to the literal read pointer, and ring
+matches as the ring decoders make them today. **By magnitude**: the same
+offset space as a ring match, an offset beyond N reaching the literal stream
+N less than that far back from the read pointer - three control bits, and a
+byte offset reaches 512 minus N literals. **Ring behind D**: no class code
+either, but the ring directly behind D with an ordinary offset reading D past
+the ring start, anchored at D's end; the write pointer wraps by lap, sources
+never do, so no match may cross a lap and ring matches reach only into the
+current lap.
 
 ### What it found
 
@@ -187,63 +199,67 @@ class code" the ring-behind-D form.
 
 At k = 1:
 
-| corpus | bytes | ring | ring alone | copies from D | no class code |
-|---|---:|---:|---:|---:|---:|
-| far-match: a block, a run, the block | 2900 | 16 | 408 (14.1%) | 210 (7.2%) | 586 (20.2%) |
-| period-129: 129 random bytes × 8 | 1032 | 16 | 1043 (101.1%) | 156 (15.1%) | 270 (26.2%) |
-| period-129 | 1032 | 64 | 1043 (101.1%) | 156 (15.1%) | 183 (17.7%) |
-| period-129 | 1032 | 256 | 135 (13.1%) | 135 (13.1%) | 160 (15.5%) |
-| word-soup: 20 words, 400 draws | 2925 | 16 | 2795 (95.6%) | 1008 (34.5%) | 1127 (38.5%) |
-| word-soup | 2925 | 64 | 2114 (72.3%) | 946 (32.3%) | 966 (33.0%) |
-| word-soup | 2925 | 256 | 1198 (41.0%) | 864 (29.5%) | 890 (30.4%) |
-| word-soup | 2925 | 1024 | 817 (27.9%) | 806 (27.6%) | 832 (28.4%) |
-| README, prose | 15732 | 16 | 15163 (96.4%) | 13548 (86.1%) | 14436 (91.8%) |
-| README | 15732 | 64 | 13376 (85.0%) | 12231 (77.7%) | 13364 (84.9%) |
-| README | 15732 | 256 | 10514 (66.8%) | 10063 (64.0%) | 11459 (72.8%) |
-| README | 15732 | 1024 | 8863 (56.3%) | 8687 (55.2%) | 9653 (61.4%) |
-| class file | 11273 | 16 | 9993 (88.6%) | 8757 (77.7%) | 9780 (86.8%) |
-| class | 11273 | 64 | 8456 (75.0%) | 7770 (68.9%) | 8787 (77.9%) |
-| class | 11273 | 256 | 7155 (63.5%) | 6836 (60.6%) | 7593 (67.4%) |
-| class | 11273 | 1024 | 6240 (55.4%) | 6185 (54.9%) | 6559 (58.2%) |
-| random + its first 500 bytes | 33012 | 16 | 33150 (100.4%) | 32521 (98.5%) | 32620 (98.8%) |
-| 32 KB of one byte | 32000 | 16 | 5 (0.0%) | 5 (0.0%) | 4500 (14.1%) |
+| corpus | bytes | ring | ring alone | class code | by magnitude | ring behind D |
+|---|---:|---:|---:|---:|---:|---:|
+| far-match: a block, a run, the block | 2900 | 16 | 408 (14.1%) | 210 (7.2%) | 210 (7.2%) | 586 (20.2%) |
+| period-129: 129 random bytes × 8 | 1032 | 16 | 1043 (101.1%) | 156 (15.1%) | 154 (14.9%) | 270 (26.2%) |
+| period-129 | 1032 | 64 | 1043 (101.1%) | 156 (15.1%) | 154 (14.9%) | 183 (17.7%) |
+| period-129 | 1032 | 256 | 135 (13.1%) | 135 (13.1%) | 135 (13.1%) | 160 (15.5%) |
+| word-soup: 20 words, 400 draws | 2925 | 16 | 2795 (95.6%) | 1008 (34.5%) | 924 (31.6%) | 1127 (38.5%) |
+| word-soup | 2925 | 64 | 2114 (72.3%) | 946 (32.3%) | 889 (30.4%) | 966 (33.0%) |
+| word-soup | 2925 | 256 | 1198 (41.0%) | 864 (29.5%) | 847 (29.0%) | 890 (30.4%) |
+| word-soup | 2925 | 1024 | 817 (27.9%) | 806 (27.6%) | 815 (27.9%) | 832 (28.4%) |
+| class file | 11273 | 16 | 9993 (88.6%) | 8757 (77.7%) | 8288 (73.5%) | 9780 (86.8%) |
+| class | 11273 | 64 | 8456 (75.0%) | 7770 (68.9%) | 7542 (66.9%) | 8787 (77.9%) |
+| class | 11273 | 256 | 7155 (63.5%) | 6836 (60.6%) | 6802 (60.3%) | 7593 (67.4%) |
+| class | 11273 | 1024 | 6240 (55.4%) | 6185 (54.9%) | 6199 (55.0%) | 6559 (58.2%) |
+| README, prose | 15732 | 16 | 15163 (96.4%) | 13548 (86.1%) | 12321 (78.3%) | 14436 (91.8%) |
+| README | 15732 | 64 | 13376 (85.0%) | 12231 (77.7%) | 11508 (73.2%) | 13364 (84.9%) |
+| README | 15732 | 256 | 10514 (66.8%) | 10063 (64.0%) | 9927 (63.1%) | 11459 (72.8%) |
+| README | 15732 | 1024 | 8863 (56.3%) | 8687 (55.2%) | 8663 (55.1%) | 9653 (61.4%) |
+| random + its first 500 bytes | 33012 | 16 | 33150 (100.4%) | 32521 (98.5%) | 33018 (100.0%) | 32620 (98.8%) |
+| 32 KB of one byte | 32000 | 16 | 5 (0.0%) | 5 (0.0%) | 5 (0.0%) | 4500 (14.1%) |
 
 At k = 4:
 
-| corpus | bytes | ring | ring alone | copies from D |
-|---|---:|---:|---:|---:|
-| class file | 11273 | 16 | 11055 (98.1%) | 10523 (93.3%) |
-| class | 11273 | 64 | 10821 (96.0%) | 10463 (92.8%) |
-| class | 11273 | 256 | 10437 (92.6%) | 10325 (91.6%) |
-| README, prose | 15732 | 16 | 15618 (99.3%) | 15239 (96.9%) |
-| README | 15732 | 64 | 15398 (97.9%) | 15143 (96.3%) |
-| README | 15732 | 256 | 15098 (96.0%) | 14928 (94.9%) |
-| word-soup: 20 words, 400 draws | 2925 | 16 | 2826 (96.6%) | 2117 (72.4%) |
-| word-soup | 2925 | 64 | 2592 (88.6%) | 2085 (71.3%) |
-| word-soup | 2925 | 256 | 2066 (70.6%) | 1955 (66.8%) |
-| period-128: 128 random bytes × 8 | 1024 | 16 | 1027 (100.3%) | 149 (14.6%) |
+| corpus | bytes | ring | ring alone | class code | by magnitude |
+|---|---:|---:|---:|---:|---:|
+| class file | 11273 | 16 | 11055 (98.1%) | 10523 (93.3%) | 10497 (93.1%) |
+| class | 11273 | 64 | 10821 (96.0%) | 10463 (92.8%) | 10443 (92.6%) |
+| class | 11273 | 256 | 10437 (92.6%) | 10325 (91.6%) | 10321 (91.6%) |
+| README, prose | 15732 | 16 | 15618 (99.3%) | 15239 (96.9%) | 15222 (96.8%) |
+| README | 15732 | 64 | 15398 (97.9%) | 15143 (96.3%) | 15130 (96.2%) |
+| README | 15732 | 256 | 15098 (96.0%) | 14928 (94.9%) | 14921 (94.8%) |
+| word-soup: 20 words, 400 draws | 2925 | 16 | 2826 (96.6%) | 2117 (72.4%) | 2064 (70.6%) |
+| word-soup | 2925 | 64 | 2592 (88.6%) | 2085 (71.3%) | 2042 (69.8%) |
+| word-soup | 2925 | 256 | 2066 (70.6%) | 1955 (66.8%) | 1948 (66.6%) |
+| period-128: 128 random bytes × 8 | 1024 | 16 | 1027 (100.3%) | 149 (14.6%) | 147 (14.4%) |
 
 Read for the goal - the same ratio from a smaller ring - the tables say what
 ring today's decoders need to match a 16-unit ring with copies from D:
 
-| corpus | k | 16 units with copies from D | ring alone, for the same ratio |
+| corpus | k | 16 units, copies from D by magnitude | ring alone, for the same ratio |
 |---|---:|---:|---:|
 | far-match | 1 | 7.2% | any ring shorter than the gap gives 14.1% |
-| period-129 | 1 | 15.1% | 256 units (13.1%); 64 units give 101.1% |
-| word-soup | 1 | 34.5% | between 256 (41.0%) and 1024 (27.9%) |
-| class file | 1 | 77.7% | about 50 units |
-| README | 1 | 86.1% | about 50 units |
-| class file | 4 | 93.3% | about 200 units |
-| README | 4 | 96.9% | about 130 units |
-| word-soup | 4 | 72.4% | about 200 units |
+| period-129 | 1 | 14.9% | 256 units (13.1%); 64 units give 101.1% |
+| word-soup | 1 | 31.6% | between 256 (41.0%) and 1024 (27.9%) |
+| class file | 1 | 73.5% | between 64 (75.0%) and 256 (63.5%) |
+| README | 1 | 78.3% | between 64 (85.0%) and 256 (66.8%) |
+| class file | 4 | 93.1% | between 64 (96.0%) and 256 (92.6%) |
+| README | 4 | 96.8% | between 64 (97.9%) and 256 (96.0%) |
+| word-soup | 4 | 70.6% | 256 units (70.6%) |
 
 ### What that means
 
-**The no-class-code form is out.** Anchoring at D's end and forbidding
-matches across a lap costs more than the class code saves everywhere, and on
-run-length data it is catastrophic: 32 KB of one byte packs to 4 bytes with a
-ring, and to 3.7 KB without one. The literal-stream match wants its own class
-code.
+**Of the two forms without a class code, only the magnitude split works.**
+The ring placed behind D, with D's end the anchor and its laps uncrossable,
+costs more than a class code saves everywhere and is catastrophic on runs:
+32 KB of one byte packs to 5 bytes with a ring and to 3.7 KB without one. The
+same offset space split at N - a ring match up to N, a copy from the literal
+stream beyond - beats the class code on every corpus but one, by its two
+control bits and its longer byte reach. What it gives up is reach into D,
+which shrinks by N, and the random stream with its head repeated shows it:
+the one copy 32512 literals back no longer fits. That is the design.
 
 **A smaller ring at the same ratio is real for block-shaped repetition.**
 Where the repeats are whole blocks or periods that lie further apart than the
@@ -252,14 +268,14 @@ copies from D packs like a ring of 256 units and more today, and the copy
 from D is a hair cheaper than a match at full reach would be, because an
 offset that counts literals is a byte where one that counts output is a word.
 At k = 4, where the decoders live, a 16-unit ring with copies from D packs
-like a 130- to 200-unit ring today on all three larger corpora.
+like a ring of 180 to 256 units today on all three larger corpora.
 
 **Prose gains the least.** A ring's advantage on text is a cheap reference
 to the most recent occurrence, which is usually match output, not a literal;
-a copy from D has to reach the first occurrence instead, a word offset away,
-and pays two control bits more with no rep form. On the README a 16-unit ring
-with copies from D packs like a 50-unit ring today at k = 1, a 130-unit one
-at k = 4.
+a copy from D has to reach the first occurrence instead, often a word offset
+away, and has no rep form. On the README a 16-unit ring with copies from D
+packs to 78.3%, like a ring of about 120 units today at k = 1; the class file
+to 73.5%, like about 80 units.
 
 **The cost model still has slack.** Copies are backward only, at least two
 units, without a rep form; a rep for the copy that continues the last one
@@ -273,10 +289,11 @@ The test corpora are synthetic. Whether the demo's assets - register dumps,
 speedcode, samples - are block-shaped or prose-shaped is what decides the
 ring size this buys, and the experiment runs on any file. If they read like
 the periodic corpora, the order of work is: the rep form and one-unit copies
-in the cost model; then the class code - `0 1`, a literal-stream bit, a
-byte-or-word bit, the offset, `gamma(length−1)`, which keeps the even
-rhythm - and its twenty-odd bytes in each decoder; then the same candidates
-in the fast optimizer, the event-driven one falling back.
+in the cost model; then the decoders - an offset compared against N as it is
+installed, and a copy whose source is the literal read pointer rather than
+the write pointer, without a wrap, twenty-odd bytes each - with the packer
+writing offsets beyond N; then the same candidates in the fast optimizer, the
+event-driven one falling back.
 
 ## Sources
 

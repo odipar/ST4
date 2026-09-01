@@ -30,6 +30,13 @@ import org.jspecify.annotations.Nullable;
  *   <li>{@link Scheme#A2} - a class code of its own, five control bits, and
  *       an offset relative to the literal read pointer. Ring matches are what
  *       the ring decoders do today: any source within N units, wrapped.</li>
+ *   <li>{@link Scheme#MAG} - no class code: the offset's magnitude says which.
+ *       An offset of at most N units is a ring match as today; one beyond N
+ *       copies from the literal stream, offset minus N literals back from the
+ *       read pointer. Three control bits, and a byte offset reaches 512 minus
+ *       N literals. The decoder compares one offset against N when it
+ *       installs it, and copies from the read pointer instead of the write
+ *       pointer, without a wrap.</li>
  *   <li>{@link Scheme#END} - no class code at all. The ring lies directly
  *       behind D, so an ordinary offset that reaches below the ring start
  *       reads D, anchored at its end; the write pointer wraps by lap and
@@ -51,7 +58,7 @@ import org.jspecify.annotations.Nullable;
 public final class St4LiteralMatchExperiment {
 
     /** How a literal-stream match is addressed, and what it costs. */
-    enum Scheme { A2, END }
+    enum Scheme { A2, MAG, END }
 
     /** Control bits of a literal-stream match under {@link Scheme#A2}. */
     private static final int CONTROL_A2 = 5;
@@ -114,7 +121,7 @@ public final class St4LiteralMatchExperiment {
                     matchLength[offset] = 0;            // END: no match crosses a lap
                 }
                 // Where the source lies: in the ring's history, or in D.
-                boolean inRing = scheme == Scheme.A2 ? offset <= ring : offset <= phase;
+                boolean inRing = scheme == Scheme.END ? offset <= phase : offset <= ring;
                 // A dictionary unit stays literal, and only a dictionary unit
                 // can be copied from D.
                 boolean matches = index != 0 && index >= offset
@@ -131,7 +138,7 @@ public final class St4LiteralMatchExperiment {
                         St4Block literal = lastLiteral[offset];
                         if (literal != null) {
                             int length = index - literal.index();
-                            boolean fits = scheme == Scheme.A2
+                            boolean fits = scheme != Scheme.END
                                     || (length <= phase + 1 && offset <= phase - length + 1);
                             if (fits) {
                                 int bits = literal.bits() + 1 + eliasGammaBits(length);
@@ -183,6 +190,18 @@ public final class St4LiteralMatchExperiment {
                             }
                             bits = previous.bits() + CONTROL_A2
                                     + (back > A2_BYTE_REACH ? 16 : 8)
+                                    + eliasGammaBits(length - 1);
+                            stored = -offset;
+                        } else if (scheme == Scheme.MAG) {
+                            // The same offset space as a ring match, past N:
+                            // N plus the literals between the source and here.
+                            int back = literalsBefore[start] - literalsBefore[start - offset];
+                            int written = ring + back;
+                            if (written > reach) {
+                                continue;
+                            }
+                            bits = previous.bits() + CONTROL_MATCH
+                                    + (written > St4Format.BYTE_OFFSET_LIMIT ? 16 : 8)
                                     + eliasGammaBits(length - 1);
                             stored = -offset;
                         } else {
@@ -350,9 +369,9 @@ public final class St4LiteralMatchExperiment {
         int reach = St4Format.maxOffsetUnits(unit);
         System.out.printf("k=%d: packed bytes, as the parse's bits, with the ratio to the input; "
                 + "refs is copies from D, ps the passes, dict the dictionary units%n", unit);
-        System.out.printf("%-12s %6s %5s %14s %14s   %14s %5s %3s %6s   %14s %5s %3s %6s %5s%n",
-                "corpus", "bytes", "ring", "full window", "ring alone", "copies from D", "refs",
-                "ps", "dict", "no class code", "refs", "ps", "dict", "pad");
+        System.out.printf("%-12s %6s %5s %14s %14s   %14s %5s %3s %6s   %14s %5s %3s %6s%n",
+                "corpus", "bytes", "ring", "full window", "ring alone", "class code", "refs",
+                "ps", "dict", "by magnitude", "refs", "ps", "dict");
         for (Path file : files) {
             byte[] input = Files.readAllBytes(file);
             int[] units = Units.split(input, unit);
@@ -360,14 +379,14 @@ public final class St4LiteralMatchExperiment {
             for (int ring : rings) {
                 St4Block ringParse = St4Optimizer.optimize(units, unit, ring, false);
                 Outcome a2 = run(units, unit, ring, reach, Scheme.A2, full);
-                Outcome end = run(units, unit, ring, reach, Scheme.END, full);
-                System.out.printf("%-12s %6d %5d %14s %14s   %14s %5d %3d %6d   %14s %5d %3d %6d %5d%n",
+                Outcome mag = run(units, unit, ring, reach, Scheme.MAG, full);
+                System.out.printf("%-12s %6d %5d %14s %14s   %14s %5d %3d %6d   %14s %5d %3d %6d%n",
                         file.getFileName().toString().replace(".bin", ""), input.length, ring,
                         packed(full.bits(), input.length), packed(ringParse.bits(), input.length),
                         packed(a2.bits(), input.length) + (a2.converged() ? "" : "?"),
                         a2.references(), a2.passes(), a2.dictionary(),
-                        packed(end.bits(), input.length) + (end.converged() ? "" : "?"),
-                        end.references(), end.passes(), end.dictionary(), end.padding() / 8);
+                        packed(mag.bits(), input.length) + (mag.converged() ? "" : "?"),
+                        mag.references(), mag.passes(), mag.dictionary());
             }
         }
     }
