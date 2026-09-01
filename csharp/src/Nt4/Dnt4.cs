@@ -25,7 +25,7 @@ public static class Dnt4
     public static int Run(string[] args)
     {
         ArgumentNullException.ThrowIfNull(args);
-        Console.WriteLine("DNT4: aligned split-stream unpacker v2.0 by Robbert van Dalen, "
+        Console.WriteLine("DNT4: aligned split-stream unpacker v3.0 by Robbert van Dalen, "
             + "based on ZX1 v1.5 by Einar Saukas");
 
         bool forcedMode = false;
@@ -86,18 +86,21 @@ public static class Dnt4
         }
 
         Format.Container container;
-        byte[] output;
+        Decompressor.Decoded decoded;
         try
         {
             container = Format.Read(file);
-            output = Decompressor.Decompress(container.Control, container.Literal,
+            // One whole pass: a repeating stream would fill any size, but what
+            // the container stores is the pass.
+            decoded = Decompressor.Decode(container.Control, container.Literal,
                 container.ByteOffsets, container.WordOffsets, container.Unit,
-                container.Size);
+                container.Size, Format.MaxOffsetUnits(container.Unit));
         }
         catch (InvalidDataException exception)
         {
             return Cli.Error($"{exception.Message}: {inputName}");
         }
+        byte[] output = decoded.Output;
 
         try
         {
@@ -109,7 +112,9 @@ public static class Dnt4
         }
 
         Console.WriteLine($"File decompressed from {file.Length} to {output.Length} bytes, "
-            + $"k={container.Unit}{(container.Unit == 1 ? "" : " (a whole number of units)")}!");
+            + $"k={container.Unit}{(container.Unit == 1 ? "" : " (a whole number of units)")}"
+            + $"{(decoded.RepeatIndex < 0 ? ""
+                : $", looping from unit {decoded.RepeatIndex}")}!");
         return 0;
     }
 }

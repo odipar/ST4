@@ -67,14 +67,42 @@ public sealed class Compressor
     /// <param name="maxOpLength">Positive maximum length requested for each operation, in units.</param>
     /// <returns>The four streams and their metadata.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="optimal"/> or <paramref name="units"/> is null.</exception>
-    public static Result Compress(Block optimal, int[] units, int unit, int maxOpLength)
+    public static Result Compress(Block optimal, int[] units, int unit, int maxOpLength) =>
+        Compress(optimal, units, unit, maxOpLength, -1);
+
+    /// <summary>
+    /// As above, but the stream ends by repeating instead of stopping: the
+    /// container encodes the infinite input <c>units[0..R) units[R..O)</c>
+    /// repeated forever, so after its last unit the output continues from
+    /// unit <paramref name="repeatIndex"/> and never stops. -1 means a plain
+    /// end. What stream D stores is the distance O-R back to the loop point,
+    /// an offset like any other, so the caller holds it to the window the
+    /// stream was packed for.
+    /// </summary>
+    /// <param name="optimal">Final block of a parse of <paramref name="units"/>.</param>
+    /// <param name="units">The input as k-byte units.</param>
+    /// <param name="unit">Bytes per unit: 1, 2 or 4.</param>
+    /// <param name="maxOpLength">Positive maximum length requested for each operation, in units.</param>
+    /// <param name="repeatIndex">The loop point as a unit index, or -1 for a plain end.</param>
+    /// <returns>The four streams and their metadata.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="optimal"/> or <paramref name="units"/> is null.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// <paramref name="repeatIndex"/> is not a unit of the stream itself.
+    /// </exception>
+    public static Result Compress(Block optimal, int[] units, int unit, int maxOpLength,
+        int repeatIndex)
     {
         ArgumentNullException.ThrowIfNull(optimal);
         ArgumentNullException.ThrowIfNull(units);
-        return new Compressor(units, unit).Run(optimal, maxOpLength);
+        if (repeatIndex < -1 || repeatIndex >= units.Length)
+        {
+            throw new ArgumentOutOfRangeException(nameof(repeatIndex), repeatIndex,
+                "the loop point must be a unit of the stream itself");
+        }
+        return new Compressor(units, unit).Run(optimal, maxOpLength, repeatIndex);
     }
 
-    private Result Run(Block optimal, int maxOpLength)
+    private Result Run(Block optimal, int maxOpLength, int repeatIndex)
     {
         // Un-reverse the chain; its head is the parser's fake block.
         var blocks = new Stack<Block>();
@@ -146,10 +174,23 @@ public sealed class Compressor
             }
         }
 
-        // End marker: the one control code that names no stream at all.
+        // End marker, then the repeat bit: end for good, or install one last
+        // word offset from stream D - the distance back to the loop point -
+        // and match it forever.
         WriteBit(true);
         WriteBit(false);
         WriteBit(true);
+        WriteBit(repeatIndex >= 0);
+        if (repeatIndex >= 0)
+        {
+            int scaled = (units.Length - repeatIndex) * unit;
+            if (wordOffsetIndex + 2 > wordOffsets.Length)
+            {
+                Array.Resize(ref wordOffsets, wordOffsets.Length * 2);
+            }
+            wordOffsets[wordOffsetIndex++] = unchecked((byte)(-scaled >> 8));
+            wordOffsets[wordOffsetIndex++] = unchecked((byte)-scaled);
+        }
 
         return new Result(control[..(controlIndex + (controlIndex & 1))],
             literal[..literalIndex], byteOffsets[..byteOffsetIndex],

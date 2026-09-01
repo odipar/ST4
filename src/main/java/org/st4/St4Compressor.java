@@ -65,10 +65,25 @@ public final class St4Compressor {
     }
 
     public static Result compress(St4Block optimal, int[] units, int unit, int maxOpLength) {
-        return new St4Compressor(units, unit).run(optimal, maxOpLength);
+        return compress(optimal, units, unit, maxOpLength, -1);
     }
 
-    private Result run(St4Block optimal, int maxOpLength) {
+    /**
+     * As above, but the stream ends by repeating instead of stopping: the
+     * container encodes the infinite input {@code units[0..R) units[R..O)}
+     * repeated forever, so after its last unit the output continues from unit
+     * {@code repeatIndex} and never stops. -1 means a plain end. What stream D
+     * stores is the distance O-R back to the loop point, an offset like any
+     * other, so the caller holds it to the window the stream was packed for.
+     */
+    public static Result compress(St4Block optimal, int[] units, int unit, int maxOpLength,
+                                  int repeatIndex) {
+        assert -1 <= repeatIndex && repeatIndex < units.length
+                : "the loop point must be a unit of the stream itself";
+        return new St4Compressor(units, unit).run(optimal, maxOpLength, repeatIndex);
+    }
+
+    private Result run(St4Block optimal, int maxOpLength, int repeatIndex) {
         // Un-reverse the chain; its head is the parser's fake block.
         var blocks = new ArrayDeque<St4Block>();
         for (St4Block block = optimal; block != null; block = block.chain()) {
@@ -126,10 +141,22 @@ public final class St4Compressor {
             }
         }
 
-        // End marker: the one control code that names no stream at all.
+        // End marker, then the repeat bit: end for good, or install one last
+        // word offset from stream D - the distance back to the loop point -
+        // and match it forever.
         writeBit(true);
         writeBit(false);
         writeBit(true);
+        writeBit(repeatIndex >= 0);
+        if (repeatIndex >= 0) {
+            int scaled = (units.length - repeatIndex) * unit;
+            assert scaled <= 32768 : "the loop distance must fit -(O-R)*k in a signed word";
+            if (wordOffsetIndex + 2 > wordOffsets.length) {
+                wordOffsets = Arrays.copyOf(wordOffsets, wordOffsets.length * 2);
+            }
+            wordOffsets[wordOffsetIndex++] = (byte) (-scaled >> 8);
+            wordOffsets[wordOffsetIndex++] = (byte) -scaled;
+        }
 
         return new Result(Arrays.copyOf(control, controlIndex + (controlIndex & 1)),
                 Arrays.copyOf(literal, literalIndex),

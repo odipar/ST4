@@ -19,7 +19,10 @@
 ;
 ; !!! LIKE ST1_wrap, THIS HAS NO DONE STATE !!!
 ; The caller must know the exact output size O in units, make exactly
-; T = ceil(O/C) decode calls, and never call again.
+; T = ceil(O/C) decode calls, and never call again. A stream packed with
+; st4 -r is the exception: its end marker installs one last offset and the
+; decoder matches it forever, so there is no T - call for as long as output
+; is wanted, and every call emits its full budget.
 ;
 ; The ring is N BYTES and must be a whole number of units; the caller resets a1
 ; to the ring start after every F = N/(C*UNIT) calls. Budgets and remaining
@@ -37,14 +40,16 @@
 ; exactly where the old entry branch went.
 ;
 ; The container is ST4.S's: twenty bytes of header - signature, O, and where
-; streams B, C and D begin - then A, B, C and D in order. See ST4.S for the
-; eight instructions that open one.
+; streams B, C and D begin - then A, C, D and B in order, the literal payload
+; last so it borders whatever the caller loads after the container. See ST4.S
+; for the eight instructions that open one.
 ;
 ; THE STATE IS YOUR REGISTERS:
 ;
 ;   a0.l  position in stream A          a1.l  write pointer
 ;   a2.l  position in stream B          a4.l  stream C, the byte offsets
-;   a5.l  stream D, the word offsets    d0.w  bit queue ($8000 empty)
+;   a5.l  stream D, the word offsets    d0.w  bit queue ($8000 empty,
+;                                            zero once a repeat is armed)
 ;   d1.l  -ring_start.low : units remaining
 ;   d2.l  N : signed byte offset (+lastOffset*UNIT literals, - during a match)
 ;
@@ -60,17 +65,18 @@
 ;   2. N mod (C * ST4_UNIT) = 0, so F = N/(C*UNIT) calls fill the ring exactly
 ;   3. no offset exceeds 32512 BYTES - the packer clamps -m to that
 ;   4. no operation is longer than 65535 units - compress with -l65535
-;   5. the caller knows O and makes exactly T = ceil(O/C) calls, as ST1_wrap
+;   5. the caller knows O and makes exactly T = ceil(O/C) calls, as ST1_wrap -
+;      unless the stream repeats: then any number of calls is fine
 ;   6. streams A and D start on even addresses, and A holds an even number of
 ;      bytes: the bit queue is refilled with a move.w, and so is a word offset
 ;
 ; Compress with st4 -k<UNIT> -m<ring/UNIT> -l65535.
 ; -----------------------------------------------------------------------------
 
-; The asset's signature for this build: 'S4', format version 4, and the unit
+; The asset's signature for this build: 'S4', format version 5, and the unit
 ; size this decoder was assembled for. One cmp.l against a file's first long
 ; proves all three at once.
-ST4_SIGNATURE   equ     $53340400+ST4_UNIT
+ST4_SIGNATURE   equ     $53340500+ST4_UNIT
 
 ; One unit copied, at the width this build was made for.
         .macro ST4_MOVE
@@ -209,6 +215,11 @@ literals_transition:
         neg.w   d2                      ; from-last reuses the negated offset
         bra.s   gamma_seed0             ; Java: beginMatchFromLastOffset()
 
+match_next:                             ; a 0 flag after a match means literals
+        bne.s   begin_literals          ; - unless the queue reads zero, which
+        subq.w  #1,d1                   ; only a pinned one does: the repeat
+        bra.s   resume_fresh            ; re-arms 65535 units, budget willing
+
 begin_literals:                         ; Java: beginLiterals()
         neg.w   d2                      ; positive lastOffset = State.LITERALS
 gamma_seed0:
@@ -244,7 +255,7 @@ gamma_refill:
 
 match_transition:                       ; remaining == 0: parse after a match
         add.w   d0,d0
-        bcc.s   begin_literals
+        bcc.s   match_next              ; 0: literals - or the repeat's re-arm
 
 new_offset:                             ; Java: beginMatchFromNewOffset/readOffset
 ; Two class bits: the first says byte or word, the second picks a byte offset's
@@ -258,7 +269,7 @@ new_offset:                             ; Java: beginMatchFromNewOffset/readOffs
 class_read:
         bcs.s   byte_offset
         add.w   d0,d0                   ; class bit 2: set means end of stream
-        bcs.s   parse_done              ; the nearer of the two identical rts
+        bcs.s   end_marker
         move.w  (a5)+,d2                ; -lastOffset*UNIT, stored ready to use
 have_offset:
         moveq   #1,d4                   ; new-offset match: remaining = gamma+1
@@ -289,3 +300,24 @@ scale_offset:
         move.w  d4,d2                   ; install -lastOffset*UNIT, keep d2.high
         moveq   #1,d4                   ; new-offset match: remaining = gamma+1
         bra.s   get_gamma               ; one branch, not two through have_offset
+
+end_marker:
+; One more bit: 0 ends the stream, 1 repeats it. It sits at an even position,
+; where the queue can run dry, so this is the one other checked read.
+        add.w   d0,d0
+        beq.s   end_refill
+end_read:
+        bcc.s   parse_done              ; a counted caller never calls again
+; The repeat: install one last word offset and match it forever. Pinning the
+; queue to zero - a value no real read leaves it at - makes every transition
+; that would parse the next block re-arm the match instead.
+        move.w  (a5)+,d2                ; -(O-R)*UNIT; N stays packed above
+        moveq   #0,d0
+        subq.w  #1,d1                   ; remaining = 65535, from zero
+        move.w  d3,d4                   ; the resume_fresh tail: the budget
+        bne.w   segment                 ; may already be spent
+        rts
+end_refill:
+        move.w  (a0)+,d0
+        addx.w  d0,d0
+        bra.s   end_read

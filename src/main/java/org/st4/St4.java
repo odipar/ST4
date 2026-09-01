@@ -17,12 +17,13 @@ public final class St4 {
     private St4() {}
 
     public static void main(String[] args) {
-        System.out.println("ST4: aligned split-stream packer v4.0 by Robbert van Dalen, "
+        System.out.println("ST4: aligned split-stream packer v5.0 by Robbert van Dalen, "
                 + "based on ZX1 v1.5 by Einar Saukas");
 
         int unit = 1;
         int offsetLimit = St4Format.MAX_OFFSET;
         int maxOpLength = St4Format.MAX_OP;
+        int repeatIndex = -1;
         boolean forcedMode = false;
         int i = 0;
         for (; i < args.length && args[i].startsWith("-"); i++) {
@@ -35,6 +36,8 @@ public final class St4 {
                         offsetLimit = parseNumber(args[i].substring(2));
                     } else if (args[i].startsWith("-l")) {
                         maxOpLength = parseNumber(args[i].substring(2));
+                    } else if (args[i].startsWith("-r")) {
+                        repeatIndex = parseIndex(args[i].substring(2));
                     } else {
                         throw error("Invalid parameter " + args[i]);
                     }
@@ -49,13 +52,15 @@ public final class St4 {
             outputName = args[i + 1];
         } else {
             usage("""
-                    Usage: st4 [-f] [-kK] [-mN] [-lN] input [output.st4]
+                    Usage: st4 [-f] [-kK] [-mN] [-lN] [-rR] input [output.st4]
                       -f      Force overwrite of output file
                       -kK     Unit size: 1, 2 or 4 bytes (default 1). Lengths and
                               offsets count units, so the output is padded to a
                               whole number of them
                       -mN     Limit back-references to N units
-                      -lN     Split matches so no operation exceeds N units""");
+                      -lN     Split matches so no operation exceeds N units
+                      -rR     Loop: after the last unit, the output continues
+                              from unit R, forever""");
             return;
         }
 
@@ -85,8 +90,19 @@ public final class St4 {
         }
 
         int[] units = Units.split(input, unit);
+        // The loop point must be a unit of the input, and its distance from
+        // the end is a match offset like any other: the window has to keep it.
+        if (repeatIndex >= units.length) {
+            throw error("-r" + repeatIndex + " is not a unit of the input, which is "
+                    + units.length + " units");
+        }
+        if (repeatIndex >= 0 && units.length - repeatIndex > offsetLimit) {
+            throw error("-r" + repeatIndex + " loops the last " + (units.length - repeatIndex)
+                    + " units, past the -m" + offsetLimit + " window");
+        }
         St4Compressor.Result result = St4Compressor.compress(
-                St4EventOptimizer.optimize(units, unit, offsetLimit), units, unit, maxOpLength);
+                St4EventOptimizer.optimize(units, unit, offsetLimit), units, unit, maxOpLength,
+                repeatIndex);
 
         try {
             Files.write(outputPath, container(result));
@@ -96,12 +112,13 @@ public final class St4 {
 
         int padded = Units.paddedLength(input.length, unit);
         System.out.printf("Packed %d bytes%s into %d (%.1f%%): A %d, B %d, C %d, D %d, "
-                + "%d operations%n",
+                + "%d operations%s%n",
                 input.length, padded == input.length ? "" : " padded to " + padded,
                 result.packedSize(), 100.0 * result.packedSize() / input.length,
                 result.control().length, result.literal().length,
                 result.byteOffsets().length, result.wordOffsets().length,
-                result.operations());
+                result.operations(),
+                repeatIndex < 0 ? "" : ", loops from unit " + repeatIndex);
         if (result.longestOp() > maxOpLength) {
             System.out.printf("Warning: longest operation is %d units, over the -l%d limit: "
                     + "a literal run, which the format cannot split%n",
@@ -110,17 +127,19 @@ public final class St4 {
     }
 
     /**
-     * Twenty bytes of header, then A, B, C and D in order, each starting on a
-     * long boundary. Nothing says how long a stream is: it runs to the next.
+     * Twenty bytes of header, then A, C, D and B in order, each starting on a
+     * long boundary. Nothing says how long a stream is: it runs to the next -
+     * and B, the literal payload, runs to the end of the file, so it borders
+     * whatever the caller loads after the container.
      */
     // Public because a container is also how other formats embed an ST4
     // stream, many of them at once.
     public static byte[] container(St4Compressor.Result result) {
         int controlAt = St4Format.HEADER_SIZE;                  // already a multiple of 4
-        int literalAt = align(controlAt + result.control().length);
-        int byteAt = align(literalAt + result.literal().length);
+        int byteAt = align(controlAt + result.control().length);
         int wordAt = align(byteAt + result.byteOffsets().length);
-        byte[] file = new byte[wordAt + result.wordOffsets().length];
+        int literalAt = align(wordAt + result.wordOffsets().length);
+        byte[] file = new byte[literalAt + result.literal().length];
 
         putLong(file, St4Format.OFFSET_SIGNATURE, St4Format.signature(result.unit()));
         putLong(file, St4Format.OFFSET_SIZE, result.paddedSize());
@@ -165,6 +184,19 @@ public final class St4 {
         try {
             int value = Integer.parseInt(argument);
             if (value <= 0) {
+                throw error("Invalid parameter value " + argument);
+            }
+            return value;
+        } catch (NumberFormatException e) {
+            throw error("Invalid parameter value " + argument);
+        }
+    }
+
+    /** As {@link #parseNumber}, but an index may be zero: -r0 loops it all. */
+    private static int parseIndex(String argument) {
+        try {
+            int value = Integer.parseInt(argument);
+            if (value < 0) {
                 throw error("Invalid parameter value " + argument);
             }
             return value;

@@ -27,12 +27,13 @@ public static class Nt4
     public static int Run(string[] args)
     {
         ArgumentNullException.ThrowIfNull(args);
-        Console.WriteLine("NT4: aligned split-stream packer v2.0 by Robbert van Dalen, "
+        Console.WriteLine("NT4: aligned split-stream packer v3.0 by Robbert van Dalen, "
             + "based on ZX1 v1.5 by Einar Saukas");
 
         int unit = 1;
         int offsetLimit = Format.MaxOffset;
         int maxOpLength = Format.MaxOp;
+        int repeatIndex = -1;
         bool forcedMode = false;
         int index = 0;
         for (; index < args.Length
@@ -44,6 +45,16 @@ public static class Nt4
                     forcedMode = true;
                     break;
                 default:
+                    if (args[index].StartsWith("-r", StringComparison.Ordinal))
+                    {
+                        // An index, not a count: -r0 is valid and loops it all.
+                        repeatIndex = Cli.ParseIndex(args[index][2..]);
+                        if (repeatIndex < 0)
+                        {
+                            return Cli.Error($"Invalid parameter value {args[index][2..]}");
+                        }
+                        break;
+                    }
                     int value = Cli.ParseNumber(args[index][2..]);
                     if (args[index].StartsWith("-k", StringComparison.Ordinal))
                     {
@@ -81,13 +92,15 @@ public static class Nt4
         else
         {
             return Cli.Usage(
-                "Usage: nt4 [-f] [-kK] [-mN] [-lN] input [output.st4]\n"
+                "Usage: nt4 [-f] [-kK] [-mN] [-lN] [-rR] input [output.st4]\n"
                 + "  -f      Force overwrite of output file\n"
                 + "  -kK     Unit size: 1, 2 or 4 bytes (default 1). Lengths and\n"
                 + "          offsets count units, so the output is padded to a\n"
                 + "          whole number of them\n"
                 + "  -mN     Limit back-references to N units\n"
-                + "  -lN     Split matches so no operation exceeds N units");
+                + "  -lN     Split matches so no operation exceeds N units\n"
+                + "  -rR     Loop: after the last unit, the output continues\n"
+                + "          from unit R, forever");
         }
         string inputName = args[index];
 
@@ -122,8 +135,21 @@ public static class Nt4
         }
 
         int[] units = Units.Split(input, unit);
+        // The loop point must be a unit of the input, and its distance from
+        // the end is a match offset like any other: the window has to keep it.
+        if (repeatIndex >= units.Length)
+        {
+            return Cli.Error($"-r{repeatIndex} is not a unit of the input, which is "
+                + $"{units.Length} units");
+        }
+        if (repeatIndex >= 0 && units.Length - repeatIndex > offsetLimit)
+        {
+            return Cli.Error($"-r{repeatIndex} loops the last {units.Length - repeatIndex} "
+                + $"units, past the -m{offsetLimit} window");
+        }
         Compressor.Result result = Compressor.Compress(
-            EventOptimizer.Optimize(units, unit, offsetLimit), units, unit, maxOpLength);
+            EventOptimizer.Optimize(units, unit, offsetLimit), units, unit, maxOpLength,
+            repeatIndex);
 
         try
         {
@@ -140,7 +166,8 @@ public static class Nt4
             + $"into {result.PackedSize} ({100.0 * result.PackedSize / input.Length:F1}%): "
             + $"A {result.Control.Length}, B {result.Literal.Length}, "
             + $"C {result.ByteOffsets.Length}, D {result.WordOffsets.Length}, "
-            + $"{result.Operations} operations"));
+            + $"{result.Operations} operations"
+            + $"{(repeatIndex < 0 ? "" : $", loops from unit {repeatIndex}")}"));
         if (result.LongestOp > maxOpLength)
         {
             Console.WriteLine(
@@ -151,8 +178,10 @@ public static class Nt4
     }
 
     /// <summary>
-    /// Twenty bytes of header, then A, B, C and D in order, each starting on a
-    /// long boundary. Nothing says how long a stream is: it runs to the next.
+    /// Twenty bytes of header, then A, C, D and B in order, each starting on a
+    /// long boundary. Nothing says how long a stream is: it runs to the next -
+    /// and B, the literal payload, runs to the end of the file, so it borders
+    /// whatever the caller loads after the container.
     /// </summary>
     /// <remarks>
     /// Public because a container is also how other formats embed an ST4
@@ -165,10 +194,10 @@ public static class Nt4
     {
         ArgumentNullException.ThrowIfNull(result);
         int controlAt = Format.HeaderSize;                  // already a multiple of 4
-        int literalAt = Align(controlAt + result.Control.Length);
-        int byteAt = Align(literalAt + result.Literal.Length);
+        int byteAt = Align(controlAt + result.Control.Length);
         int wordAt = Align(byteAt + result.ByteOffsets.Length);
-        byte[] file = new byte[wordAt + result.WordOffsets.Length];
+        int literalAt = Align(wordAt + result.WordOffsets.Length);
+        byte[] file = new byte[literalAt + result.Literal.Length];
 
         PutLong(file, Format.OffsetSignature, Format.Signature(result.Unit));
         PutLong(file, Format.OffsetSize, result.PaddedSize);

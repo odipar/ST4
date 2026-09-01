@@ -30,6 +30,14 @@ internal static class Cli
         int.TryParse(value, NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture,
             out int number) ? number : 0;
 
+    /// <summary>
+    /// Parses an unsigned decimal index, where zero is a value - -r0 loops the
+    /// whole stream. Invalid values become -1 so callers reject them.
+    /// </summary>
+    internal static int ParseIndex(string value) =>
+        int.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture,
+            out int number) ? number : -1;
+
     /// <summary>Identifies filesystem exceptions that the CLIs report without a stack trace.</summary>
     internal static bool IsFileException(Exception exception) =>
         exception is IOException or UnauthorizedAccessException or ArgumentException

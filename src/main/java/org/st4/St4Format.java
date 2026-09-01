@@ -43,8 +43,19 @@ package org.st4;
  *   1 0   byte offset from stream C, 1..256 units
  *   1 1   byte offset from stream C, 257..512 units
  *   0 0   word offset from stream D
- *   0 1   end of stream
+ *   0 1   end of stream: one more bit says whether it truly ends
  * </pre>
+ *
+ * <p>The end code is followed by a single bit. A 0 ends the stream as it
+ * always did. A 1 means the stream <em>repeats</em> from a loop point R: the
+ * container encodes the infinite input {@code units[0..R) units[R..O)}
+ * repeated forever, so after the last unit the output continues from unit R
+ * and never stops. What stream D stores as its one last word is the distance
+ * O-R back to the loop point - an offset like any other - and the decoder
+ * becomes an endless match at it. A decoder driven by budgets simply never
+ * runs dry; the reference decoder fills whatever output it was asked for. The
+ * loop distance obeys the same limits as any other offset, which is what
+ * keeps a looping stream safe for the ring it was packed for.
  *
  * <p>On top of that, lengths and offsets are counted in <em>units</em> of
  * {@code k} bytes, where k is 1, 2 or 4. At k = 1 that is ZX1's parse with the
@@ -67,7 +78,7 @@ package org.st4;
  *   8   4  stream B, as a byte offset from the start of the header
  *  12   4  stream C
  *  16   4  stream D
- *  20  ..  stream A, then B, then C, then D
+ *  20  ..  stream A, then C, then D, then B
  * </pre>
  *
  * <p>Everything else follows from those. Stream A begins where the header ends,
@@ -75,6 +86,13 @@ package org.st4;
  * so each one runs to the next, and the last runs to the end of the file. None
  * of the four decoders reads a length anyway - it stops on the end marker and
  * the other streams run out with it.
+ *
+ * <p>Stream B comes last - version 5 moved it there from second - so the
+ * literal payload runs to the end of the file. A ring buffer placed directly
+ * after the container therefore sits flush against the literal data, and since
+ * stream B holds whole units it also ends on a unit boundary: the not yet
+ * consumed literals occupy a known stretch of memory just below the ring,
+ * which a packer that knows the caller's layout can let matches reach into.
  *
  * <p>The shape is chosen for the 68000 that has to load it. The signature packs
  * the magic, the version AND the unit size into one long, so a decoder built
@@ -106,8 +124,13 @@ public final class St4Format {
     /** {@code 'S4'}, the top half of every signature. */
     public static final int MAGIC = 0x53340000;
 
-    /** Version 4 cut the header to what cannot be derived. */
-    public static final int VERSION = 4;
+    /**
+     * Version 5 moved stream B behind the offsets, so the literal payload
+     * borders whatever the caller places after the container, and gave the end
+     * marker its repeat bit. Version 4 cut the header to what cannot be
+     * derived.
+     */
+    public static final int VERSION = 5;
 
     public static final int OFFSET_SIGNATURE = 0;
     public static final int OFFSET_SIZE = 4;
@@ -190,24 +213,26 @@ public final class St4Format {
                     "output size " + size + " is not a whole number of " + unit + "-byte units");
         }
 
-        int[] edge = {HEADER_SIZE, longAt(file, OFFSET_LITERAL),
-                      longAt(file, OFFSET_BYTE_OFFSETS), longAt(file, OFFSET_WORD_OFFSETS),
+        // The file lays the streams out as A, C, D, B: the literal payload
+        // last, so it runs to the end of the file.
+        int[] edge = {HEADER_SIZE, longAt(file, OFFSET_BYTE_OFFSETS),
+                      longAt(file, OFFSET_WORD_OFFSETS), longAt(file, OFFSET_LITERAL),
                       file.length};
         for (int i = 1; i < edge.length - 1; i++) {
             if (edge[i] % 4 != 0) {
                 throw new IllegalArgumentException(
-                        "stream " + "ABCD".charAt(i) + " does not start on a long boundary");
+                        "stream " + "ACDB".charAt(i) + " does not start on a long boundary");
             }
             if (edge[i] < edge[i - 1] || edge[i] > file.length) {
                 throw new IllegalArgumentException(
-                        "stream " + "ABCD".charAt(i) + " lies outside the file");
+                        "stream " + "ACDB".charAt(i) + " lies outside the file");
             }
         }
         return new Container(unit, size,
                 java.util.Arrays.copyOfRange(file, edge[0], edge[1]),
+                java.util.Arrays.copyOfRange(file, edge[3], edge[4]),
                 java.util.Arrays.copyOfRange(file, edge[1], edge[2]),
-                java.util.Arrays.copyOfRange(file, edge[2], edge[3]),
-                java.util.Arrays.copyOfRange(file, edge[3], edge[4]));
+                java.util.Arrays.copyOfRange(file, edge[2], edge[3]));
     }
 
     private static int longAt(byte[] file, int at) {

@@ -18,7 +18,7 @@ public final class Dst4 {
     private Dst4() {}
 
     public static void main(String[] args) {
-        System.out.println("DST4: aligned split-stream unpacker v4.0 by Robbert van Dalen, "
+        System.out.println("DST4: aligned split-stream unpacker v5.0 by Robbert van Dalen, "
                 + "based on ZX1 v1.5 by Einar Saukas");
 
         boolean forcedMode = false;
@@ -70,17 +70,20 @@ public final class Dst4 {
             throw error(e.getMessage() + ": " + inputName);
         }
 
-        byte[] output;
+        St4Decompressor.Decoded decoded;
         try {
-            output = St4Decompressor.decompress(container.control(), container.literal(),
+            // One whole pass: a repeating stream would fill any size, but what
+            // the container stores is the pass.
+            decoded = St4Decompressor.decode(container.control(), container.literal(),
                     container.byteOffsets(), container.wordOffsets(), container.unit(),
-                    container.size());
+                    container.size(), St4Format.maxOffsetUnits(container.unit()));
         } catch (AssertionError | IndexOutOfBoundsException e) {
             // With -ea a malformed stream trips a descriptive assertion; the
             // decoder trusts its input, so report rather than pretend.
             throw error("Corrupted or truncated ST4 data in " + inputName
                     + (e.getMessage() == null ? "" : ": " + e.getMessage()));
         }
+        byte[] output = decoded.output();
 
         try {
             Files.write(outputPath, output);
@@ -88,9 +91,11 @@ public final class Dst4 {
             throw error("Cannot write output file " + outputName);
         }
 
-        System.out.printf("File decompressed from %d to %d bytes, k=%d%s!%n",
+        System.out.printf("File decompressed from %d to %d bytes, k=%d%s%s!%n",
                 file.length, output.length, container.unit(),
-                container.unit() == 1 ? "" : " (a whole number of units)");
+                container.unit() == 1 ? "" : " (a whole number of units)",
+                decoded.repeatIndex() < 0 ? ""
+                        : ", looping from unit " + decoded.repeatIndex());
     }
 
     private static RuntimeException error(String message) {

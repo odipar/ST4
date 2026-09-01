@@ -49,6 +49,17 @@ match, last offset   gamma(length)    copy length units from the current offset
 match, new offset    2 class bits + one value from C or D, then gamma(length-1)
 ```
 
+A stream may end by repeating instead of stopping. `st4 -rR` names a loop
+point: the container then encodes the infinite input `[0,R)` `[R,O)*` — after
+the last unit, the output continues from unit R and never stops — which is
+how a small ring holds an 'infinite' stream: a looping sample, a register
+dump, a pattern. One repeat bit follows the end code, and when it is set one
+last word offset is read from stream D — the distance O−R back to the loop
+point — and the stream becomes an endless match at it. The distance obeys the
+same limits as any other offset, and that is also the mechanism's reach: the
+looped span `[R,O)` must fit the window the stream was packed for, since the
+endless match reads it back out of the ring.
+
 One flag bit says which block comes next. After literals, `0` starts a match
 at the last offset and `1` a match at a new offset — two literal runs in a row
 cannot happen. After a match, `0` starts literals and `1` a match at a new
@@ -60,7 +71,7 @@ The two class bits of a new offset pick its stream and reach, or end the file:
 1 0   byte offset from stream C, 1..256 units back
 1 1   byte offset from stream C, 257..512 units back
 0 0   word offset from stream D
-0 1   end of stream
+0 1   end of stream, then the repeat bit: 0 ends it, 1 loops it forever
 ```
 
 A byte offset of n units in bank b is stored as the byte 256·(b+1) − n. A word
@@ -79,12 +90,12 @@ an even length so the last refill finds a whole word.
 A container is twenty bytes of header, then the streams in order:
 
 ```
- 0  4  signature: 'S', '4', format version (4), k
+ 0  4  signature: 'S', '4', format version (5), k
  4  4  output size in bytes, a multiple of k
  8  4  where stream B starts, in bytes from the start of the header
 12  4  where stream C starts
 16  4  where stream D starts
-20 ..  stream A, then B, then C, then D, each starting on a long boundary
+20 ..  stream A, then C, then D, then B, each starting on a long boundary
 ```
 
 Nothing else is stored because nothing else is needed: stream A begins where
@@ -94,6 +105,13 @@ built for one k accepts or rejects an asset with a single `cmp.l`, and the
 stream starts are header-relative, so opening a container is one `adda.l` per
 stream. The eight instructions that do it are in [ST4.S](68k/ST4.S).
 
+Stream B sits last — version 5 moved it there from second — so the literal
+payload runs to the end of the file and ends on a unit boundary. A ring buffer
+placed directly after the container therefore borders the literal data: at any
+moment during a decode, the literals not yet consumed occupy a known stretch
+of memory just below the ring, which a packer that knows the caller's layout
+can let matches reach into.
+
 ## 68000 decoders
 
 Three decoders, each built for one unit size with `ST4_UNIT` — nine builds, no
@@ -101,9 +119,9 @@ runtime choice of width:
 
 | | k=1 | k=2 | k=4 | calls |
 |---|---:|---:|---:|---|
-| [ST4.S](68k/ST4.S) | 276 B | 278 B | 280 B | `ST4_init`, `ST4_decompress`, `ST4_resume` |
-| [ST4_wrap.S](68k/ST4_wrap.S) | 292 B | 296 B | 298 B | `ST4_init`, `ST4_resume` — counted wrap, no DONE state |
-| [ST4_ring.S](68k/ST4_ring.S) | 352 B | 360 B | 362 B | `ST4_init`, `ST4_resume` — general ring |
+| [ST4.S](68k/ST4.S) | 306 B | 308 B | 310 B | `ST4_init`, `ST4_decompress`, `ST4_resume` |
+| [ST4_wrap.S](68k/ST4_wrap.S) | 324 B | 328 B | 330 B | `ST4_init`, `ST4_resume` — counted wrap, no DONE state |
+| [ST4_ring.S](68k/ST4_ring.S) | 386 B | 394 B | 396 B | `ST4_init`, `ST4_resume` — general ring |
 
 Use [ST4.S](68k/ST4.S) when the whole output stays in one buffer; it can
 decode everything in one call or stop and resume. The other two stream through
@@ -111,6 +129,14 @@ a small ring. Use [ST4_wrap.S](68k/ST4_wrap.S) when the sizes and call pattern
 are known and your caller counts the wraps; use
 [ST4_ring.S](68k/ST4_ring.S) for variable call sizes — it stops each call at
 the ring end.
+
+All three decode repeating streams: the end marker installs the repeat offset
+and the decoder re-arms the same match 65535 units at a time, forever. The
+bit queue is pinned to zero — a value no real read leaves it in — so the only
+cost to a stream that does end is one extra branch on a match-to-literals
+transition. A repeating stream never reaches DONE: drive it through
+`ST4_resume` with budgets and stop when you have enough. `ST4_decompress`,
+which drains until DONE, would never return.
 
 Each decoder runs two copy ladders: match runs of at most sixteen units — on
 measured streams, four of every five — take a counter-free ladder that falls
@@ -138,16 +164,18 @@ has already left the ring.
 
 ```sh
 mvn package
-java -ea -cp target/classes org.st4.St4  [-f] [-kK] [-mN] [-lN] input [output.st4]
+java -ea -cp target/classes org.st4.St4  [-f] [-kK] [-mN] [-lN] [-rR] input [output.st4]
 java -ea -cp target/classes org.st4.Dst4 [-f] input.st4 [output]
 ```
 
 `st4` packs, reporting progress and a time estimate as it works; `dst4`
 unpacks, and is the readable reference the 68000 decoders are checked against.
 Its output is padded to a whole number of units, which is what the format
-stores. `-kK` picks the unit size, `-mN` limits how far back matches may
-reach, and `-lN` splits long matches — the default already fits the 68000
-decoders.
+stores — for a repeating stream, one whole pass. `-kK` picks the unit size,
+`-mN` limits how far back matches may reach, `-lN` splits long matches — the
+default already fits the 68000 decoders — and `-rR` makes the stream loop:
+after the last unit, the output continues from unit R, forever. `-r0` loops
+the whole stream.
 
 Three optimizers select the blocks, all held to each other by tests:
 
@@ -183,7 +211,7 @@ on real data at every unit size — and the tests are the Java suite, corpus for
 corpus.
 
 ```sh
-dotnet run --project csharp/src/Nt4.Cli -- [-f] [-kK] [-mN] [-lN] input [output.st4]
+dotnet run --project csharp/src/Nt4.Cli -- [-f] [-kK] [-mN] [-lN] [-rR] input [output.st4]
 ```
 
 ## Tests
@@ -194,6 +222,7 @@ dotnet test csharp/Nt4.slnx -c Release    # the C# port, same corpora
 python3 68k/test/emu/test_st4.py          # linear decoder vs the Java packer, k = 1, 2, 4
 python3 68k/test/emu/test_st4_wrap.py     # counted wrap, every unit size
 python3 68k/test/emu/test_st4_ring.py     # general ring, both wrap modes, oversized budgets
+python3 68k/test/emu/test_st4_repeat.py   # -r streams through all three decoders, past two passes
 python3 68k/test/emu/bench_bits.py        # why the lengths are still Elias gamma
 ```
 

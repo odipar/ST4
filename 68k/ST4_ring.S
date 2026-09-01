@@ -18,7 +18,9 @@
 ;
 ; Unlike ST4_wrap this decoder minds the destination itself: it stops each call
 ; at the ring end and wraps the write pointer on the next entry, so the caller
-; may ask for any budget and needs no call counting. d1.w = 0 means done.
+; may ask for any budget and needs no call counting. d1.w = 0 means done - and
+; a stream packed with st4 -r never is: its end marker installs one last
+; offset and the decoder matches it forever, re-arming 65535 units at a time.
 ;
 ; The copy engine runs two ladders: match segments of at most sixteen units
 ; take a counter-free ladder that falls straight into the match epilogue, and
@@ -26,14 +28,16 @@
 ; for the measurements behind the split.
 ;
 ; The container is ST4.S's: twenty bytes of header - signature, O, and where
-; streams B, C and D begin - then A, B, C and D in order. See ST4.S for the
-; eight instructions that open one.
+; streams B, C and D begin - then A, C, D and B in order, the literal payload
+; last so it borders whatever the caller loads after the container. See ST4.S
+; for the eight instructions that open one.
 ;
 ; THE STATE IS YOUR REGISTERS:
 ;
 ;   a0.l  position in stream A          a1.l  write pointer
 ;   a2.l  position in stream B          a4.l  stream C, the byte offsets
-;   a5.l  stream D, the word offsets    d0.w  bit queue ($8000 empty)
+;   a5.l  stream D, the word offsets    d0.w  bit queue ($8000 empty,
+;                                            zero once a repeat is armed)
 ;   d1.l  -ring_start.low : units remaining
 ;   d2.l  ring_end.low : signed byte offset (+lastOffset*UNIT during literals,
 ;         -lastOffset*UNIT during a match, zero once DONE)
@@ -59,10 +63,10 @@
 ; Compress with st4 -k<UNIT> -m<ring/UNIT> -l65535.
 ; -----------------------------------------------------------------------------
 
-; The asset's signature for this build: 'S4', format version 4, and the unit
+; The asset's signature for this build: 'S4', format version 5, and the unit
 ; size this decoder was assembled for. One cmp.l against a file's first long
 ; proves all three at once.
-ST4_SIGNATURE   equ     $53340400+ST4_UNIT
+ST4_SIGNATURE   equ     $53340500+ST4_UNIT
 
 ; One unit copied, at the width this build was made for.
         .macro ST4_MOVE
@@ -247,7 +251,7 @@ literals_transition:
 
 match_transition:                       ; remaining == 0: parse after a match
         add.w   d0,d0                   ; Java: next(), case MATCH (bare read)
-        bcc.s   begin_literals          ; 0: literals; 1: falls into new offset
+        bcc.s   match_next              ; 0: literals - or the repeat's re-arm
 
 new_offset:                             ; Java: beginMatchFromNewOffset() / readOffset()
 ; Two class bits: the first says byte or word, the second picks a byte offset's
@@ -293,9 +297,35 @@ scale_offset:
         moveq   #1,d4                   ; new-offset match: remaining = gamma+1
         bra.s   get_gamma               ; one branch, not two through have_offset
 
-end_marker:                             ; Java: State.DONE
+end_marker:
+; One more bit: 0 ends the stream, 1 repeats it. It sits at an even position,
+; where the queue can run dry, so this is the one other checked read.
+        add.w   d0,d0
+        beq.s   end_refill
+end_read:
+        bcs.s   arm_repeat
         clr.w   d2                      ; d1.w is already zero; keep metadata highs
+        rts                             ; Java: State.DONE
+end_refill:
+        move.w  (a0)+,d0
+        addx.w  d0,d0
+        bra.s   end_read
+
+arm_repeat:
+; The repeat: install one last word offset and match it forever. Pinning the
+; queue to zero - a value no real read leaves it at - makes every transition
+; that would parse the next block re-arm the match instead.
+        move.w  (a5)+,d2                ; -(O-R)*UNIT; end.low stays above
+        moveq   #0,d0
+        subq.w  #1,d1                   ; remaining = 65535, from zero
+        move.w  d3,d4                   ; the resume_fresh tail: the budget
+        bne.w   segment                 ; may already be spent
         rts
+
+match_next:                             ; a 0 flag after a match means literals
+        bne.s   begin_literals          ; - unless the queue reads zero, which
+        subq.w  #1,d1                   ; only a pinned one does: the repeat
+        bra.w   resume_fresh            ; re-arms 65535 units, budget willing
 
 begin_literals:                         ; Java: beginLiterals()
         neg.w   d2                      ; positive lastOffset = State.LITERALS
