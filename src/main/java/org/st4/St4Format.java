@@ -19,12 +19,13 @@ package org.st4;
  *       interlaced Elias gamma lengths. Because no byte-sized read ever comes
  *       out of it, the reservoir refills a word at a time, halving the
  *       refills.</li>
- *   <li><b>stream B</b> - the literal payload, nothing else. Its alignment is
- *       therefore a property of the format rather than luck.</li>
- *   <li><b>stream C</b> - the byte offsets, one byte each.</li>
- *   <li><b>stream D</b> - the word offsets, one word each, so it is
+ *   <li><b>stream B</b> - the byte offsets, one byte each.</li>
+ *   <li><b>stream C</b> - the word offsets, one word each, so it is
  *       word-aligned by construction and a match source is one
  *       {@code move.w} away.</li>
+ *   <li><b>stream D</b> - the literal payload, nothing else. Its alignment is
+ *       therefore a property of the format rather than luck, and it comes
+ *       last, so it runs to the end of the file.</li>
  * </ul>
  *
  * <p>Which of the two an offset came from used to be encoded in the low bit of
@@ -40,9 +41,9 @@ package org.st4;
  * which is what keeps the split from costing ratio.
  *
  * <pre>
- *   1 0   byte offset from stream C, 1..256 units
- *   1 1   byte offset from stream C, 257..512 units
- *   0 0   word offset from stream D
+ *   1 0   byte offset from stream B, 1..256 units
+ *   1 1   byte offset from stream B, 257..512 units
+ *   0 0   word offset from stream C
  *   0 1   end of stream: one more bit says whether it truly ends
  * </pre>
  *
@@ -50,7 +51,7 @@ package org.st4;
  * always did. A 1 means the stream <em>repeats</em> from a loop point R: the
  * container encodes the infinite input {@code units[0..R) units[R..O)}
  * repeated forever, so after the last unit the output continues from unit R
- * and never stops. What stream D stores as its one last word is the distance
+ * and never stops. What stream C stores as its one last word is the distance
  * O-R back to the loop point - an offset like any other - and the decoder
  * becomes an endless match at it. A decoder driven by budgets simply never
  * runs dry; the reference decoder fills whatever output it was asked for. The
@@ -76,11 +77,11 @@ package org.st4;
  * <pre>
  *   0   4  signature: 'S', '4', format version, k
  *   4   4  O, the output size in bytes; always a multiple of k
- *   8   4  stream B, as a byte offset from the start of the header
- *  12   4  stream C
- *  16   4  stream D
+ *   8   4  stream B, the byte offsets, as a byte offset from the header
+ *  12   4  stream C, the word offsets
+ *  16   4  stream D, the literals
  *  20   4  the rewind point in bytes, or $FFFFFFFF when there is none
- *  24  ..  stream A, then C, then D, then B
+ *  24  ..  streams A, B, C and D, in that order
  * </pre>
  *
  * <p>The rewind point is how a stream loops when its loop is longer than the
@@ -100,10 +101,10 @@ package org.st4;
  * of the four decoders reads a length anyway - it stops on the end marker and
  * the other streams run out with it.
  *
- * <p>Stream B comes last - version 5 moved it there from second - so the
- * literal payload runs to the end of the file. A ring buffer placed directly
- * after the container therefore sits flush against the literal data, and since
- * stream B holds whole units it also ends on a unit boundary: the not yet
+ * <p>Stream D, the literal payload, comes last - version 4 had it second - so
+ * it runs to the end of the file. A ring buffer placed directly after the
+ * container therefore sits flush against the literal data, and since the
+ * stream holds whole units it also ends on a unit boundary: the not yet
  * consumed literals occupy a known stretch of memory just below the ring,
  * which a packer that knows the caller's layout can let matches reach into.
  *
@@ -121,11 +122,11 @@ package org.st4;
  *         bne.s   wrong_asset
  *         lea     24(a3),a0               ; stream A, where the header ends
  *         movea.l a3,a2
- *         adda.l  8(a3),a2                ; stream B
+ *         adda.l  16(a3),a2               ; stream D, the literals
  *         movea.l a3,a4
- *         adda.l  12(a3),a4               ; stream C
+ *         adda.l  8(a3),a4                ; stream B, the byte offsets
  *         movea.l a3,a5
- *         adda.l  16(a3),a5               ; stream D
+ *         adda.l  12(a3),a5               ; stream C, the word offsets
  * </pre>
  *
  * <p>A derived length can be up to three bytes longer than what the packer
@@ -138,18 +139,19 @@ public final class St4Format {
     public static final int MAGIC = 0x53340000;
 
     /**
-     * Version 5 moved stream B behind the offsets, so the literal payload
-     * borders whatever the caller places after the container, and gave the end
-     * marker its repeat bit and the header its rewind point. Version 4 cut the
-     * header to what cannot be derived.
+     * Version 5 laid the streams out in file order with the literal payload
+     * last - A, B, C, D as they lie, so the literals border whatever the caller
+     * places after the container - and gave the end marker its repeat bit and
+     * the header its rewind point. Version 4 cut the header to what cannot be
+     * derived.
      */
     public static final int VERSION = 5;
 
     public static final int OFFSET_SIGNATURE = 0;
     public static final int OFFSET_SIZE = 4;
-    public static final int OFFSET_LITERAL = 8;
-    public static final int OFFSET_BYTE_OFFSETS = 12;
-    public static final int OFFSET_WORD_OFFSETS = 16;
+    public static final int OFFSET_BYTE_OFFSETS = 8;
+    public static final int OFFSET_WORD_OFFSETS = 12;
+    public static final int OFFSET_LITERAL = 16;
     public static final int OFFSET_REWIND = 20;
     public static final int HEADER_SIZE = 24;
 
@@ -239,7 +241,7 @@ public final class St4Format {
                     "rewind point " + rewind + " is not a unit of the output");
         }
 
-        // The file lays the streams out as A, C, D, B: the literal payload
+        // The streams lie in the file as A, B, C, D: the literal payload
         // last, so it runs to the end of the file.
         int[] edge = {HEADER_SIZE, longAt(file, OFFSET_BYTE_OFFSETS),
                       longAt(file, OFFSET_WORD_OFFSETS), longAt(file, OFFSET_LITERAL),
@@ -247,11 +249,11 @@ public final class St4Format {
         for (int i = 1; i < edge.length - 1; i++) {
             if (edge[i] % 4 != 0) {
                 throw new IllegalArgumentException(
-                        "stream " + "ACDB".charAt(i) + " does not start on a long boundary");
+                        "stream " + "ABCD".charAt(i) + " does not start on a long boundary");
             }
             if (edge[i] < edge[i - 1] || edge[i] > file.length) {
                 throw new IllegalArgumentException(
-                        "stream " + "ACDB".charAt(i) + " lies outside the file");
+                        "stream " + "ABCD".charAt(i) + " lies outside the file");
             }
         }
         return new Container(unit, size,

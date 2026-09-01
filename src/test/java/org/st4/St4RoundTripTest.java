@@ -100,11 +100,11 @@ final class St4RoundTripTest {
             for (byte[] input : inputs()) {
                 St4Compressor.Result packed = pack(input, unit);
                 assertEquals(0, packed.literal().length % unit,
-                        "stream B holds whole units only");
+                        "stream D holds whole units only");
                 assertEquals(0, packed.control().length % 2,
                         "stream A is refilled a word at a time, so it ends on one");
                 assertEquals(0, packed.wordOffsets().length % 2,
-                        "stream D holds whole words only");
+                        "stream C holds whole words only");
                 assertEquals(0, packed.paddedSize() % unit);
             }
         }
@@ -335,14 +335,14 @@ final class St4RoundTripTest {
             int literalAt = longAt(file, St4Format.OFFSET_LITERAL);
             int byteAt = longAt(file, St4Format.OFFSET_BYTE_OFFSETS);
             int wordAt = longAt(file, St4Format.OFFSET_WORD_OFFSETS);
-            assertEquals(0, literalAt % 4, "stream B starts long-aligned");
-            assertEquals(0, byteAt % 4, "stream C starts long-aligned");
-            assertEquals(0, wordAt % 4, "stream D starts long-aligned");
-            // The layout is A, C, D, B: the literal payload runs to the end of
+            assertEquals(0, literalAt % 4, "stream D starts long-aligned");
+            assertEquals(0, byteAt % 4, "stream B starts long-aligned");
+            assertEquals(0, wordAt % 4, "stream C starts long-aligned");
+            // The layout is A, B, C, D: the literal payload runs to the end of
             // the file, so it borders whatever the caller loads after it.
-            assertTrue(byteAt <= wordAt && wordAt <= literalAt, "streams run A, C, D, B");
+            assertTrue(byteAt <= wordAt && wordAt <= literalAt, "streams run A, B, C, D");
             assertEquals(file.length, literalAt + packed.literal().length,
-                    "stream B runs to the end of the file");
+                    "stream D runs to the end of the file");
 
             // Stream A needs no field: it begins where the header ends. Every
             // other start is one adda.l from the asset's own address.
@@ -411,7 +411,7 @@ final class St4RoundTripTest {
         strayStream[St4Format.OFFSET_BYTE_OFFSETS + 1] = 0x7F;
         assertThrows(IllegalArgumentException.class, () -> St4Format.read(strayStream));
 
-        byte[] outOfOrder = good.clone();          // C before the header ends
+        byte[] outOfOrder = good.clone();          // B before the header ends
         outOfOrder[St4Format.OFFSET_BYTE_OFFSETS + 3] = 0;
         assertThrows(IllegalArgumentException.class, () -> St4Format.read(outOfOrder));
 

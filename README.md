@@ -37,9 +37,9 @@ output. A container holds four streams, in this order:
 | stream | holds |
 |---|---|
 | **A** | all the bits: flags, class bits and lengths |
-| **C** | byte offsets, one byte each |
-| **D** | word offsets, one word each |
-| **B** | the literal data, whole units — last, so it runs to the end of the file |
+| **B** | byte offsets, one byte each |
+| **C** | word offsets, one word each |
+| **D** | the literal data, whole units — last, so it runs to the end of the file |
 
 Bits are read from stream A most significant first. Lengths use interlaced
 Elias gamma: each binary digit of the value below its leading 1 is written
@@ -49,9 +49,9 @@ So 1 is `0`, 2 is `100`, 3 is `110`, 4 is `10100`.
 The data is a sequence of ZX1's three block types:
 
 ```
-literals             gamma(length)    the next length units of stream B
+literals             gamma(length)    the next length units of stream D
 match, last offset   gamma(length)    copy length units from the current offset
-match, new offset    2 class bits + one value from C or D, then gamma(length-1)
+match, new offset    2 class bits + one value from B or C, then gamma(length-1)
 ```
 
 One flag bit says which block comes next. After literals, `0` starts a match
@@ -62,9 +62,9 @@ offset. The first block is always literals and has no flag bit.
 The two class bits of a new offset pick its stream and reach, or end the data:
 
 ```
-1 0   byte offset from stream C, 1..256 units back
-1 1   byte offset from stream C, 257..512 units back
-0 0   word offset from stream D
+1 0   byte offset from stream B, 1..256 units back
+1 1   byte offset from stream B, 257..512 units back
+0 0   word offset from stream C
 0 1   end of the data, followed by one repeat bit
 ```
 
@@ -75,7 +75,7 @@ reach further back than 32512 bytes, at any k, and a new-offset match is at
 least 2 units long — which is why it stores gamma(length−1).
 
 The repeat bit says whether the stream ends there. A `0` ends it. A `1` makes
-it loop: one last word offset is read from stream D and the stream becomes an
+it loop: one last word offset is read from stream C and the stream becomes an
 endless match that far back — see [Loops](#loops).
 
 Together with its flag, a block is an even number of bits: a gamma value is
@@ -93,11 +93,11 @@ A container is twenty-four bytes of header, then the streams:
 ```
  0  4  signature: 'S', '4', format version (5), k
  4  4  O, the output size in bytes, a multiple of k
- 8  4  where stream B starts, in bytes from the start of the header
-12  4  where stream C starts
-16  4  where stream D starts
+ 8  4  where stream B, the byte offsets, starts, in bytes from the header
+12  4  where stream C, the word offsets, starts
+16  4  where stream D, the literal data, starts
 20  4  the rewind point in bytes, or $FFFFFFFF when there is none
-24 ..  stream A, then C, then D, then B, each starting on a long boundary
+24 ..  streams A, B, C and D in that order, each starting on a long boundary
 ```
 
 The header holds only what cannot be worked out from the streams. Stream A
@@ -110,8 +110,8 @@ or rejects an asset with a single `cmp.l`, and the stream starts are
 header-relative, so opening a container is one `adda.l` per stream. The eight
 instructions that do it are in [ST4.S](68k/ST4.S).
 
-Stream B sits last — version 5 moved it there from second — so the literal
-payload runs to the end of the file and ends on a unit boundary. A ring buffer
+Stream D, the literal data, sits last — version 4 had it second — so it runs
+to the end of the file and ends on a unit boundary. A ring buffer
 placed directly after the container therefore borders the literal data: at any
 moment during a decode, the literals not yet consumed occupy a known stretch
 of memory just below the ring, which a packer that knows the caller's layout
@@ -127,7 +127,7 @@ stream. There are two ways to loop, and the packer picks one by whether the
 loop fits the window it was packed for.
 
 **A loop that fits the window loops by itself.** The stream's repeat bit is
-set, and the word that follows it in stream D is the distance O−R back to the
+set, and the word that follows it in stream C is the distance O−R back to the
 loop point. The decoder installs it as any other offset and matches it
 forever, so after one pass every unit is the one O−R units back. It costs the
 container two bytes and the pass is packed exactly as it would be without
@@ -176,7 +176,7 @@ writes, `d0.w` holds the bit queue, `d1.w` the units left in the operation and
 decoders keep those two as longs and pack the ring's bounds into the upper
 halves, which is how a match that reaches back past the ring start finds its
 source at the other end. Only `a6`, `d6` and `d7` are preserved across a
-call. The destination, stream B and the ring all start on a unit
+call. The destination, stream D and the ring all start on a unit
 boundary, and the ring size is a whole number of units, so a wide move never
 lands on an odd address. Each file documents its exact contract and numbered
 assumptions.

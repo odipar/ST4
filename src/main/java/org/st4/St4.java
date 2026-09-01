@@ -126,8 +126,8 @@ public final class St4 {
                 + "%d operations%s%n",
                 input.length, padded == input.length ? "" : " padded to " + padded,
                 result.packedSize(), 100.0 * result.packedSize() / input.length,
-                result.control().length, result.literal().length,
-                result.byteOffsets().length, result.wordOffsets().length,
+                result.control().length, result.byteOffsets().length,
+                result.wordOffsets().length, result.literal().length,
                 result.operations(),
                 repeatIndex < 0 ? "" : ", loops from unit " + repeatIndex
                         + (result.rewindIndex() < 0 ? "" : " by rewind"));
@@ -144,7 +144,7 @@ public final class St4 {
     }
 
     /**
-     * Twenty-four bytes of header, then A, C, D and B in order, each starting
+     * Twenty-four bytes of header, then A, B, C and D in order, each starting
      * on a long boundary. Nothing says how long a stream is: it runs to the
      * next - and B, the literal payload, runs to the end of the file, so it
      * borders whatever the caller loads after the container.
