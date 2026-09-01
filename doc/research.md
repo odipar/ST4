@@ -307,13 +307,13 @@ returns to its first pass.
 
 The test corpora are synthetic. Whether the demo's assets - register dumps,
 speedcode, samples - are block-shaped or prose-shaped is what decides the
-ring size this buys, and the experiment runs on any file. If they read like
-the periodic corpora, the order of work is: the rep form and one-unit copies
-in the cost model; then the decoders - an offset compared against N as it is
-installed, and a copy whose source is the literal read pointer rather than
-the write pointer, without a wrap, twenty-odd bytes each - with the packer
-writing offsets beyond N; then the same candidates in the fast optimizer, the
-event-driven one falling back.
+ring size this buys, and the experiment runs on any file. The packer writes
+offsets beyond N with `-c`, and the decoders take them when built with
+`ST4_WINDOW`: one compare per match segment, and a copy whose source is the
+literal read pointer rather than the write pointer, without a wrap, 14-22
+bytes each. If the assets read like the periodic corpora, what is left is
+the rep form and one-unit copies in the cost model, and the same candidates
+in the fast optimizer, the event-driven one falling back.
 
 ## Sources
 

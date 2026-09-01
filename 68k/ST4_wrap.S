@@ -17,6 +17,23 @@
 ;       ST4_UNIT    equ     4
 ;               include "ST4_wrap.S"
 ;
+; ST4_WINDOW, the ring size in units, is the second build-time constant, and
+; optional. A stream packed with st4 -c writes a copy from the literal stream
+; as an offset beyond the window: it copies offset-M literal units from behind
+; the stream D read pointer, without moving it. A decoder built with
+; ST4_WINDOW = M tells such a copy from a match by magnitude - one compare per
+; match segment - and reads its source straight out of stream D, skipping the
+; ring's wrap arithmetic. A build without ST4_WINDOW, or with 0, has no copy
+; code and is byte for byte the decoder there was before:
+;
+;       ST4_UNIT    equ     4
+;       ST4_WINDOW  equ     16          ; the ring is 64 bytes
+;               include "ST4_wrap.S"
+;
+; A stream with copies needs the build made for its window, which the header
+; records at offset 24 - one cmp.l proves it; a stream without copies decodes
+; on any build whose window is at least its own.
+;
 ; !!! LIKE ST1_wrap, THIS HAS NO DONE STATE !!!
 ; The caller must know the exact output size O in units, make exactly
 ; T = ceil(O/C) decode calls, and never call again. A stream packed with
@@ -72,14 +89,25 @@
 ;      unless the stream repeats: then any number of calls is fine
 ;   6. streams A and C start on even addresses, and A holds an even number of
 ;      bytes: the bit queue is refilled with a move.w, and so is a word offset
+;   6. a stream with copies was packed with -m equal to ST4_WINDOW, and every
+;      copy is shorter than its distance, so the offset never reaches zero -
+;      the st4 packer keeps both
 ;
-; Compress with st4 -k<UNIT> -m<ring/UNIT> -l65535.
+; Compress with st4 -k<UNIT> -m<ring/UNIT> -l65535, and -c for copies from the
+; literal stream on a build with ST4_WINDOW = ring/UNIT.
 ; -----------------------------------------------------------------------------
 
 ; The asset's signature for this build: 'S4', format version 6, and the unit
 ; size this decoder was assembled for. One cmp.l against a file's first long
 ; proves all three at once.
 ST4_SIGNATURE   equ     $53340600+ST4_UNIT
+
+; ST4_WINDOW, the window in units, is optional: a build without it has no
+; copies from the literal stream and is the decoder there was before.
+        .if ^^defined ST4_WINDOW
+        .else
+ST4_WINDOW      equ     0
+        .endif
 
 ; One unit copied, at the width this build was made for.
         .macro ST4_MOVE
@@ -130,6 +158,26 @@ source_wrapped:
         adda.l  d5,a3                   ; raw source + N, back into the ring
         bra.s   copy
 
+        .if ST4_WINDOW
+copy_source:                            ; the offset is beyond the window, so
+; the source is stream D, offset-M units behind the read pointer, which stays
+; where it is. Stream D never wraps, so none of the ring arithmetic applies.
+; The offset moves on by what this segment copies: a copy the budget or the
+; ring end cuts continues where it stopped, and a rep after it starts just
+; past it. It stays beyond the window, since a copy is shorter than its
+; distance.
+        .if ST4_WINDOW*ST4_UNIT<128
+        lea     ST4_WINDOW*ST4_UNIT(a2,d2.w),a3 ; D + M*UNIT + -offset*UNIT
+        .else
+        lea     ST4_WINDOW*ST4_UNIT(a2),a3 ; the same in two, past a byte
+        adda.w  d2,a3                   ; displacement
+        .endif
+        .rept   ST4_UNIT
+        add.w   d4,d2                   ; -offset*UNIT += n*UNIT
+        .endr
+        bra.s   copy
+        .endif
+
 ; ST4_resume: a0/a1/d0/d1/d2 = state and d3.w = this call's budget.
 ; Continuing calls emit d3 bytes; the final call may be shorter. The caller
 ; knows the final span from O; [old a1 .. new a1) is fresh output.
@@ -142,6 +190,10 @@ segment:                                ; runs one 0-unit match segment and
 budget_fits:
         tst.w   d2                      ; positive lastOffset means LITERALS
         bpl.s   literal_source
+        .if ST4_WINDOW
+        cmp.w   #-ST4_WINDOW*ST4_UNIT,d2 ; beyond the window: a copy from D
+        blt.s   copy_source
+        .endif
 ; MATCH: derive the source and split a segment that crosses the ring end.
         movea.l a1,a3                   ; raw source = dst + -lastOffset*UNIT
         adda.w  d2,a3                   ; which is why the offset is kept scaled

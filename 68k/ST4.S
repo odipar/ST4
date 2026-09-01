@@ -8,7 +8,7 @@
 ; your own programs, even commercially, as long as your documentation indicates
 ; that you used ZX1 through ST4 (see LICENSE).
 ;
-; ST4 differs from ZX1 in four ways, and this file in one more:
+; ST4 differs from ZX1 in five ways, and this file in one more:
 ;
 ;   1. the literal payload lives in a stream of its own, so its alignment is a
 ;      property of the file rather than of wherever the control bytes left it;
@@ -22,7 +22,10 @@
 ;   4. a stream can loop. Its end code carries a repeat bit, and a set one
 ;      installs a last offset that the decoder matches forever - or the
 ;      header names a rewind point, and the caller replays the streams from
-;      the state it saved there. See THE STATE below.
+;      the state it saved there. See THE STATE below;
+;   5. an offset beyond the window M is a copy from stream D: every literal
+;      is still there, in order, and a copy reads them from behind the read
+;      pointer without moving it. See ST4_WINDOW below.
 ;
 ; ST4_UNIT is a build-time constant - 1, 2 or 4 - because a decoder that chose
 ; its copy width at run time would pay for the choice on every operation. Set
@@ -34,6 +37,22 @@
 ; At ST4_UNIT = 1 this is ST1 with the literals moved out: the same parse, the
 ; same bits, the same speed. At 2 and 4 the copy is a move.w or move.l and the
 ; operation count falls with the unit size.
+;
+; ST4_WINDOW, the window M in units, is the second build-time constant, and
+; optional. A stream packed with st4 -c writes a copy from the literal stream
+; as an offset beyond M: it copies offset-M literal units from behind the
+; stream D read pointer, without moving it. A decoder built with ST4_WINDOW = M
+; tells such a copy from a match by magnitude - one compare per match segment.
+; A build without ST4_WINDOW, or with 0, has no copy code and is byte for byte
+; the decoder there was before:
+;
+;       ST4_UNIT    equ     4
+;       ST4_WINDOW  equ     16
+;               include "ST4.S"
+;
+; A stream with copies needs the build made for its window, which the header
+; records at offset 24 - one cmp.l proves it; a stream without copies decodes
+; on any build whose window is at least its own.
 ;
 ; 68000 ALIGNMENT. Streams A and C are read a word at a time, so both must
 ; start on an even address; the packer pads A to an even length so the last
@@ -127,6 +146,9 @@
 ;   3. at ST4_UNIT 2 or 4 the destination and stream D start on a unit boundary
 ;   4. streams A and C start on even addresses; A holds an even number of bytes
 ;   5. the budget in d3.w is 1..65535 units; zero makes no progress
+;   6. a stream with copies was packed with -m equal to ST4_WINDOW, and every
+;      copy is shorter than its distance, so the offset never reaches zero -
+;      the st4 packer keeps both
 ;
 ; TRUSTED INPUT ONLY. Neither stream, nor the destination, nor the budget is
 ; validated. A wrong value can read or write arbitrary memory.
@@ -136,6 +158,13 @@
 ; size this decoder was assembled for. One cmp.l against a file's first long
 ; proves all three at once.
 ST4_SIGNATURE   equ     $53340600+ST4_UNIT
+
+; ST4_WINDOW, the window in units, is optional: a build without it has no
+; copies from the literal stream and is the decoder there was before.
+        .if ^^defined ST4_WINDOW
+        .else
+ST4_WINDOW      equ     0
+        .endif
 
 ; One unit copied, at the width this build was made for. Everything else in
 ; this file is width-independent, which is the point of keeping the counts in
@@ -187,6 +216,24 @@ ST4_resume:
 suspend:                                ; DONE or a suspended operation
         rts
 
+        .if ST4_WINDOW
+copy_source:                            ; the offset is beyond the window, so
+; the source is stream D, offset-M units behind the read pointer, which stays
+; where it is. The offset moves on by what this segment copies: a copy the
+; budget cuts continues where it stopped, and a rep after it starts just past
+; it. It stays beyond the window, since a copy is shorter than its distance.
+        .if ST4_WINDOW*ST4_UNIT<128
+        lea     ST4_WINDOW*ST4_UNIT(a2,d2.w),a3 ; D + M*UNIT + -offset*UNIT
+        .else
+        lea     ST4_WINDOW*ST4_UNIT(a2),a3 ; the same in two, past a byte
+        adda.w  d2,a3                   ; displacement
+        .endif
+        .rept   ST4_UNIT
+        add.w   d4,d2                   ; -offset*UNIT += n*UNIT
+        .endr
+        bra.s   copy
+        .endif
+
 ; get_gamma: interlaced Elias gamma in d1.w; d4.w is the 0/1 length seed.
 ; Gammas are odd-length and every one of them is followed by a single flag bit,
 ; so a gamma always starts at an even position and the queue - which empties
@@ -233,6 +280,10 @@ op_body:                                ; shared; sign(d2) = LITERALS/MATCH
 budget_fits:
         tst.w   d2                      ; positive lastOffset means LITERALS
         bpl.s   literal_source
+        .if ST4_WINDOW
+        cmp.w   #-ST4_WINDOW*ST4_UNIT,d2 ; beyond the window: a copy from D
+        blt.s   copy_source
+        .endif
         movea.l a1,a3                   ; match: destination plus -lastOffset*UNIT
         adda.w  d2,a3                   ; which is why the offset is kept scaled
 copy:                                   ; MATCH copies only reach this entry
