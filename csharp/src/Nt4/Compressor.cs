@@ -18,6 +18,14 @@ namespace Nt4;
 /// 65535 units. A literal run cannot be split - after a literal run a 0 bit
 /// means a match, so the format has no way to say "more literals" - and
 /// <see cref="Result.LongestOp"/> reports what actually came out.</para>
+/// <para>A stream may be written from more than one parse, back to back: that
+/// is how a loop longer than the window is packed, the intro and the loop each
+/// parsed on their own so that nothing in the loop reaches before it. Two
+/// literal runs that meet at the seam become one, since the format cannot say
+/// "literals again"; and a one-unit match that the loop's parse meant as a rep
+/// of the stream's initial offset goes out as a literal when the intro left a
+/// different offset behind. Every flag is derived from the stream as actually
+/// written, so the seam is otherwise just a block boundary.</para>
 /// </remarks>
 public sealed class Compressor
 {
@@ -30,8 +38,10 @@ public sealed class Compressor
     /// <param name="PaddedSize">The output size in bytes, a multiple of the unit.</param>
     /// <param name="LongestOp">Longest literal run or match emitted, in units.</param>
     /// <param name="Operations">How many operations the streams hold.</param>
+    /// <param name="RewindIndex">The loop point of a stream the caller loops by rewind, in units, or -1.</param>
     public sealed record Result(byte[] Control, byte[] Literal, byte[] ByteOffsets,
-        byte[] WordOffsets, int Unit, int PaddedSize, int LongestOp, int Operations)
+        byte[] WordOffsets, int Unit, int PaddedSize, int LongestOp, int Operations,
+        int RewindIndex)
     {
         /// <summary>Bytes all four streams take together, which is what a comparison wants.</summary>
         public int PackedSize =>
@@ -52,6 +62,14 @@ public sealed class Compressor
     private int bitIndex;
     private int longestOp;
     private int operations;
+
+    // The walk: where the next unit comes from, the literal run gathered but
+    // not yet written, the offset the stream currently holds, and whether the
+    // first block - which has no flag - is still to come.
+    private int readIndex;
+    private int pendingLiterals;
+    private int lastOffset = Optimizer.InitialOffset;
+    private bool first = true;
 
     private Compressor(int[] units, int unit)
     {
@@ -99,51 +117,69 @@ public sealed class Compressor
             throw new ArgumentOutOfRangeException(nameof(repeatIndex), repeatIndex,
                 "the loop point must be a unit of the stream itself");
         }
-        return new Compressor(units, unit).Run(optimal, maxOpLength, repeatIndex);
+        return new Compressor(units, unit).Run([optimal], maxOpLength, repeatIndex, -1);
     }
 
-    private Result Run(Block optimal, int maxOpLength, int repeatIndex)
+    /// <summary>
+    /// A stream that loops by rewind, for a loop longer than the window: the
+    /// intro <c>units[0..R)</c> and the loop <c>units[R..O)</c> come from
+    /// separate parses - <paramref name="intro"/> is null when R is 0 - so no
+    /// match in the loop reaches before it, and the caller can replay the
+    /// stream from the state it saved at unit <paramref name="rewindIndex"/>
+    /// every time the output reaches O. The stream ends plainly; the rewind
+    /// point goes in the header.
+    /// </summary>
+    /// <param name="intro">Final block of a parse of the units before the loop, or null when there are none.</param>
+    /// <param name="loop">Final block of a parse of the loop's units on their own.</param>
+    /// <param name="units">The whole input as k-byte units.</param>
+    /// <param name="unit">Bytes per unit: 1, 2 or 4.</param>
+    /// <param name="maxOpLength">Positive maximum length requested for each operation, in units.</param>
+    /// <param name="rewindIndex">The loop point as a unit index.</param>
+    /// <returns>The four streams and their metadata.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="loop"/> or <paramref name="units"/> is null.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// <paramref name="rewindIndex"/> is not a unit of the stream, or an intro is given exactly when there is none.
+    /// </exception>
+    public static Result CompressRewinding(Block? intro, Block loop, int[] units, int unit,
+        int maxOpLength, int rewindIndex)
     {
-        // Un-reverse the chain; its head is the parser's fake block.
-        var blocks = new Stack<Block>();
-        for (Block? block = optimal; block != null; block = block.Chain)
+        ArgumentNullException.ThrowIfNull(loop);
+        ArgumentNullException.ThrowIfNull(units);
+        if (rewindIndex < 0 || rewindIndex >= units.Length)
         {
-            blocks.Push(block);
+            throw new ArgumentOutOfRangeException(nameof(rewindIndex), rewindIndex,
+                "the rewind point must be a unit of the stream itself");
         }
-        Block previous = blocks.Pop();
-
-        int readIndex = 0;
-        int lastOffset = Optimizer.InitialOffset;
-        bool first = true;
-        bool afterLiterals = false;
-
-        foreach (Block block in blocks)
+        if ((intro == null) != (rewindIndex == 0))
         {
-            int length = block.Index - previous.Index;
-            previous = block;
+            throw new ArgumentOutOfRangeException(nameof(intro), "an intro exactly when there is one");
+        }
+        Block[] chains = intro == null ? [loop] : [intro, loop];
+        return new Compressor(units, unit).Run(chains, maxOpLength, -1, rewindIndex);
+    }
 
-            if (block.Offset == 0)
+    private Result Run(Block[] chains, int maxOpLength, int repeatIndex, int rewindIndex)
+    {
+        foreach (Block chain in chains)
+        {
+            // Un-reverse the chain; its head is the parser's fake block.
+            var blocks = new Stack<Block>();
+            for (Block? block = chain; block != null; block = block.Chain)
             {
-                if (first)
-                {
-                    first = false;              // a stream opens with literals
-                }
-                else
-                {
-                    WriteBit(false);
-                }
-                WriteInterlacedEliasGamma(length);
-                for (int i = 0; i < length; i++)
-                {
-                    Units.Write(literal, literalIndex, units[readIndex++], unit);
-                    literalIndex += unit;
-                }
-                afterLiterals = true;
-                operations++;
-                longestOp = Math.Max(longestOp, length);
+                blocks.Push(block);
             }
-            else
+            Block previous = blocks.Pop();
+
+            foreach (Block block in blocks)
             {
+                int length = block.Index - previous.Index;
+                previous = block;
+
+                if (block.Offset == 0)
+                {
+                    pendingLiterals += length;      // runs merge across a seam
+                    continue;
+                }
                 int offset = block.Offset;
                 // Split evenly rather than greedily: every piece after the first
                 // has to be a new-offset match, and those cannot be shorter than
@@ -154,7 +190,14 @@ public sealed class Compressor
                 for (int piece = 0; piece < pieces; piece++)
                 {
                     int size = baseSize + (piece < wider ? 1 : 0);
-                    if (afterLiterals && offset == lastOffset)
+                    bool rep = pendingLiterals > 0 && offset == lastOffset;
+                    if (size == 1 && !rep)
+                    {
+                        pendingLiterals++;          // the seam's one-unit rep
+                        continue;
+                    }
+                    FlushLiterals();
+                    if (rep)
                     {
                         WriteBit(false);
                         WriteInterlacedEliasGamma(size);
@@ -166,12 +209,16 @@ public sealed class Compressor
                         WriteInterlacedEliasGamma(size - 1);
                         lastOffset = offset;
                     }
-                    afterLiterals = false;
                     operations++;
                     readIndex += size;
                     longestOp = Math.Max(longestOp, size);
                 }
             }
+        }
+        FlushLiterals();
+        if (readIndex != units.Length)
+        {
+            throw new InvalidOperationException("the parses did not cover the input");
         }
 
         // End marker, then the repeat bit: end for good, or install one last
@@ -195,7 +242,36 @@ public sealed class Compressor
         return new Result(control[..(controlIndex + (controlIndex & 1))],
             literal[..literalIndex], byteOffsets[..byteOffsetIndex],
             wordOffsets[..wordOffsetIndex], unit,
-            units.Length * unit, longestOp, operations);
+            units.Length * unit, longestOp, operations, rewindIndex);
+    }
+
+    /// <summary>
+    /// Writes the literal run gathered so far, if there is one: its flag -
+    /// unless it opens the stream - its length, and its units into stream B.
+    /// </summary>
+    private void FlushLiterals()
+    {
+        if (pendingLiterals == 0)
+        {
+            return;
+        }
+        if (first)
+        {
+            first = false;                          // a stream opens with literals
+        }
+        else
+        {
+            WriteBit(false);
+        }
+        WriteInterlacedEliasGamma(pendingLiterals);
+        for (int i = 0; i < pendingLiterals; i++)
+        {
+            Units.Write(literal, literalIndex, units[readIndex++], unit);
+            literalIndex += unit;
+        }
+        operations++;
+        longestOp = Math.Max(longestOp, pendingLiterals);
+        pendingLiterals = 0;
     }
 
     /// <summary>

@@ -3,6 +3,7 @@ package org.st4;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Arrays;
 
 /**
  * Command-line ST4 packer: ZX1's blocks at a chosen unit granularity, with the
@@ -90,19 +91,29 @@ public final class St4 {
         }
 
         int[] units = Units.split(input, unit);
-        // The loop point must be a unit of the input, and its distance from
-        // the end is a match offset like any other: the window has to keep it.
         if (repeatIndex >= units.length) {
             throw error("-r" + repeatIndex + " is not a unit of the input, which is "
                     + units.length + " units");
         }
+        St4Compressor.Result result;
         if (repeatIndex >= 0 && units.length - repeatIndex > offsetLimit) {
-            throw error("-r" + repeatIndex + " loops the last " + (units.length - repeatIndex)
-                    + " units, past the -m" + offsetLimit + " window");
+            // The loop is longer than the window, so no match can reach across
+            // it and the decoder cannot loop it alone: the caller will replay
+            // the stream from the state it saved at the loop point. For every
+            // pass to see the same history, the loop is parsed on its own.
+            int[] intro = Arrays.copyOfRange(units, 0, repeatIndex);
+            int[] loop = Arrays.copyOfRange(units, repeatIndex, units.length);
+            result = St4Compressor.compressRewinding(
+                    intro.length == 0 ? null : St4EventOptimizer.optimize(intro, unit, offsetLimit),
+                    St4EventOptimizer.optimize(loop, unit, offsetLimit),
+                    units, unit, maxOpLength, repeatIndex);
+        } else {
+            // The loop fits the window, so the stream loops by itself: its end
+            // becomes an endless match back to the loop point.
+            result = St4Compressor.compress(
+                    St4EventOptimizer.optimize(units, unit, offsetLimit), units, unit,
+                    maxOpLength, repeatIndex);
         }
-        St4Compressor.Result result = St4Compressor.compress(
-                St4EventOptimizer.optimize(units, unit, offsetLimit), units, unit, maxOpLength,
-                repeatIndex);
 
         try {
             Files.write(outputPath, container(result));
@@ -118,7 +129,13 @@ public final class St4 {
                 result.control().length, result.literal().length,
                 result.byteOffsets().length, result.wordOffsets().length,
                 result.operations(),
-                repeatIndex < 0 ? "" : ", loops from unit " + repeatIndex);
+                repeatIndex < 0 ? "" : ", loops from unit " + repeatIndex
+                        + (result.rewindIndex() < 0 ? "" : " by rewind"));
+        if (result.rewindIndex() >= 0) {
+            System.out.printf("The loop is longer than the -m%d window, so the decoder cannot "
+                    + "loop it alone: save its state at unit %d and restore it at unit %d, "
+                    + "every pass%n", offsetLimit, repeatIndex, units.length);
+        }
         if (result.longestOp() > maxOpLength) {
             System.out.printf("Warning: longest operation is %d units, over the -l%d limit: "
                     + "a literal run, which the format cannot split%n",
@@ -127,10 +144,10 @@ public final class St4 {
     }
 
     /**
-     * Twenty bytes of header, then A, C, D and B in order, each starting on a
-     * long boundary. Nothing says how long a stream is: it runs to the next -
-     * and B, the literal payload, runs to the end of the file, so it borders
-     * whatever the caller loads after the container.
+     * Twenty-four bytes of header, then A, C, D and B in order, each starting
+     * on a long boundary. Nothing says how long a stream is: it runs to the
+     * next - and B, the literal payload, runs to the end of the file, so it
+     * borders whatever the caller loads after the container.
      */
     // Public because a container is also how other formats embed an ST4
     // stream, many of them at once.
@@ -146,6 +163,8 @@ public final class St4 {
         putLong(file, St4Format.OFFSET_LITERAL, literalAt);
         putLong(file, St4Format.OFFSET_BYTE_OFFSETS, byteAt);
         putLong(file, St4Format.OFFSET_WORD_OFFSETS, wordAt);
+        putLong(file, St4Format.OFFSET_REWIND, result.rewindIndex() < 0
+                ? St4Format.NO_REWIND : result.rewindIndex() * result.unit());
         System.arraycopy(result.control(), 0, file, controlAt, result.control().length);
         System.arraycopy(result.literal(), 0, file, literalAt, result.literal().length);
         System.arraycopy(result.byteOffsets(), 0, file, byteAt,

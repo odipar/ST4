@@ -27,6 +27,7 @@ public sealed class Decompressor
     }
 
     private readonly int offsetLimit;
+    private readonly int rewindAt;
     private readonly byte[] control;
     private readonly byte[] literal;
     private readonly byte[] byteOffsets;
@@ -45,9 +46,10 @@ public sealed class Decompressor
     private State state = State.Start;
 
     private Decompressor(byte[] control, byte[] literal, byte[] byteOffsets,
-        byte[] wordOffsets, byte[] output, int unit, int offsetLimit)
+        byte[] wordOffsets, byte[] output, int unit, int offsetLimit, int rewindAt)
     {
         this.offsetLimit = offsetLimit;
+        this.rewindAt = rewindAt;
         this.control = control;
         this.literal = literal;
         this.byteOffsets = byteOffsets;
@@ -125,7 +127,35 @@ public sealed class Decompressor
     /// <paramref name="offsetLimit"/>.
     /// </exception>
     public static Decoded Decode(byte[] control, byte[] literal, byte[] byteOffsets,
-        byte[] wordOffsets, int unit, int size, int offsetLimit)
+        byte[] wordOffsets, int unit, int size, int offsetLimit) =>
+        Decode(control, literal, byteOffsets, wordOffsets, unit, size, offsetLimit,
+            Format.NoRewind);
+
+    /// <summary>
+    /// As above, holding a stream to its rewind point: from
+    /// <paramref name="rewindAt"/> bytes on, no match may reach before it. That
+    /// is what makes the loop replayable from the state saved there - every
+    /// pass then sees the same history - and a stream that breaks it would loop
+    /// wrongly on the 68000, so the reference refuses it instead.
+    /// </summary>
+    /// <param name="control">Stream A, the bits.</param>
+    /// <param name="literal">Stream B, the literal payload.</param>
+    /// <param name="byteOffsets">Stream C, one byte per offset.</param>
+    /// <param name="wordOffsets">Stream D, one word per offset.</param>
+    /// <param name="unit">Bytes per unit: 1, 2 or 4.</param>
+    /// <param name="size">The output size in bytes, a multiple of the unit.</param>
+    /// <param name="offsetLimit">The furthest back any offset may reach, in units.</param>
+    /// <param name="rewindAt">The rewind point in bytes, or <see cref="Format.NoRewind"/>.</param>
+    /// <returns>The decoded bytes and the repeat index, -1 when the stream ends.</returns>
+    /// <exception cref="ArgumentNullException">A stream is null.</exception>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="unit"/> is not 1, 2 or 4.</exception>
+    /// <exception cref="ArgumentException"><paramref name="size"/> is not a whole number of units.</exception>
+    /// <exception cref="InvalidDataException">
+    /// The streams are malformed or truncated, reach further back than
+    /// <paramref name="offsetLimit"/>, or reach before the rewind point.
+    /// </exception>
+    public static Decoded Decode(byte[] control, byte[] literal, byte[] byteOffsets,
+        byte[] wordOffsets, int unit, int size, int offsetLimit, int rewindAt)
     {
         ArgumentNullException.ThrowIfNull(control);
         ArgumentNullException.ThrowIfNull(literal);
@@ -142,7 +172,7 @@ public sealed class Decompressor
                 nameof(size));
         }
         var decoder = new Decompressor(control, literal, byteOffsets, wordOffsets,
-            new byte[size], unit, offsetLimit);
+            new byte[size], unit, offsetLimit, rewindAt);
         decoder.Run();
         return new Decoded(decoder.output, decoder.repeatIndex);
     }
@@ -306,6 +336,12 @@ public sealed class Decompressor
         }
         for (int i = 0; i < length * unit; i++)
         {
+            // With no rewind point this never fires: -1 is below every source.
+            if (outputIndex >= rewindAt && outputIndex - distance < rewindAt)
+            {
+                throw new InvalidDataException(
+                    $"the loop reaches before the rewind point {rewindAt} at byte {outputIndex}");
+            }
             output[outputIndex] = output[outputIndex - distance];
             outputIndex++;
         }

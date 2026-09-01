@@ -135,21 +135,33 @@ public static class Nt4
         }
 
         int[] units = Units.Split(input, unit);
-        // The loop point must be a unit of the input, and its distance from
-        // the end is a match offset like any other: the window has to keep it.
         if (repeatIndex >= units.Length)
         {
             return Cli.Error($"-r{repeatIndex} is not a unit of the input, which is "
                 + $"{units.Length} units");
         }
+        Compressor.Result result;
         if (repeatIndex >= 0 && units.Length - repeatIndex > offsetLimit)
         {
-            return Cli.Error($"-r{repeatIndex} loops the last {units.Length - repeatIndex} "
-                + $"units, past the -m{offsetLimit} window");
+            // The loop is longer than the window, so no match can reach across
+            // it and the decoder cannot loop it alone: the caller will replay
+            // the stream from the state it saved at the loop point. For every
+            // pass to see the same history, the loop is parsed on its own.
+            int[] intro = units[..repeatIndex];
+            int[] loop = units[repeatIndex..];
+            result = Compressor.CompressRewinding(
+                intro.Length == 0 ? null : EventOptimizer.Optimize(intro, unit, offsetLimit),
+                EventOptimizer.Optimize(loop, unit, offsetLimit),
+                units, unit, maxOpLength, repeatIndex);
         }
-        Compressor.Result result = Compressor.Compress(
-            EventOptimizer.Optimize(units, unit, offsetLimit), units, unit, maxOpLength,
-            repeatIndex);
+        else
+        {
+            // The loop fits the window, so the stream loops by itself: its end
+            // becomes an endless match back to the loop point.
+            result = Compressor.Compress(
+                EventOptimizer.Optimize(units, unit, offsetLimit), units, unit, maxOpLength,
+                repeatIndex);
+        }
 
         try
         {
@@ -167,7 +179,14 @@ public static class Nt4
             + $"A {result.Control.Length}, B {result.Literal.Length}, "
             + $"C {result.ByteOffsets.Length}, D {result.WordOffsets.Length}, "
             + $"{result.Operations} operations"
-            + $"{(repeatIndex < 0 ? "" : $", loops from unit {repeatIndex}")}"));
+            + $"{(repeatIndex < 0 ? "" : $", loops from unit {repeatIndex}")}"
+            + $"{(result.RewindIndex < 0 ? "" : " by rewind")}"));
+        if (result.RewindIndex >= 0)
+        {
+            Console.WriteLine($"The loop is longer than the -m{offsetLimit} window, so the "
+                + $"decoder cannot loop it alone: save its state at unit {repeatIndex} and "
+                + $"restore it at unit {units.Length}, every pass");
+        }
         if (result.LongestOp > maxOpLength)
         {
             Console.WriteLine(
@@ -178,10 +197,10 @@ public static class Nt4
     }
 
     /// <summary>
-    /// Twenty bytes of header, then A, C, D and B in order, each starting on a
-    /// long boundary. Nothing says how long a stream is: it runs to the next -
-    /// and B, the literal payload, runs to the end of the file, so it borders
-    /// whatever the caller loads after the container.
+    /// Twenty-four bytes of header, then A, C, D and B in order, each starting
+    /// on a long boundary. Nothing says how long a stream is: it runs to the
+    /// next - and B, the literal payload, runs to the end of the file, so it
+    /// borders whatever the caller loads after the container.
     /// </summary>
     /// <remarks>
     /// Public because a container is also how other formats embed an ST4
@@ -204,6 +223,8 @@ public static class Nt4
         PutLong(file, Format.OffsetLiteral, literalAt);
         PutLong(file, Format.OffsetByteOffsets, byteAt);
         PutLong(file, Format.OffsetWordOffsets, wordAt);
+        PutLong(file, Format.OffsetRewind, result.RewindIndex < 0
+            ? Format.NoRewind : result.RewindIndex * result.Unit);
         result.Control.CopyTo(file, controlAt);
         result.Literal.CopyTo(file, literalAt);
         result.ByteOffsets.CopyTo(file, byteAt);

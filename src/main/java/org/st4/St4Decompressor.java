@@ -16,6 +16,7 @@ public final class St4Decompressor {
     private enum State { START, LITERALS, MATCH, DONE }
 
     private final int offsetLimit;
+    private final int rewindAt;
     private final byte[] control;
     private final byte[] literal;
     private final byte[] byteOffsets;
@@ -35,8 +36,9 @@ public final class St4Decompressor {
 
     private St4Decompressor(byte[] control, byte[] literal, byte[] byteOffsets,
                             byte[] wordOffsets, byte[] output, int unit,
-                            int offsetLimit) {
+                            int offsetLimit, int rewindAt) {
         this.offsetLimit = offsetLimit;
+        this.rewindAt = rewindAt;
         this.control = control;
         this.literal = literal;
         this.byteOffsets = byteOffsets;
@@ -81,10 +83,27 @@ public final class St4Decompressor {
     public static Decoded decode(byte[] control, byte[] literal, byte[] byteOffsets,
                                  byte[] wordOffsets, int unit, int size,
                                  int offsetLimit) {
+        return decode(control, literal, byteOffsets, wordOffsets, unit, size, offsetLimit,
+                St4Format.NO_REWIND);
+    }
+
+    /**
+     * As above, holding a stream to its rewind point: from {@code rewindAt}
+     * bytes on, no match may reach before it. That is what makes the loop
+     * replayable from the state saved there - every pass then sees the same
+     * history - and a stream that breaks it would loop wrongly on the 68000,
+     * so the reference refuses it instead.
+     *
+     * @throws IllegalStateException when the loop reaches before its rewind
+     *     point, or an offset reaches past the limit
+     */
+    public static Decoded decode(byte[] control, byte[] literal, byte[] byteOffsets,
+                                 byte[] wordOffsets, int unit, int size,
+                                 int offsetLimit, int rewindAt) {
         assert St4Format.isUnitSize(unit) : "unit size must be 1, 2 or 4";
         assert size % unit == 0 : "output size must be a whole number of units";
         var decoder = new St4Decompressor(control, literal, byteOffsets, wordOffsets,
-                new byte[size], unit, offsetLimit);
+                new byte[size], unit, offsetLimit, rewindAt);
         decoder.run();
         return new Decoded(decoder.output, decoder.repeatIndex);
     }
@@ -191,6 +210,11 @@ public final class St4Decompressor {
         int distance = lastOffset * unit;
         assert distance <= outputIndex : "match reaches before the output";
         for (int i = 0; i < length * unit; i++) {
+            // With no rewind point this never fires: -1 is below every source.
+            if (outputIndex >= rewindAt && outputIndex - distance < rewindAt) {
+                throw new IllegalStateException("the loop reaches before the rewind point "
+                        + rewindAt + " at byte " + outputIndex);
+            }
             output[outputIndex] = output[outputIndex - distance];
             outputIndex++;
         }

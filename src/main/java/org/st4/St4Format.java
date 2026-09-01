@@ -70,7 +70,8 @@ package org.st4;
  * disaster on data that is not, which is why the mode is chosen per asset and
  * recorded in the header.
  *
- * <p>The header is twenty bytes and holds only what cannot be worked out:
+ * <p>The header is twenty-four bytes and holds only what cannot be worked
+ * out:
  *
  * <pre>
  *   0   4  signature: 'S', '4', format version, k
@@ -78,8 +79,20 @@ package org.st4;
  *   8   4  stream B, as a byte offset from the start of the header
  *  12   4  stream C
  *  16   4  stream D
- *  20  ..  stream A, then C, then D, then B
+ *  20   4  the rewind point in bytes, or $FFFFFFFF when there is none
+ *  24  ..  stream A, then C, then D, then B
  * </pre>
+ *
+ * <p>The rewind point is how a stream loops when its loop is longer than the
+ * window: the decoder cannot match that far back, so the caller replays the
+ * encoded stream instead. Every decoder keeps its whole state in registers,
+ * so the caller saves them when the output reaches the rewind point and
+ * restores them - all but the write pointer - when it reaches O, and does so
+ * every pass. The packer makes that sound by parsing the loop {@code [R,O)}
+ * on its own, so no match in it reaches before R or straddles R: every pass
+ * then sees the same history, whatever came before. The field is set only
+ * when the caller has something to do; a stream that ends, or that loops by
+ * itself through the repeat bit, says $FFFFFFFF.
  *
  * <p>Everything else follows from those. Stream A begins where the header ends,
  * so it needs no field. No length is stored: the streams are laid out in order,
@@ -106,7 +119,7 @@ package org.st4;
  *         lea     asset(pc),a3
  *         cmp.l   #ST4_SIGNATURE,(a3)     ; magic, version and k in one compare
  *         bne.s   wrong_asset
- *         lea     20(a3),a0               ; stream A, where the header ends
+ *         lea     24(a3),a0               ; stream A, where the header ends
  *         movea.l a3,a2
  *         adda.l  8(a3),a2                ; stream B
  *         movea.l a3,a4
@@ -127,8 +140,8 @@ public final class St4Format {
     /**
      * Version 5 moved stream B behind the offsets, so the literal payload
      * borders whatever the caller places after the container, and gave the end
-     * marker its repeat bit. Version 4 cut the header to what cannot be
-     * derived.
+     * marker its repeat bit and the header its rewind point. Version 4 cut the
+     * header to what cannot be derived.
      */
     public static final int VERSION = 5;
 
@@ -137,7 +150,11 @@ public final class St4Format {
     public static final int OFFSET_LITERAL = 8;
     public static final int OFFSET_BYTE_OFFSETS = 12;
     public static final int OFFSET_WORD_OFFSETS = 16;
-    public static final int HEADER_SIZE = 20;
+    public static final int OFFSET_REWIND = 20;
+    public static final int HEADER_SIZE = 24;
+
+    /** The rewind field of a stream that ends or loops by itself. */
+    public static final int NO_REWIND = -1;
 
     /**
      * Magic, version and unit size in one long, so a decoder built for one k
@@ -176,9 +193,13 @@ public final class St4Format {
         return MAX_OFFSET / unit;
     }
 
-    /** What a container holds: the four streams, the unit size and the output size. */
+    /**
+     * What a container holds: the four streams, the unit size, the output
+     * size, and the rewind point in bytes - {@link #NO_REWIND} when the
+     * caller has nothing to do.
+     */
     public record Container(int unit, int size, byte[] control, byte[] literal,
-                            byte[] byteOffsets, byte[] wordOffsets) {}
+                            byte[] byteOffsets, byte[] wordOffsets, int rewind) {}
 
     /**
      * Reads a container, checking everything a decoder would otherwise trust.
@@ -212,6 +233,11 @@ public final class St4Format {
             throw new IllegalArgumentException(
                     "output size " + size + " is not a whole number of " + unit + "-byte units");
         }
+        int rewind = longAt(file, OFFSET_REWIND);
+        if (rewind != NO_REWIND && (rewind < 0 || rewind >= size || rewind % unit != 0)) {
+            throw new IllegalArgumentException(
+                    "rewind point " + rewind + " is not a unit of the output");
+        }
 
         // The file lays the streams out as A, C, D, B: the literal payload
         // last, so it runs to the end of the file.
@@ -232,7 +258,7 @@ public final class St4Format {
                 java.util.Arrays.copyOfRange(file, edge[0], edge[1]),
                 java.util.Arrays.copyOfRange(file, edge[3], edge[4]),
                 java.util.Arrays.copyOfRange(file, edge[1], edge[2]),
-                java.util.Arrays.copyOfRange(file, edge[2], edge[3]));
+                java.util.Arrays.copyOfRange(file, edge[2], edge[3]), rewind);
     }
 
     private static int longAt(byte[] file, int at) {

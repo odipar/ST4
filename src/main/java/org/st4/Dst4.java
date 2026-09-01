@@ -76,8 +76,9 @@ public final class Dst4 {
             // the container stores is the pass.
             decoded = St4Decompressor.decode(container.control(), container.literal(),
                     container.byteOffsets(), container.wordOffsets(), container.unit(),
-                    container.size(), St4Format.maxOffsetUnits(container.unit()));
-        } catch (AssertionError | IndexOutOfBoundsException e) {
+                    container.size(), St4Format.maxOffsetUnits(container.unit()),
+                    container.rewind());
+        } catch (AssertionError | IndexOutOfBoundsException | IllegalStateException e) {
             // With -ea a malformed stream trips a descriptive assertion; the
             // decoder trusts its input, so report rather than pretend.
             throw error("Corrupted or truncated ST4 data in " + inputName
@@ -94,8 +95,10 @@ public final class Dst4 {
         System.out.printf("File decompressed from %d to %d bytes, k=%d%s%s!%n",
                 file.length, output.length, container.unit(),
                 container.unit() == 1 ? "" : " (a whole number of units)",
-                decoded.repeatIndex() < 0 ? ""
-                        : ", looping from unit " + decoded.repeatIndex());
+                decoded.repeatIndex() >= 0 ? ", looping from unit " + decoded.repeatIndex()
+                        : container.rewind() < 0 ? ""
+                        : ", looping from unit " + container.rewind() / container.unit()
+                                + " by rewind");
     }
 
     private static RuntimeException error(String message) {

@@ -39,7 +39,7 @@
 ; raises an address error if they do not.
 ;
 ; -----------------------------------------------------------------------------
-; THE CONTAINER. An .st4 file is twenty bytes of header and then the four
+; THE CONTAINER. An .st4 file is twenty-four bytes of header and then the four
 ; streams, in order, each starting on a long boundary:
 ;
 ;    0  4  signature: 'S', '4', format version, ST4_UNIT
@@ -47,7 +47,8 @@
 ;    8  4  stream B, as a byte offset from the start of the header
 ;   12  4  stream C
 ;   16  4  stream D
-;   20 ..  stream A, then C, then D, then B
+;   20  4  the rewind point in bytes, or $FFFFFFFF when there is none
+;   24 ..  stream A, then C, then D, then B
 ;
 ; Stream B comes last, so the literal payload runs to the end of the file and
 ; borders whatever the caller loads after the container - a ring, say.
@@ -61,7 +62,7 @@
 ;       lea     asset(pc),a3
 ;       cmp.l   #ST4_SIGNATURE,(a3)     ; magic, version and k in one compare
 ;       bne.s   wrong_asset
-;       lea     20(a3),a0               ; stream A, where the header ends
+;       lea     24(a3),a0               ; stream A, where the header ends
 ;       movea.l a3,a2
 ;       adda.l  8(a3),a2                ; stream B
 ;       movea.l a3,a4
@@ -83,10 +84,19 @@
 ;   d2.w  signed byte offset: +lastOffset*UNIT during LITERALS,
 ;         -lastOffset*UNIT during MATCH, and zero once DONE
 ;
-; A stream packed with st4 -r never reaches DONE: its end marker installs one
-; last offset and the decoder matches it forever, re-arming 65535 units at a
-; time. Drive such a stream through ST4_resume with budgets and stop when you
-; have enough - ST4_decompress, which drains until DONE, would never return.
+; A stream packed with st4 -r whose loop fits the window never reaches DONE:
+; its end marker installs one last offset and the decoder matches it forever,
+; re-arming 65535 units at a time. Drive such a stream through ST4_resume with
+; budgets and stop when you have enough - ST4_decompress, which drains until
+; DONE, would never return.
+;
+; A loop longer than the window is yours to replay, and the header says where:
+; when the output reaches the rewind point, save these seven registers - all
+; but a1 - and when it reaches O, restore them and carry on, every pass. The
+; packer parsed the loop on its own, so nothing in it reaches before the
+; rewind point and every pass sees the same history. Arrange the budgets so a
+; call ends exactly on both points; the state mid-operation is saved as any
+; other, because there is nothing else to it.
 ;
 ; Calling convention, in full:
 ;
