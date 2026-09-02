@@ -1,12 +1,11 @@
 #!/usr/bin/env python3
 """Differential test for ST4_wrap.S at every unit size.
 
-Drives the counted-wrap decoder the way its contract demands: from a known
-output size, exactly T = ceil(O/C) calls, resetting the write pointer after
-each group of F = N/(C*UNIT) calls, and never polling for a DONE state it does
-not have. Checks every byte of every returned span, that both streams are
-consumed exactly, that nothing is written outside the ring, and that the packed
-metadata in the state's high words survives.
+Drives the counted ring as its caller must: from a known output size,
+T = ceil(O/C) calls, resetting the write pointer after every F = N/(C*UNIT)
+calls, and never polling for a done state it does not have. Checks every byte
+of every returned span, that all four streams are consumed exactly, that
+nothing is written outside the ring, and that the state's high words survive.
 
     python3 68k/test/emu/test_st4_wrap.py [--quick]
 """

@@ -1,26 +1,23 @@
 #!/usr/bin/env python3
-"""Three ways of reading ST4's control stream, cycle-counted on real streams.
+"""Three ways of reading ST4's bit stream, cycle-counted on real streams.
 
-ST4 spends a large part of its time turning stream A into flags and lengths, so
-it is worth knowing what that costs and what the alternatives would cost. This
-packs the test corpora with the real packer, recovers the exact sequence of
-operations from stream A, and makes three decoders reproduce that sequence:
+ST4 spends much of its time turning stream A into flags and lengths. This
+packs the test corpora with the packer, recovers the sequence of operations
+from stream A, and has three readers reproduce it:
 
-  V1  byte queue    ZX1's own reader: a $80-sentinel byte, refilled a byte at
-                    a time. What ST4 did before the offsets moved out.
-  V2  word queue    the same reader with a $8000 sentinel, refilled a word at
-                    a time. What ST4 does now. Same bits, half the refills,
-                    and only possible because stream A is nothing but bits.
+  V1  byte queue    ZX1's reader: a $80-sentinel byte, refilled a byte at a
+                    time.
+  V2  word queue    ST4's reader: a $8000 sentinel, refilled a word at a
+                    time. The same bits, half the refills, possible because
+                    stream A holds bits alone.
   V3  peek table    lengths in a stream of their own, written LSB first, read
                     through a 512-entry table indexed by the next 9 bits.
-                    Flags keep a word queue. The table is the classic fast
-                    Huffman-style reader.
+                    Flags keep a word queue.
 
-V3 exists to be measured, not to be shipped: on this data it loses, and this is
-the file that says by how much. The reason is in the length distribution - more
-than half of all lengths are 1, which interlaced Elias gamma spends ONE bit and
-about 30 cycles on, while any table needs a variable shift to consume a
-bit-granular code and a running count of valid bits to know when to refill.
+V3 loses on this data, and this file measures by how much: more than half of
+all lengths are 1, which interlaced Elias gamma reads in one bit and about 30
+cycles, while a table needs a variable shift per code and a count of valid
+bits to know when to refill.
 
     python3 68k/test/emu/bench_bits.py [--quick]
 """

@@ -1,16 +1,15 @@
 package org.st4;
 
 /**
- * The input as an array of k-byte units, big-endian as the 68000 loads them:
- * a unit fits an {@code int}, so comparisons are integer comparisons. Input
- * that is not a multiple of k is padded with zeros, and the padding is part
- * of the output the decoder produces.
+ * The input as k-byte units, one per {@code int}, big-endian as the 68000
+ * loads them. Input that is not a multiple of k is padded with zeros, and
+ * the padding is part of the decoder's output.
  */
 public final class Units {
 
     private Units() {}
 
-    /** Big-endian, so a unit reads the way the 68000 would load it. */
+    /** The units, big-endian. */
     public static int[] split(byte[] data, int unit) {
         int count = (data.length + unit - 1) / unit;
         int[] units = new int[count];
@@ -33,7 +32,7 @@ public final class Units {
         }
     }
 
-    /** The padded length in bytes: what the decoder will produce. */
+    /** The padded length in bytes: what the decoder produces. */
     public static int paddedLength(int length, int unit) {
         return (length + unit - 1) / unit * unit;
     }

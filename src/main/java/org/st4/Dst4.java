@@ -5,15 +5,11 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 
 /**
- * Command-line ST4 unpacker: the counterpart to {@link St4}, and the readable
- * reference the 68000 decoders are checked against.
- *
- * <p>What comes out is the <em>padded</em> data - a whole number of k-byte
- * units - because that is what the format stores and what the 68000 decoders
- * write. At {@code -k1} that is the input exactly; at {@code -k2} or
- * {@code -k4} it can be up to k-1 bytes longer, and this tool says so. For a
- * stream that loops, {@code -rN} plays the loop N times: the whole pass, and
- * then N-1 repeats of its loop section.
+ * Command-line ST4 unpacker, and the reference the 68000 decoders are checked
+ * against. The output is the padded data, a whole number of k-byte units, as
+ * the format stores it: at {@code -k1} the input, at {@code -k2} or
+ * {@code -k4} up to k-1 bytes longer. For a stream that loops, {@code -rN}
+ * writes the pass and then N-1 repeats of its loop section.
  */
 public final class Dst4 {
 
@@ -80,15 +76,13 @@ public final class Dst4 {
         St4Decompressor.Decoded decoded;
         byte[] output;
         try {
-            // One whole pass: a repeating stream would fill any size, but what
-            // the container stores is the pass - and -r asks for more of it.
+            // One whole pass; -r asks for more of it.
             decoded = St4Decompressor.decode(container.control(), container.literal(),
                     container.byteOffsets(), container.wordOffsets(), container.unit(),
                     container.size(), container.window(), container.rewind());
             output = played(container, decoded, times);
         } catch (AssertionError | IndexOutOfBoundsException | IllegalStateException e) {
-            // With -ea a malformed stream trips a descriptive assertion; the
-            // decoder trusts its input, so report rather than pretend.
+            // A malformed stream trips an assertion under -ea; report it.
             throw error("Corrupted or truncated ST4 data in " + inputName
                     + (e.getMessage() == null ? "" : ": " + e.getMessage()));
         } catch (IllegalArgumentException e) {
@@ -112,12 +106,10 @@ public final class Dst4 {
     }
 
     /**
-     * The pass, and then {@code times - 1} repeats of its loop section: what
-     * a decoder driven past the end of a looping stream produces. A stream
-     * that loops by itself is decoded again to that length, since its repeat
-     * fills whatever the pass did not; a stream that loops by rewind is
-     * replayed as its caller would, and every pass sees the same history, so
-     * the replay is the pass's loop section again.
+     * The pass and then {@code times - 1} repeats of its loop section, as a
+     * decoder driven past the end produces. A stream that loops by itself is
+     * decoded again to that length; a stream that loops by rewind repeats
+     * the pass's loop section, since every pass sees the same history.
      *
      * @throws IllegalArgumentException when the stream does not loop and more
      *     than one pass is asked for

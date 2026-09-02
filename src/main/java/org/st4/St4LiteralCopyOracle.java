@@ -4,11 +4,12 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * The true optimum of a parse with copies from the literal stream, by trying
- * every parse the format allows - possible on a dozen units or so, and there
- * to measure {@link St4LiteralCopySearch} against. It costs exactly what the compressor writes: literal runs, matches
- * new or repeated, copies at the window plus the literals between, strictly
- * shorter than that count, and reps of a copy, which resume just past it.
+ * The optimum of a parse with copies from the literal stream, by trying every
+ * parse the format allows: feasible on a dozen units, and there to measure
+ * {@link St4LiteralCopySearch} against. It costs what the compressor writes:
+ * literal runs, matches new or repeated, copies at the window plus the
+ * literals between and shorter than that count, and reps of a copy, which
+ * resume past it.
  */
 public final class St4LiteralCopyOracle {
 
@@ -41,8 +42,8 @@ public final class St4LiteralCopyOracle {
 
     /**
      * The cheapest parse of {@code units} at {@code window}, as a chain of
-     * blocks the compressor can write - copies as negative offsets - whose
-     * bits are exactly the compressor's.
+     * blocks the compressor writes, copies as negative offsets, whose bits
+     * are the compressor's.
      */
     public static St4Block optimize(int[] units, int unit, int window) {
         var oracle = new St4LiteralCopyOracle(units, unit, window);
@@ -59,12 +60,12 @@ public final class St4LiteralCopyOracle {
 
     /**
      * Extends the parse from {@code index} with every block the format
-     * allows there, keeping the cheapest complete one.
+     * allows there, keeping the cheapest complete parse.
      *
      * @param bits          the cost so far
      * @param lastOffset    the offset the decoder holds, as the compressor
-     *                      writes it: beyond the window for a copy, and less
-     *                      what the copy copied
+     *                      writes it: beyond the window for a copy, less what
+     *                      the copy copied
      * @param afterLiterals whether the last block was a literal run
      * @param first         whether the first block, which has no flag, is
      *                      still to come
@@ -161,8 +162,8 @@ public final class St4LiteralCopyOracle {
                 if (length == 2 && units[index] != units[literalPositions[source]]) {
                     break;
                 }
-                // The copied units must be one run in the output: the compressor
-                // names the source by output position and reads it as such.
+                // The copied units are one run in the output: the compressor
+                // gives the source as an output position.
                 if (literalPositions[source + length - 1] != literalPositions[source] + length - 1) {
                     break;
                 }

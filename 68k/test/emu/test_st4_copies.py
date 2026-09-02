@@ -3,15 +3,14 @@
 
 A stream packed with -c at a window of M units writes a match beyond M as a
 copy from the literal stream: offset minus M literal units behind the read
-pointer, in stream B, without moving it. A decoder built with ST4_WINDOW set
-to M tells the two apart by magnitude. This packs corpora that way at unit
-sizes 1, 2 and 4 and windows of 16, 64 and 256 units, builds the decoders for
-each window, and decodes under Unicorn as a plain 68000 - linearly with
+pointer, in stream B, without moving it. A decoder built with ST4_WINDOW = M
+tells the two apart by magnitude. This packs corpora that way at unit sizes
+1, 2 and 4 and windows of 16, 64 and 256 units, builds the decoders for each
+window, and decodes under Unicorn as a plain 68000, into one buffer with
 ST4.S, through a ring the size of the window with ST4_wrap.S, and with
-ST4_ring.S in both wrap modes - checking every output byte, that all four
+ST4_ring.S in both wrap modes, checking every output byte, that all four
 streams are consumed exactly, and that nothing is written outside the ring.
-The same builds also decode streams packed without copies, which a window
-build must read exactly as the plain build does.
+The same builds decode streams packed without copies as the plain build does.
 
     python3 68k/test/emu/test_st4_copies.py [--quick]
 """

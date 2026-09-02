@@ -4,13 +4,13 @@
 namespace Nt4;
 
 /// <summary>
-/// The input as an array of k-byte units, big-endian as the 68000 loads them.
-/// Input that is not a multiple of k is padded with zeros, and the padding is
-/// part of the output the decoder produces.
+/// The input as k-byte units, one per <c>int</c>, big-endian as the 68000
+/// loads them. Input that is not a multiple of k is padded with zeros, and
+/// the padding is part of the decoder's output.
 /// </summary>
 public static class Units
 {
-    /// <summary>Big-endian, so a unit reads the way the 68000 would load it.</summary>
+    /// <summary>The units, big-endian.</summary>
     /// <param name="data">The bytes to pack.</param>
     /// <param name="unit">Bytes per unit: 1, 2 or 4.</param>
     /// <returns>The units, the last padded with zero bytes if needed.</returns>
@@ -48,7 +48,7 @@ public static class Units
         }
     }
 
-    /// <summary>The padded length in bytes: what the decoder will produce.</summary>
+    /// <summary>The padded length in bytes: what the decoder produces.</summary>
     public static int PaddedLength(int length, int unit) =>
         (length + unit - 1) / unit * unit;
 }

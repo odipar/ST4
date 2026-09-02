@@ -5,29 +5,25 @@ using System.Globalization;
 
 namespace Nt4;
 
-/// <summary>
-/// Command-line ST4 packer: ZX1's blocks at a chosen unit granularity, with
-/// the literal payload in a stream of its own.
-/// </summary>
+/// <summary>Command-line ST4 packer, the port of the Java <c>St4</c>.</summary>
 /// <remarks>
-/// <c>Nt4</c> is the C# counterpart of the Java <c>St4</c> entry point.
-/// <c>-k1</c> is ZX1's granularity and should pack to within a byte or two of
-/// jx1; <c>-k2</c> and <c>-k4</c> trade ratio for a decoder that runs half or
-/// a quarter as many operations and copies two or four bytes at a time.
+/// <c>-k1</c> is ZX1's unit size and packs to within a few percent of jx1,
+/// which a test holds; <c>-k2</c> and <c>-k4</c> trade ratio for a decoder
+/// that runs half or a quarter as many operations.
 /// </remarks>
 public static class Nt4
 {
     /// <summary>Runs the packer command.</summary>
     /// <param name="args">
     /// Arguments after the executable name. Syntax:
-    /// <c>nt4 [-f] [-kK] [-mN] [-lN] input [output.st4]</c>.
+    /// <c>nt4 [-f] [-c[S]] [-kK] [-mN] [-lN] [-rR] input [output.st4]</c>.
     /// </param>
     /// <returns>Zero on success; one after a user-facing argument or file error.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="args"/> is null.</exception>
     public static int Run(string[] args)
     {
         ArgumentNullException.ThrowIfNull(args);
-        Console.WriteLine("NT4: aligned split-stream packer v4.0 by Robbert van Dalen, "
+        Console.WriteLine("NT4: aligned split-stream packer v7.0 by Robbert van Dalen, "
             + "based on ZX1 v1.5 by Einar Saukas");
 
         int unit = 1;
@@ -127,8 +123,8 @@ public static class Nt4
         {
             return Cli.Error(problem);
         }
-        // A word offset is stored pre-scaled, so the window is a byte figure:
-        // reaching 32512 units at k=4 would not fit the word it is kept in.
+        // A word offset is stored scaled to bytes, so the window is a byte
+        // figure: 32512 units at k=4 would not fit the word.
         if (offsetLimit > Format.MaxOffsetUnits(unit))
         {
             offsetLimit = Format.MaxOffsetUnits(unit);
@@ -162,10 +158,10 @@ public static class Nt4
         int window = offsetLimit;
         if (repeatIndex >= 0 && units.Length - repeatIndex > offsetLimit)
         {
-            // The loop is longer than the window, so no match can reach across
-            // it and the decoder cannot loop it alone: the caller will replay
-            // the stream from the state it saved at the loop point. For every
-            // pass to see the same history, the loop is parsed on its own.
+            // The loop is longer than the window, so no match reaches across
+            // it and the caller replays the stream from the state it saved at
+            // the loop point. The loop is parsed on its own, so every pass
+            // sees the same history.
             int[] intro = units[..repeatIndex];
             int[] loop = units[repeatIndex..];
             result = Compressor.CompressRewinding(
@@ -176,8 +172,8 @@ public static class Nt4
         }
         else
         {
-            // The loop fits the window, so the stream loops by itself: its end
-            // becomes an endless match back to the loop point.
+            // The loop fits the window: the end is an endless match back to
+            // the loop point.
             result = Compressor.Compress(
                 Parse(units, unit, offsetLimit, maxOpLength, copies, search), units, unit,
                 maxOpLength, repeatIndex, window);
@@ -218,10 +214,9 @@ public static class Nt4
     }
 
     /// <summary>
-    /// The parse: the event-driven optimizer, or with <c>-c</c> the search that
-    /// lets a match beyond the window copy from the literal stream - with no
-    /// seconds, just its opening passes, which are the one-shot heuristic on
-    /// the search's parser; with seconds, the search from there.
+    /// The parse: the event-driven optimizer, or with <c>-c</c> the opening
+    /// passes of the search that copies from the literal stream, and with
+    /// seconds the search from there.
     /// </summary>
     private static Block Parse(int[] units, int unit, int window, int maxOpLength, bool copies,
                                double seconds)
@@ -234,15 +229,11 @@ public static class Nt4
     }
 
     /// <summary>
-    /// Twenty-eight bytes of header, then A, B, C and D in order - the bits,
-    /// the literals, the byte offsets, the word offsets - each starting on a
-    /// long boundary. Nothing says how long a stream is: it runs to the next,
-    /// and the last runs to the end of the file.
+    /// Twenty-eight bytes of header, then A, B, C and D, each on a long
+    /// boundary. No length is stored: a stream runs to the next, and the last
+    /// to the end of the file.
     /// </summary>
-    /// <remarks>
-    /// Public because a container is also how other formats embed an ST4
-    /// stream: a yx6 file holds up to fifty of them.
-    /// </remarks>
+    /// <remarks>Public because other formats embed containers, many at once.</remarks>
     /// <param name="result">The four streams to lay out.</param>
     /// <returns>The complete container, header first.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="result"/> is null.</exception>

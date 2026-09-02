@@ -3,18 +3,16 @@
 
 namespace Nt4;
 
-/// <summary>
-/// The readable ST4 decoder: what the 68000 versions have to agree with, in
-/// C#.
-/// </summary>
+/// <summary>The reference decoder in C#, which the 68000 decoders have to agree with.</summary>
 /// <remarks>
 /// ZX1's state machine with four changes: literals come from stream B and
 /// offsets from stream C or D by width; lengths and offsets count units; the
-/// end marker's extra bit can turn the end into an endless match, the repeat;
-/// and an offset beyond the window copies from the literal stream behind the
-/// read pointer, which stays put, advancing the offset by what was copied.
-/// Malformed streams throw <see cref="InvalidDataException"/>, where the Java
-/// reference trips a <c>-ea</c> assertion.
+/// end marker's extra bit turns the end into an endless match, the repeat;
+/// and an offset beyond the window copies <c>offset - window</c> units from
+/// behind the literal read pointer, which stays where it is, and advances
+/// the offset by what was copied. A malformed stream throws
+/// <see cref="InvalidDataException"/>, where the Java reference trips an
+/// assertion.
 /// </remarks>
 public sealed class Decompressor
 {
@@ -72,12 +70,9 @@ public sealed class Decompressor
             Format.MaxOffsetUnits(unit));
 
     /// <summary>
-    /// What a decode produced: the output, and how the stream ended. A stream
-    /// that repeats reports its loop point - the unit the output continues
-    /// from after the last one, so the stream decodes as
-    /// <c>units[0..R) units[R..O)</c> forever; a stream that simply ends
-    /// reports -1. For a repeating stream any size from one whole pass up is
-    /// decodable - the repeat fills whatever the pass itself did not.
+    /// The output and how the stream ended: the loop point R of a repeating
+    /// stream, which decodes as <c>units[0..R) units[R..O)</c> forever, or
+    /// -1. A repeating stream decodes to any size from one pass up.
     /// </summary>
     /// <param name="Output">The decoded bytes, padding included.</param>
     /// <param name="RepeatIndex">The loop point as a unit index, or -1.</param>
@@ -85,9 +80,9 @@ public sealed class Decompressor
 
     /// <summary>
     /// As above, at the window the stream was packed for: a match reaches at
-    /// most <paramref name="window"/> units back, which is what makes a
-    /// stream safe for a ring of that many units, and an offset beyond it
-    /// copies from the literal stream.
+    /// most <paramref name="window"/> units back, so a stream that decodes is
+    /// safe for a ring of that many units, and an offset beyond it copies
+    /// from the literal stream.
     /// </summary>
     /// <param name="control">Stream A, the bits.</param>
     /// <param name="literal">Stream B, the literal payload.</param>
@@ -95,7 +90,7 @@ public sealed class Decompressor
     /// <param name="wordOffsets">Stream D, one word per offset.</param>
     /// <param name="unit">Bytes per unit: 1, 2 or 4.</param>
     /// <param name="size">The output size in bytes, a multiple of the unit.</param>
-    /// <param name="window">The window in units: matches within it, copies from D beyond.</param>
+    /// <param name="window">The window in units: matches within it, copies from stream B beyond.</param>
     /// <returns>The decoded bytes, padding included.</returns>
     /// <exception cref="ArgumentNullException">A stream is null.</exception>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="unit"/> is not 1, 2 or 4.</exception>
@@ -116,8 +111,8 @@ public sealed class Decompressor
     /// <param name="wordOffsets">Stream D, one word per offset.</param>
     /// <param name="unit">Bytes per unit: 1, 2 or 4.</param>
     /// <param name="size">The output size in bytes, a multiple of the unit.</param>
-    /// <param name="window">The window in units: matches within it, copies from D beyond.</param>
-    /// <returns>The decoded bytes and the repeat offset, zero when the stream ends.</returns>
+    /// <param name="window">The window in units: matches within it, copies from stream B beyond.</param>
+    /// <returns>The decoded bytes and the loop point, -1 when the stream ends.</returns>
     /// <exception cref="ArgumentNullException">A stream is null.</exception>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="unit"/> is not 1, 2 or 4.</exception>
     /// <exception cref="ArgumentException"><paramref name="size"/> is not a whole number of units.</exception>
@@ -132,10 +127,10 @@ public sealed class Decompressor
 
     /// <summary>
     /// As above, holding a stream to its rewind point: from
-    /// <paramref name="rewindAt"/> bytes on, no match may reach before it. That
-    /// is what makes the loop replayable from the state saved there - every
-    /// pass then sees the same history - and a stream that breaks it would loop
-    /// wrongly on the 68000, so the reference refuses it instead.
+    /// <paramref name="rewindAt"/> bytes on, no match reaches before it, so
+    /// the loop replays from the state saved there and every pass sees the
+    /// same history. A stream that reaches before it would loop wrongly on
+    /// the 68000, and is rejected here.
     /// </summary>
     /// <param name="control">Stream A, the bits.</param>
     /// <param name="literal">Stream B, the literal payload.</param>
@@ -143,9 +138,9 @@ public sealed class Decompressor
     /// <param name="wordOffsets">Stream D, one word per offset.</param>
     /// <param name="unit">Bytes per unit: 1, 2 or 4.</param>
     /// <param name="size">The output size in bytes, a multiple of the unit.</param>
-    /// <param name="window">The window in units: matches within it, copies from D beyond.</param>
+    /// <param name="window">The window in units: matches within it, copies from stream B beyond.</param>
     /// <param name="rewindAt">The rewind point in bytes, or <see cref="Format.NoRewind"/>.</param>
-    /// <returns>The decoded bytes and the repeat index, -1 when the stream ends.</returns>
+    /// <returns>The decoded bytes and the loop point, -1 when the stream does not repeat.</returns>
     /// <exception cref="ArgumentNullException">A stream is null.</exception>
     /// <exception cref="ArgumentOutOfRangeException"><paramref name="unit"/> is not 1, 2 or 4.</exception>
     /// <exception cref="ArgumentException"><paramref name="size"/> is not a whole number of units.</exception>
@@ -246,8 +241,8 @@ public sealed class Decompressor
 
     private void BeginMatchFromNewOffset()
     {
-        // Two class bits: byte or word, then which bank - or, for a word, the
-        // one code that means the stream is over.
+        // Two class bits: byte or word, then the bank, or for a word the end
+        // of the stream.
         if (ReadBit())
         {
             int bank = ReadBit() ? 1 : 0;
@@ -284,9 +279,8 @@ public sealed class Decompressor
 
     /// <summary>
     /// Copies <paramref name="length"/> units from the literal stream,
-    /// <c>lastOffset - window</c> units behind the read pointer, without
-    /// moving the pointer, and advances the offset by what it copied - as the
-    /// 68000 decoders do.
+    /// <c>lastOffset - window</c> units behind the read pointer, which stays
+    /// where it is, and advances the offset by what it copied.
     /// </summary>
     private void CopyFromLiterals(int length)
     {
@@ -309,17 +303,15 @@ public sealed class Decompressor
     }
 
     /// <summary>
-    /// The end code's extra bit: a plain end, or the repeat - one last word
-    /// offset from stream D, matched until the output the caller asked for is
-    /// full. The 68000 decoders run the same match 65535 units at a time,
-    /// re-armed forever.
+    /// The end code's extra bit: a plain end, or the repeat, one last word
+    /// offset from stream D matched until the output is full. The 68000
+    /// decoders run the same match 65535 units at a time, re-armed forever.
     /// </summary>
     private void EndOrRepeat()
     {
         if (ReadBit())
         {
-            // Stream D holds the distance back to the loop point; the loop
-            // point itself is where the pass so far ends, minus that.
+            // Stream D holds the distance back to the loop point.
             int distance = ReadWordOffset();
             if (distance <= 0)
             {

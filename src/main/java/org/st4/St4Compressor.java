@@ -5,31 +5,28 @@ import java.util.Arrays;
 import org.jspecify.annotations.Nullable;
 
 /**
- * Writes an ST4 parse out as four streams: bits and gamma lengths in A,
- * literal units in B, byte offsets in C and word offsets in D. A word offset
- * is written as {@code -offset * unit} and a byte offset as
- * {@code bank * 256 + 256 - offset}, which is what the 68000 decoders keep in
- * a register, and stream A is padded to an even length for their word-wide
- * refill.
+ * Writes a parse as the four streams: bits and gamma lengths in A, literal
+ * units in B, byte offsets in C, word offsets in D. A word offset is written
+ * as {@code -offset * unit} and a byte offset as
+ * {@code bank * 256 + 256 - offset}, the values the 68000 decoders keep in a
+ * register; stream A is padded to an even length for their word-wide refill.
  *
- * <p>Matches longer than {@code maxOpLength} units are split, since the
+ * <p>A match longer than {@code maxOpLength} units is split, since the
  * decoders count an operation in a word; a literal run cannot be, and
- * {@link Result#longestOp()} reports what came out. A copy from the literal
- * stream is written as an offset beyond the window: the window plus the
- * literal units between its source and itself, counted from what was actually
- * written, and strictly shorter than that count - the one copy that would not
- * be gives up its last unit to a literal. A stream written from two parses
- * back to back, the intro and the loop of a rewind stream, merges two literal
- * runs that meet at the seam, and writes a one-unit rep the intro left no
- * offset for as a literal.
+ * {@link Result#longestOp()} reports it. A copy from the literal stream is
+ * written as the window plus the literal units between its source and
+ * itself, and is shorter than that count: the one copy that would not be
+ * gives its last unit to a literal. The intro and the loop of a rewind
+ * stream are two parses written back to back; two literal runs that meet at
+ * the seam merge, and a one-unit rep the intro left no offset for is written
+ * as a literal.
  */
 public final class St4Compressor {
 
     /**
-     * The four streams, and what the caller needs to know about them.
-     * {@code rewindIndex} is the loop point of a stream the caller loops by
-     * rewind, in units, or -1 when there is nothing for the caller to do;
-     * {@code window} is what the header records, and {@code copies} how many
+     * The four streams and their figures. {@code rewindIndex} is the loop
+     * point of a stream the caller loops by rewind, in units, or -1;
+     * {@code window} is what the header records; {@code copies} counts the
      * blocks copied from the literal stream.
      */
     public record Result(byte[] control, byte[] literal, byte[] byteOffsets,
@@ -37,15 +34,16 @@ public final class St4Compressor {
                          int operations, int rewindIndex, int window, int copies,
                          int controlBits, boolean repeatWord) {
 
-        /** Bytes all four streams take together, which is what a comparison wants. */
+        /** Bytes all four streams take together. */
         public int packedSize() {
             return control.length + literal.length + byteOffsets.length
                     + wordOffsets.length;
         }
 
         /**
-         * Bits the parse itself cost: everything written but the end code and
-         * its repeat bit, and stream A's padding - what a parse's chain counts.
+         * Bits the parse cost, what a chain counts: everything written but
+         * the end code, its repeat bit, the repeat's word and stream A's
+         * padding.
          */
         public int bits() {
             return controlBits - 4 + 8 * (literal.length + byteOffsets.length
@@ -72,9 +70,9 @@ public final class St4Compressor {
     private int copies;
 
     // The walk: where the next unit comes from, the literal run gathered but
-    // not yet written, the offset the stream currently holds, whether the
-    // first block - which has no flag - is still to come, and how many
-    // literal units precede each position written so far.
+    // not yet written, the offset the stream holds, whether the first block,
+    // which has no flag, is still to come, and how many literal units precede
+    // each position written so far.
     private int readIndex;
     private int pendingLiterals;
     private int lastOffset = St4Optimizer.INITIAL_OFFSET;
@@ -94,9 +92,9 @@ public final class St4Compressor {
     }
 
     /**
-     * As above, but the stream repeats from unit {@code repeatIndex}: the
-     * container encodes {@code units[0..R) units[R..O)} forever, the distance
-     * O-R written as one last word offset. -1 means a plain end.
+     * As above, repeating from unit {@code repeatIndex}: the stream decodes as
+     * {@code units[0..R) units[R..O)} forever, the distance O-R written as
+     * one last word offset. -1 ends the stream.
      */
     public static Result compress(St4Block optimal, int[] units, int unit, int maxOpLength,
                                   int repeatIndex) {
@@ -105,9 +103,8 @@ public final class St4Compressor {
     }
 
     /**
-     * As above, for a parse made at {@code window} units: an offset beyond it
-     * is a copy from the literal stream, so the parse's matches must keep
-     * within it and its copies are written past it.
+     * As above, for a parse made at {@code window} units: the parse's matches
+     * keep within it, and its copies are written as offsets beyond it.
      */
     public static Result compress(St4Block optimal, int[] units, int unit, int maxOpLength,
                                   int repeatIndex, int window) {
@@ -118,10 +115,10 @@ public final class St4Compressor {
     }
 
     /**
-     * A stream that loops by rewind: the intro {@code units[0..R)} - null when
-     * R is 0 - and the loop {@code units[R..O)} come from separate parses, so
+     * A stream that loops by rewind: the intro {@code units[0..R)}, null when
+     * R is 0, and the loop {@code units[R..O)} come from separate parses, so
      * no match in the loop reaches before unit {@code rewindIndex}, where the
-     * caller saves the decoder's state to replay from. The stream ends plainly.
+     * caller saves the decoder's state. The stream ends plainly.
      */
     public static Result compressRewinding(@Nullable St4Block intro, St4Block loop,
                                            int[] units, int unit, int maxOpLength,
@@ -186,9 +183,8 @@ public final class St4Compressor {
         flushLiterals();
         assert readIndex == units.length : "the parses did not cover the input";
 
-        // End marker, then the repeat bit: end for good, or install one last
-        // word offset from stream D - the distance back to the loop point -
-        // and match it forever.
+        // The end marker, then the repeat bit: end, or one last word offset
+        // in stream D, the distance back to the loop point, matched forever.
         writeBit(true);
         writeBit(false);
         writeBit(true);
@@ -214,11 +210,11 @@ public final class St4Compressor {
 
     /**
      * A copy from the literal stream, {@code distance} units back in the
-     * output for {@code length} units, in pieces the counters can hold. Each
-     * piece is written as a match at the window plus the literals between its
-     * source and itself; a piece that would be exactly as long as that count
-     * gives up its last unit to a literal, so the decoder's offset - which it
-     * advances by what it copies - never reaches zero.
+     * output for {@code length} units, in pieces the counters hold. A piece
+     * is written as a match at the window plus the literals between its
+     * source and itself; a piece as long as that count gives its last unit
+     * to a literal, so the decoder's offset, advanced by what it copies,
+     * never reaches zero.
      */
     private void copy(int distance, int length, int maxOpLength) {
         int pieces = maxOpLength < 3 ? 1 : (length - 1) / maxOpLength + 1;
@@ -280,8 +276,8 @@ public final class St4Compressor {
     }
 
     /**
-     * Writes the literal run gathered so far, if there is one: its flag -
-     * unless it opens the stream - its length, and its units into stream B.
+     * Writes the literal run gathered so far, if any: its flag, unless it
+     * opens the stream, its length, and its units into stream B.
      */
     private void flushLiterals() {
         if (pendingLiterals == 0) {
@@ -305,9 +301,9 @@ public final class St4Compressor {
     }
 
     /**
-     * The two class bits, then the offset itself into whichever stream it
-     * belongs to. The class bits are also what keeps the operation an even
-     * number of bits long, which is what lets the decoder skip refill checks.
+     * The two class bits, then the offset into its stream. Two class bits
+     * keep every operation an even number of bits, so a decoder checks its
+     * refill on gamma continuation bits alone.
      */
     private void writeOffsetOf(int offset) {
         if (offset <= St4Format.BYTE_OFFSET_LIMIT) {
@@ -339,8 +335,8 @@ public final class St4Compressor {
     }
 
     /**
-     * Bits live in stream A, in the byte reserved when the reservoir ran dry -
-     * so a set bit patches that byte where it already sits.
+     * A bit goes into the byte reserved when the last one filled; a set bit
+     * patches it in place.
      */
     private void writeBit(boolean value) {
         bitsWritten++;

@@ -7,26 +7,27 @@ using System.Globalization;
 namespace Nt4;
 
 /// <summary>
-/// The long-running optimizer for streams whose matches beyond the window
-/// copy from the literal stream: a search over which units are literal, each
-/// step scored by an exact parse for that choice and by what the compressor
-/// then writes, run for as long as it is given - the twin of the Java
-/// <c>St4LiteralCopySearch</c>.
+/// The optimizer for streams with copies from the literal stream: a search
+/// over which units are literal, each step scored by an exact parse for that
+/// choice and by what the compressor then writes, for as long as it is given.
+/// The port of the Java <c>St4LiteralCopySearch</c>.
 /// </summary>
 /// <remarks>
-/// A dictionary is a set of forced literals: they stay literal, a copy may
-/// come only from them, the parse decides the rest. The search opens with the
-/// one-shot heuristic - the literals of a full-window parse, holes filled,
-/// shrunk to what gets copied from - which is what <c>nt4 -c</c> alone
-/// writes; given time it sweeps every literal run keeping
-/// what packs smaller, then anneals with random moves that free, seed, extend
-/// or trim runs, returning to the best when it stalls. The parse is
-/// <see cref="FastOptimizer"/>'s DP with copies added - sources through
-/// two-unit chains over the dictionary, the rep of a copy as a ring rep at the
-/// same output distance, a min-tree literal channel, a node pool, and
-/// checkpointed restarts from the first changed unit. Copies are costed with
-/// the dictionary's own literal count, a lower bound, so every copy is valid;
-/// the compressor's bits are the score.
+/// A dictionary is a set of forced literals: they stay literal, a copy comes
+/// only from them, the parse decides the rest. The opening passes, what
+/// <c>nt4 -c</c> alone writes, take the literals of a full-window parse, fill
+/// holes of a few units, and shrink the dictionary to what gets copied from.
+/// Given time, a sweep frees or trims every literal run, keeping what packs
+/// smaller; then random moves free, seed, extend or trim runs, accepted when
+/// they pack smaller and by annealing when they do not, and the search
+/// returns to the best and sweeps again when it stalls. The parse is
+/// <see cref="FastOptimizer"/>'s DP with copies added: sources found through
+/// two-unit chains over the dictionary, the rep of a copy as a ring rep at
+/// the same output distance with literal shadows at the source, the literal
+/// channel a min-tree keyed by match end, chains rebuilt from a node pool,
+/// and every parse restarted from a checkpoint before the first changed unit.
+/// A copy is costed with the dictionary's own literal count, a lower bound,
+/// so every copy is valid; the compressor's bits are the score.
 /// </remarks>
 public static class LiteralCopySearch
 {
@@ -38,10 +39,10 @@ public static class LiteralCopySearch
     private const byte Copy = 3;         // a copy from the literal stream
     private const byte CopyRep = 4;      // a rep of the last copy, after literals
 
-    /// <summary>Holes of up to this many units between dictionary runs are filled, at the start.</summary>
+    /// <summary>Holes of up to this many units between dictionary runs are filled in the opening passes.</summary>
     private const int Hole = 3;
 
-    /// <summary>Passes of the one-shot heuristic the search starts from.</summary>
+    /// <summary>The opening passes, at most.</summary>
     private const int Passes = 4;
 
     /// <summary>The annealing temperature, in bits, at the start and at the end.</summary>
@@ -55,14 +56,14 @@ public static class LiteralCopySearch
         2 * (31 - System.Numerics.BitOperations.LeadingZeroCount((uint)value)) + 1;
 
     /// <summary>
-    /// Searches for <paramref name="seconds"/>, reporting improvements on
-    /// stdout, and returns the best parse found: copies from the literal
+    /// Searches for <paramref name="seconds"/>, zero for the opening passes
+    /// alone, and returns the best parse found: copies from the literal
     /// stream as negative offsets, matches within the window as positive ones.
     /// </summary>
     /// <param name="units">The input as k-byte units.</param>
     /// <param name="unit">Bytes per unit.</param>
     /// <param name="window">The furthest a match may reach back, in units.</param>
-    /// <param name="maxOpLength">The compressor's operation limit, which the score honours.</param>
+    /// <param name="maxOpLength">The compressor's operation limit, which the score counts.</param>
     /// <param name="seconds">How long to search.</param>
     /// <param name="progress">Whether to report improvements on stdout.</param>
     /// <returns>The final block of the best parse.</returns>
@@ -76,10 +77,7 @@ public static class LiteralCopySearch
             progress);
     }
 
-    /// <summary>
-    /// Searches for exactly <paramref name="steps"/> steps from
-    /// <paramref name="seed"/>, which makes the result reproducible; for the tests.
-    /// </summary>
+    /// <summary>Searches for <paramref name="steps"/> steps from <paramref name="seed"/>, reproducibly; for the tests.</summary>
     internal static Block Optimize(int[] units, int unit, int window, int maxOpLength,
                                    long steps, long seed) =>
         new Search(units, unit, window, maxOpLength, seed).Run(long.MaxValue, steps, false);
@@ -123,8 +121,8 @@ public static class LiteralCopySearch
             count = units.Length;
             random = new JavaRandom(seed);
             parser = new Parser(units, unit, window);
-            // Start as the one-shot heuristic does: the full-window parse's
-            // literals, holes filled, shrunk to what gets copied from.
+            // The opening passes: the full-window parse's literals, holes
+            // filled, shrunk to what gets copied from.
             int reach = Format.MaxOffsetUnits(unit);
             bool[] dictionary = Filled(LiteralCopySearch.LiteralMask(
                 EventOptimizer.Optimize(units, unit, reach, false), count));
@@ -157,7 +155,7 @@ public static class LiteralCopySearch
 
         /// <summary>
         /// Makes <paramref name="parsed"/>, the parse just made, the incumbent,
-        /// with its own literals as the dictionary from here on.
+        /// its own literals the dictionary from here on.
         /// </summary>
         private void Adopt(Block parsed)
         {
@@ -220,8 +218,8 @@ public static class LiteralCopySearch
             {
                 Report("start");
             }
-            // Descend first: most of what the heuristic forces is better
-            // free, and a sweep finds that run by run.
+            // Descend first: most of what the opening passes force packs
+            // smaller free, and a sweep finds that run by run.
             Sweep();
             while (!Exhausted())
             {
@@ -317,7 +315,7 @@ public static class LiteralCopySearch
             }
         }
 
-        /// <summary>Un-forces [from, to) if that packs smaller.</summary>
+        /// <summary>Frees [from, to) when that packs smaller.</summary>
         private bool Improve(int from, int to, string move)
         {
             bool[] proposal = (bool[])forced.Clone();
@@ -386,7 +384,7 @@ public static class LiteralCopySearch
             return runs[random.NextInt(runs.Count)];
         }
 
-        /// <summary>Un-forces a literal run, or part of one: the parse may then match it.</summary>
+        /// <summary>Frees a literal run, or part of one, for the parse to match.</summary>
         private void Free(bool[] dictionary)
         {
             int[]? run = PickRun();
@@ -523,9 +521,9 @@ public static class LiteralCopySearch
     // ---------------------------------------------------------------- parser
 
     /// <summary>
-    /// The exact parse for one dictionary, on arrays reused across calls. The
-    /// state index space is shared: ring offsets 1..window and copy distances
-    /// window+1..count-1 never meet.
+    /// The exact parse for one dictionary, on arrays reused across calls. Ring
+    /// offsets 1..window and copy distances window+1..count-1 share one state
+    /// index space and never meet.
     /// </summary>
     internal sealed class Parser
     {
@@ -535,8 +533,8 @@ public static class LiteralCopySearch
         private readonly int window;
         private readonly int reach;
 
-        // Per state index: the best chain ending in a match or copy there -
-        // its cost, end, and how to rebuild it - and its literal extension.
+        // Per state index: the best chain ending in a match or copy there,
+        // its cost, end and how to rebuild it, and its literal extension.
         private readonly int[] stateBits;
         private readonly int[] stateEnd;
         private readonly byte[] stateKind;
@@ -556,8 +554,8 @@ public static class LiteralCopySearch
         private readonly int[] bestLength;
 
         // The dictionary as prefix counts, and the input's two-unit chains:
-        // the previous position with the same two units, whatever the
-        // dictionary, which does not change between parses.
+        // the previous position with the same two units, the same for every
+        // dictionary.
         private readonly int[] forcedBefore;
         private readonly int[] prevSame2;
         private bool[] forced = Array.Empty<bool>();
@@ -591,7 +589,7 @@ public static class LiteralCopySearch
         private readonly long[] tree;
 
         // Checkpoints: the state before position k*checkpoint, for the base
-        // dictionary - the last parse accepted - and for the parse under way.
+        // dictionary, the last parse accepted, and for the parse under way.
         // A parse restarts from the last checkpoint before its dictionary
         // first differs from the base's, since nothing before depends on
         // what comes after. Nodes are appended past the base's, so a
@@ -841,12 +839,12 @@ public static class LiteralCopySearch
                     }
                 }
 
-                // Copies. A copy needs two units, so the runs that matter are
-                // found by the two-unit chain, restricted to dictionary pairs
-                // beyond the window; a run in progress that the chain no longer
-                // lists ends here, and is visited for its last unit; and a
-                // distance whose last copy could still be repped is visited
-                // wherever its unit matches, since a rep may be one unit.
+                // Copies. A copy needs two units, so the two-unit chain finds
+                // the runs, restricted to dictionary pairs beyond the window;
+                // a run in progress the chain no longer lists ends here and is
+                // visited for its last unit; a distance whose last copy could
+                // still be repped is visited wherever its unit matches, since
+                // a rep may be one unit.
                 (activePrev, activeCur) = (activeCur, activePrev);
                 activePrevCount = activeCurCount;
                 activeCurCount = 0;
@@ -918,7 +916,7 @@ public static class LiteralCopySearch
         }
 
         /// <summary>
-        /// A copy distance whose unit matches at <paramref name="index"/>, with
+        /// A copy distance whose unit matches at <paramref name="index"/> with
         /// the source in the dictionary: continues or starts its run, and
         /// enters the rep of the last copy at that distance and the copy
         /// ending here.
@@ -929,7 +927,7 @@ public static class LiteralCopySearch
             if (stamp[distance] != index - 1)
             {
                 // A run starts. Its rep continues the last copy at this
-                // distance, if the literals since have literal shadows at
+                // distance when the literals since have literal shadows at
                 // the source.
                 matchLength[distance] = 1;
                 litNode[distance] = -1;
@@ -968,8 +966,8 @@ public static class LiteralCopySearch
             if (run > 1)
             {
                 // Literals from the source's last unit to here: a copy of n
-                // units reads back n - 1 more, and must leave at least one
-                // literal between.
+                // units reads back n - 1 more and leaves at least one literal
+                // between.
                 int between = forcedBefore[index] - forcedBefore[p];
                 if (between < 2)
                 {
@@ -1011,8 +1009,8 @@ public static class LiteralCopySearch
 
         /// <summary>
         /// Makes the parse just made the base for the ones to come: its
-        /// checkpoints stand, its nodes are kept, and its dictionary is what
-        /// the next parse is compared against.
+        /// checkpoints stand, its nodes are kept, and the next parse is
+        /// compared against its dictionary.
         /// </summary>
         internal void Accept()
         {
@@ -1020,9 +1018,9 @@ public static class LiteralCopySearch
             if (poolTop > 4L * fullNodes + 65536)
             {
                 // The pool holds the tails of every parse since the last full
-                // one; one full parse of the base compacts it. The yardstick
-                // is what a full parse takes, so the compaction cannot find
-                // the pool too big again.
+                // one; one full parse of the base compacts it. The limit is a
+                // multiple of what a full parse takes, so the compaction does
+                // not find the pool too big again.
                 hasBase = false;
                 poolTop = 0;
                 Parse(baseForced);
@@ -1127,7 +1125,7 @@ public static class LiteralCopySearch
             bestLength[2] = 2;
             nodes = poolTop;
             // The fake block every chain hangs from: one unit back, ending
-            // just before the stream, costing -1 so the first flag is free.
+            // before the stream, costing -1 so the first flag is free.
             int root = NewNode(New, -1, Optimizer.InitialOffset, 0, -1, -1);
             stateBits[Optimizer.InitialOffset] = -1;
             stateEnd[Optimizer.InitialOffset] = -1;

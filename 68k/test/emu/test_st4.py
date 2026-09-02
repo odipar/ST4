@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Differential test for ST4.S: the 68000 decoder against the Java packer.
 
-Packs each corpus with the real ST4 packer at unit sizes 1, 2 and 4, assembles
-ST4.S once per unit size, and decodes under Unicorn as a plain 68000 - one shot
-and resumed in chunks - checking every output byte, that all four streams are
+Packs each corpus with the packer at unit sizes 1, 2 and 4, assembles ST4.S
+once per unit size, and decodes under Unicorn as a plain 68000, in one call
+and resumed in chunks, checking every output byte, that all four streams are
 consumed exactly, and that the caller's registers survive.
 
     python3 68k/test/emu/test_st4.py [--quick]

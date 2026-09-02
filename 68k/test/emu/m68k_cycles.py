@@ -1,7 +1,6 @@
-"""The MC68000 instruction knowledge bench_bits needs: rmac listing parsing
-and per-instruction cycle counts. Extracted from odipar/ST1's
-68k/test/emu/cycle_model.py, which remains the authority for ST1's timing
-tables; this copy carries only what a benchmark harness must know."""
+"""What bench_bits needs of the MC68000: rmac listing parsing and
+per-instruction cycle counts, copied from odipar/ST1's
+68k/test/emu/cycle_model.py and cut to what the benchmark uses."""
 
 from __future__ import annotations
 

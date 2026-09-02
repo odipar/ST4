@@ -4,18 +4,19 @@
 namespace Nt4;
 
 /// <summary>
-/// The event-driven ST4 optimizer: the same costs as <see cref="FastOptimizer"/>,
-/// without visiting every (position, offset) pair. The Java
-/// <c>St4EventOptimizer</c> is the reference.
+/// The event-driven optimizer: the costs of <see cref="FastOptimizer"/>
+/// without visiting every (position, offset) pair. The port of the Java
+/// <c>St4EventOptimizer</c>.
 /// </summary>
 /// <remarks>
-/// Between the start and end of a match run every candidate's cost is a closed
-/// form of the position, so this class emits three channel minima per position
-/// from range structures and does per-offset work only where a run starts or
-/// ends. It reproduces the fast optimizer's cost array exactly; where
-/// candidates tie the chain may differ, the packed size cannot.
+/// Between the start and end of a match run every candidate's cost is a
+/// closed form of the position, so this class takes three channel minima per
+/// position from range structures and does per-offset work only where a run
+/// starts or ends. It reproduces the fast optimizer's cost array exactly;
+/// where candidates tie the chain may differ, the packed size cannot.
 /// <see cref="Optimize(int[], int, int, bool)"/> counts the events first and
-/// falls back to <see cref="FastOptimizer"/> on run-churny data.
+/// falls back to <see cref="FastOptimizer"/> where runs are a step or two
+/// long.
 /// </remarks>
 public sealed class EventOptimizer
 {
@@ -82,10 +83,9 @@ public sealed class EventOptimizer
     }
 
     /// <summary>
-    /// Returns the last block of an optimal parse of <paramref name="units"/> -
-    /// the same cost as <see cref="FastOptimizer"/>, not necessarily the same
-    /// chain. Falls back to the fast optimizer when a cheap event count says
-    /// the data is run-churny and the DP would be faster.
+    /// The last block of an optimal parse of <paramref name="units"/>: the
+    /// cost of <see cref="FastOptimizer"/>, not always its chain. Falls back
+    /// to the fast optimizer when an event count says the DP would be faster.
     /// </summary>
     /// <param name="units">The input as k-byte units.</param>
     /// <param name="unit">Bytes per unit, which sets what a literal costs.</param>
@@ -130,9 +130,9 @@ public sealed class EventOptimizer
     /// <summary>
     /// Run starts at j: offsets whose unit matches at j but not at j-1. Those
     /// are the in-window occurrences p of <c>units[j]</c> whose predecessor
-    /// differs from <c>units[j-1]</c> - or that have no predecessor at all - so
-    /// the chains keyed by (value, predecessor) enumerate exactly them, newest
-    /// first, stopping at the window's edge.
+    /// differs from <c>units[j-1]</c>, or that have none, so the chains keyed
+    /// by (value, predecessor) enumerate exactly them, newest first, stopping
+    /// at the window's edge.
     /// </summary>
     private void ForEachRunStart(int j, Action<int> gotOffset)
     {
@@ -198,7 +198,7 @@ public sealed class EventOptimizer
         }
     }
 
-    /// <summary>One cheap pass counting run events, to decide engine or plain DP.</summary>
+    /// <summary>One pass counting run events, to choose between events and the plain DP.</summary>
     private long CountEvents()
     {
         long events = 0;
@@ -211,7 +211,7 @@ public sealed class EventOptimizer
             }
             Chain(j);
         }
-        // The pass consumed the chains; rebuild them empty for the real run.
+        // The pass filled the chains; the real run fills them again.
         byPred.Clear();
         bySucc.Clear();
         return events;
@@ -225,8 +225,8 @@ public sealed class EventOptimizer
         var meter = new ProgressMeter(
             ProgressMeter.TotalSteps(count, 0, offsetLimit), progress);
 
-        // The fake state every chain hangs from: offset one, just before the
-        // stream, as the reference DP seeds it.
+        // The fake state every chain hangs from: offset one, before the
+        // stream, as the reference seeds it.
         stateS[1] = -1;
         stateE[1] = -1;
         literalTree.Insert(0, Encode(-1 - (-1 * literalBits), 1));
@@ -388,8 +388,8 @@ public sealed class EventOptimizer
         {
             if (stateE[offset] != None)
             {
-                // The reference DP overwrites an offset's state at its next
-                // match run regardless of cost; replicate that exactly.
+                // The reference overwrites an offset's state at its next match
+                // run whatever the cost; this does the same.
                 literalTree.Remove(stateE[offset] + 1,
                     Encode(stateS[offset] - stateE[offset] * literalBits, offset));
             }
@@ -501,7 +501,7 @@ public sealed class EventOptimizer
         }
     }
 
-    /// <summary>A min tree whose slots hold sets, so entries can retire exactly.</summary>
+    /// <summary>A min tree whose slots hold sets, so an entry can be removed.</summary>
     private sealed class SlotTree : MinTree
     {
         private readonly Dictionary<int, SortedSet<long>> slots = new();

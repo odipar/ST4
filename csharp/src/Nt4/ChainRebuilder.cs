@@ -4,14 +4,14 @@
 namespace Nt4;
 
 /// <summary>
-/// Rebuilds an optimal parse chain from what a forward cost pass recorded: the
-/// winning cost per position and a three-int descriptor of the winner.
+/// Rebuilds a parse chain from what a forward cost pass recorded: the winning
+/// cost per position and a three-int descriptor of the winner.
 /// </summary>
 /// <remarks>
-/// Everything else is re-derived from those costs and the data, and only the
-/// blocks the winning chain contains are built. <see cref="FastOptimizer"/>
-/// and <see cref="EventOptimizer"/> both feed it; their winners may differ
-/// where candidates tie, their packed size cannot.
+/// The rest is derived from those costs and the data, and only the blocks of
+/// the winning chain are built. <see cref="FastOptimizer"/> and
+/// <see cref="EventOptimizer"/> both feed it; their winners may differ where
+/// candidates tie, their packed size cannot.
 /// </remarks>
 internal sealed class ChainRebuilder
 {
@@ -53,8 +53,8 @@ internal sealed class ChainRebuilder
 
     /// <summary>
     /// A pending resolution: the winner chain at <c>Index</c>, or the state an
-    /// offset held when it last matched at <c>Index</c>. Frames form a chain of
-    /// single dependencies, resolved with an explicit stack because a chain of
+    /// offset held when it last matched at <c>Index</c>. Frames form a chain
+    /// of single dependencies, resolved on an explicit stack, since a chain of
     /// one-unit blocks is as deep as the input is long.
     /// </summary>
     private sealed class Frame
@@ -77,11 +77,10 @@ internal sealed class ChainRebuilder
     }
 
     /// <summary>
-    /// Builds the winning chain from the descriptors. Each winner's parent is
-    /// either an earlier winner - recorded - or the state some offset held at a
-    /// recorded position; a state is re-derived from its match run, the recorded
-    /// winning costs and, when it reused its offset, the state before it. Only
-    /// what the chain reaches is ever built.
+    /// Builds the winning chain from the descriptors. A winner's parent is an
+    /// earlier winner, recorded, or the state an offset held at a recorded
+    /// position; a state is derived from its match run, the recorded winning
+    /// costs and, when it reused its offset, the state before it.
     /// </summary>
     internal Block Rebuild()
     {
@@ -165,9 +164,9 @@ internal sealed class ChainRebuilder
 
     /// <summary>
     /// Resolves the state offset <c>frame.Offset</c> held after matching at
-    /// <c>frame.Index</c>: the cheaper of reusing the offset across the literal
-    /// run before this match run, and a new-offset match at the best split - the
-    /// same two candidates the forward pass weighed, with the same tie rule.
+    /// <c>frame.Index</c>: the cheaper of reusing the offset across the
+    /// literal run before this match run, and a new-offset match at the best
+    /// split, the two candidates the forward pass weighed, with its tie rule.
     /// </summary>
     private bool ResolveState(Frame frame, Dictionary<long, Block> states,
         Block?[] winner, Stack<Frame> stack)
@@ -238,14 +237,14 @@ internal sealed class ChainRebuilder
 
     /// <summary>Where this offset's state ended at or before <paramref name="from"/>, or None.</summary>
     /// <remarks>
-    /// That is the last match at the offset - but only once any state exists,
-    /// because from then on every match updates it. State first appears at a
-    /// match whose predecessor also matches (a run of two, which is when a
-    /// new-offset match first fires); lone matches before that never created
-    /// one. So the answer is the last match, provided some adjacent-pair match
-    /// sits at or below it. Offset one is the exception: the fake block the
-    /// whole parse hangs from is state before the first unit, so its every
-    /// match counts - and with no match at all, the fake itself is the state.
+    /// That is the last match at the offset, once a state exists: from then
+    /// on every match updates it. A state first appears at a match whose
+    /// predecessor also matches, a run of two, where a new-offset match first
+    /// fires; lone matches before that create none. So the answer is the last
+    /// match, provided a run of two sits at or below it. Offset one is the
+    /// exception: the fake block the parse hangs from is a state before the
+    /// first unit, so its every match counts, and with no match the fake is
+    /// the state.
     /// </remarks>
     private int PreviousStateEnd(int offset, int from)
     {

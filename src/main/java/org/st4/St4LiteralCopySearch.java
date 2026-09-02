@@ -8,26 +8,25 @@ import java.util.Random;
 import org.jspecify.annotations.Nullable;
 
 /**
- * The long-running optimizer for streams whose matches beyond the window copy
- * from the literal stream: a search over which units are literal, each step
- * scored by an exact parse for that choice and by what the compressor then
- * writes, run for as long as it is given.
+ * The optimizer for streams with copies from the literal stream: a search
+ * over which units are literal, each step scored by an exact parse for that
+ * choice and by what the compressor then writes, for as long as it is given.
  *
- * <p>A dictionary is a set of forced literals: they stay literal, a copy may
- * come only from them, the parse decides the rest. The search opens with the
- * one-shot heuristic - the literals of a full-window parse, holes filled,
- * shrunk to what gets copied from - which is what {@code st4 -c} alone
- * writes; given time it sweeps every literal run - freed whole,
- * trimmed at either end - keeping what packs smaller, then anneals with random
- * moves that free, seed, extend or trim runs, returning to the best and
- * sweeping again when it stalls. The parse is {@link St4FastOptimizer}'s DP
- * with copies added: sources found through two-unit chains over the
- * dictionary, the rep of a copy as a ring rep at the same output distance
- * with literal shadows at the source, the literal channel a min-tree keyed by
- * match end, chains rebuilt from a node pool, and every parse restarted from
- * a checkpoint before the first changed unit. Copies are costed with the
- * dictionary's own literal count, a lower bound, so every copy is valid; the
- * compressor's bits are the score.
+ * <p>A dictionary is a set of forced literals: they stay literal, a copy
+ * comes only from them, the parse decides the rest. The opening passes, what
+ * {@code st4 -c} alone writes, take the literals of a full-window parse,
+ * fill holes of a few units, and shrink the dictionary to what gets copied
+ * from. Given time, a sweep frees or trims every literal run, keeping what
+ * packs smaller; then random moves free, seed, extend or trim runs, accepted
+ * when they pack smaller and by annealing when they do not, and the search
+ * returns to the best and sweeps again when it stalls. The parse is
+ * {@link St4FastOptimizer}'s DP with copies added: sources found through
+ * two-unit chains over the dictionary, the rep of a copy as a ring rep at
+ * the same output distance with literal shadows at the source, the literal
+ * channel a min-tree keyed by match end, chains rebuilt from a node pool,
+ * and every parse restarted from a checkpoint before the first changed unit.
+ * A copy is costed with the dictionary's own literal count, a lower bound,
+ * so every copy is valid; the compressor's bits are the score.
  */
 public final class St4LiteralCopySearch {
 
@@ -39,10 +38,13 @@ public final class St4LiteralCopySearch {
     private static final byte COPY = 3;         // a copy from the literal stream
     private static final byte COPYREP = 4;      // a rep of the last copy, after literals
 
-    /** Holes of up to this many units between dictionary runs are filled, at the start. */
+    /**
+     * Holes of up to this many units between dictionary runs are filled in
+     * the opening passes.
+     */
     private static final int HOLE = 3;
 
-    /** Passes of the one-shot heuristic the search starts from. */
+    /** The opening passes, at most. */
     private static final int PASSES = 4;
 
     /** The annealing temperature, in bits, at the start and at the end. */
@@ -59,14 +61,15 @@ public final class St4LiteralCopySearch {
     }
 
     /**
-     * Searches for {@code seconds}, none for the opening passes alone,
-     * reporting improvements on stdout, and returns the best parse found: copies from the literal stream as
+     * Searches for {@code seconds}, zero for the opening passes alone, and
+     * returns the best parse found: copies from the literal stream as
      * negative offsets, matches within {@code window} as positive ones.
      *
      * @param unit        bytes per unit
      * @param window      the furthest a match may reach back, in units
      * @param maxOpLength the compressor's operation limit, which the score
-     *                    honours
+     *                    counts
+     * @param progress    whether to report improvements on stdout
      */
     public static St4Block optimize(int[] units, int unit, int window, int maxOpLength,
                                     double seconds, boolean progress) {
@@ -76,8 +79,8 @@ public final class St4LiteralCopySearch {
     }
 
     /**
-     * Searches for exactly {@code steps} steps from {@code seed}, which makes
-     * the result reproducible; for the tests.
+     * Searches for {@code steps} steps from {@code seed}, reproducibly; for
+     * the tests.
      */
     static St4Block optimize(int[] units, int unit, int window, int maxOpLength, long steps,
                              long seed) {
@@ -122,8 +125,8 @@ public final class St4LiteralCopySearch {
             this.count = units.length;
             this.random = new Random(seed);
             this.parser = new Parser(units, unit, window);
-            // Start as the one-shot heuristic does: the full-window parse's
-            // literals, holes filled, shrunk to what gets copied from.
+            // The opening passes: the full-window parse's literals, holes
+            // filled, shrunk to what gets copied from.
             int reach = St4Format.maxOffsetUnits(unit);
             boolean[] dictionary = filled(St4LiteralCopySearch.literalMask(
                     St4EventOptimizer.optimize(units, unit, reach, false), count));
@@ -156,7 +159,7 @@ public final class St4LiteralCopySearch {
 
         /**
          * Makes {@code parsed}, the parse of {@code dictionary} just made, the
-         * incumbent, with its own literals as the dictionary from here on.
+         * incumbent, its own literals the dictionary from here on.
          */
         private void adopt(boolean[] dictionary, St4Block parsed) {
             parser.accept();
@@ -207,8 +210,8 @@ public final class St4LiteralCopySearch {
             if (progress) {
                 report("start");
             }
-            // Descend first: most of what the heuristic forces is better
-            // free, and a sweep finds that run by run.
+            // Descend first: most of what the opening passes force packs
+            // smaller free, and a sweep finds that run by run.
             sweep();
             while (!exhausted()) {
                 double fraction = steps == Long.MAX_VALUE
@@ -293,7 +296,7 @@ public final class St4LiteralCopySearch {
             }
         }
 
-        /** Un-forces {@code [from, to)} if that packs smaller. */
+        /** Frees {@code [from, to)} when that packs smaller. */
         private boolean improve(int from, int to, String move) {
             boolean[] proposal = forced.clone();
             Arrays.fill(proposal, from, to, false);
@@ -348,7 +351,7 @@ public final class St4LiteralCopySearch {
             return runs.get(random.nextInt(runs.size()));
         }
 
-        /** Un-forces a literal run, or part of one: the parse may then match it. */
+        /** Frees a literal run, or part of one, for the parse to match. */
         private void free(boolean[] dictionary) {
             int[] run = pickRun();
             if (run == null) {
@@ -456,9 +459,9 @@ public final class St4LiteralCopySearch {
     // ---------------------------------------------------------------- parser
 
     /**
-     * The exact parse for one dictionary, on arrays reused across calls. The
-     * state index space is shared: ring offsets 1..window and copy distances
-     * window+1..count-1 never meet.
+     * The exact parse for one dictionary, on arrays reused across calls. Ring
+     * offsets 1..window and copy distances window+1..count-1 share one state
+     * index space and never meet.
      */
     static final class Parser {
         private final int[] units;
@@ -467,8 +470,8 @@ public final class St4LiteralCopySearch {
         private final int window;
         private final int reach;
 
-        // Per state index: the best chain ending in a match or copy there -
-        // its cost, end, and how to rebuild it - and its literal extension.
+        // Per state index: the best chain ending in a match or copy there,
+        // its cost, end and how to rebuild it, and its literal extension.
         private final int[] stateBits;
         private final int[] stateEnd;
         private final byte[] stateKind;
@@ -488,8 +491,8 @@ public final class St4LiteralCopySearch {
         private final int[] bestLength;
 
         // The dictionary as prefix counts, and the input's two-unit chains:
-        // the previous position with the same two units, whatever the
-        // dictionary, which does not change between parses.
+        // the previous position with the same two units, the same for every
+        // dictionary.
         private final int[] forcedBefore;
         private final int[] prevSame2;
         private boolean[] forced = new boolean[0];
@@ -523,7 +526,7 @@ public final class St4LiteralCopySearch {
         private final long[] tree;
 
         // Checkpoints: the state before position k*checkpoint, for the base
-        // dictionary - the last parse accepted - and for the parse under way.
+        // dictionary, the last parse accepted, and for the parse under way.
         // A parse restarts from the last checkpoint before its dictionary
         // first differs from the base's, since nothing before depends on
         // what comes after. Nodes are appended past the base's, so a
@@ -740,12 +743,12 @@ public final class St4LiteralCopySearch {
                     }
                 }
 
-                // Copies. A copy needs two units, so the runs that matter are
-                // found by the two-unit chain, restricted to dictionary pairs
-                // beyond the window; a run in progress that the chain no longer
-                // lists ends here, and is visited for its last unit; and a
-                // distance whose last copy could still be repped is visited
-                // wherever its unit matches, since a rep may be one unit.
+                // Copies. A copy needs two units, so the two-unit chain finds
+                // the runs, restricted to dictionary pairs beyond the window;
+                // a run in progress the chain no longer lists ends here and is
+                // visited for its last unit; a distance whose last copy could
+                // still be repped is visited wherever its unit matches, since
+                // a rep may be one unit.
                 int[] swap = activePrev;
                 activePrev = activeCur;
                 activePrevCount = activeCurCount;
@@ -805,7 +808,7 @@ public final class St4LiteralCopySearch {
         }
 
         /**
-         * A copy distance whose unit matches at {@code index}, with the source
+         * A copy distance whose unit matches at {@code index} with the source
          * in the dictionary: continues or starts its run, and enters the rep
          * of the last copy at that distance and the copy ending here.
          */
@@ -813,7 +816,7 @@ public final class St4LiteralCopySearch {
             int p = index - distance;
             if (stamp[distance] != index - 1) {
                 // A run starts. Its rep continues the last copy at this
-                // distance, if the literals since have literal shadows at
+                // distance when the literals since have literal shadows at
                 // the source.
                 matchLength[distance] = 1;
                 litNode[distance] = -1;
@@ -845,8 +848,8 @@ public final class St4LiteralCopySearch {
             }
             if (run > 1) {
                 // Literals from the source's last unit to here: a copy of n
-                // units reads back n - 1 more, and must leave at least one
-                // literal between.
+                // units reads back n - 1 more and leaves at least one literal
+                // between.
                 int between = forcedBefore[index] - forcedBefore[p];
                 if (between < 2) {
                     return;
@@ -883,16 +886,16 @@ public final class St4LiteralCopySearch {
 
         /**
          * Makes the parse just made the base for the ones to come: its
-         * checkpoints stand, its nodes are kept, and its dictionary is what
-         * the next parse is compared against.
+         * checkpoints stand, its nodes are kept, and the next parse is
+         * compared against its dictionary.
          */
         void accept() {
             settle();
             if (poolTop > 4L * fullNodes + 65536) {
                 // The pool holds the tails of every parse since the last full
-                // one; one full parse of the base compacts it. The yardstick
-                // is what a full parse takes, so the compaction cannot find
-                // the pool too big again.
+                // one; one full parse of the base compacts it. The limit is a
+                // multiple of what a full parse takes, so the compaction does
+                // not find the pool too big again.
                 hasBase = false;
                 poolTop = 0;
                 parse(baseForced);
@@ -990,7 +993,7 @@ public final class St4LiteralCopySearch {
             bestLength[2] = 2;
             nodes = poolTop;
             // The fake block every chain hangs from: one unit back, ending
-            // just before the stream, costing -1 so the first flag is free.
+            // before the stream, costing -1 so the first flag is free.
             int root = newNode(NEW, -1, St4Optimizer.INITIAL_OFFSET, 0, -1, -1);
             stateBits[St4Optimizer.INITIAL_OFFSET] = -1;
             stateEnd[St4Optimizer.INITIAL_OFFSET] = -1;

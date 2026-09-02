@@ -8,7 +8,7 @@ namespace Nt4;
 /// <summary>Shared command-line parsing and error-reporting helpers.</summary>
 internal static class Cli
 {
-    /// <summary>Writes a Java-compatible error message and returns the failure exit code.</summary>
+    /// <summary>Writes an error message as the Java tools do and returns the failure exit code.</summary>
     internal static int Error(string message)
     {
         Console.Error.WriteLine($"Error: {message}");
@@ -23,22 +23,22 @@ internal static class Cli
     }
 
     /// <summary>
-    /// Parses a signed decimal integer. Invalid or overflowing values become
-    /// zero so callers reject them the way the Java tools reject a parse failure.
+    /// Parses a signed decimal integer. An invalid or overflowing value
+    /// becomes zero, which callers reject.
     /// </summary>
     internal static int ParseNumber(string value) =>
         int.TryParse(value, NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture,
             out int number) ? number : 0;
 
     /// <summary>
-    /// Parses an unsigned decimal index, where zero is a value - -r0 loops the
-    /// whole stream. Invalid values become -1 so callers reject them.
+    /// Parses an unsigned decimal index, where zero is a value: -r0 loops the
+    /// whole stream. An invalid value becomes -1, which callers reject.
     /// </summary>
     internal static int ParseIndex(string value) =>
         int.TryParse(value, NumberStyles.None, CultureInfo.InvariantCulture,
             out int number) ? number : -1;
 
-    /// <summary>Identifies filesystem exceptions that the CLIs report without a stack trace.</summary>
+    /// <summary>Whether an exception is a file error, reported without a stack trace.</summary>
     internal static bool IsFileException(Exception exception) =>
         exception is IOException or UnauthorizedAccessException or ArgumentException
             or NotSupportedException;
