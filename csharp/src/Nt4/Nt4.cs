@@ -218,9 +218,10 @@ public static class Nt4
     }
 
     /// <summary>
-    /// The parse: the event-driven optimizer, or with <c>-c</c> the one that
-    /// lets a match beyond the window copy from the literal stream, which is
-    /// the readable reference and slow on large inputs.
+    /// The parse: the event-driven optimizer, or with <c>-c</c> the search that
+    /// lets a match beyond the window copy from the literal stream - with no
+    /// seconds, just its opening passes, which are the one-shot heuristic on
+    /// the search's parser; with seconds, the search from there.
     /// </summary>
     private static Block Parse(int[] units, int unit, int window, int maxOpLength, bool copies,
                                double seconds)
@@ -229,11 +230,7 @@ public static class Nt4
         {
             return EventOptimizer.Optimize(units, unit, window);
         }
-        if (seconds > 0)
-        {
-            return LiteralCopySearch.Optimize(units, unit, window, maxOpLength, seconds, true);
-        }
-        return LiteralCopyOptimizer.Optimize(units, unit, window, true);
+        return LiteralCopySearch.Optimize(units, unit, window, maxOpLength, seconds, seconds > 0);
     }
 
     /// <summary>

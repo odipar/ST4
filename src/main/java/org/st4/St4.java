@@ -157,19 +157,18 @@ public final class St4 {
     }
 
     /**
-     * The parse: the event-driven optimizer, or with {@code -c} the one that
-     * lets a match beyond the window copy from the literal stream - the
-     * one-shot heuristic, or given seconds, the search that starts from it.
+     * The parse: the event-driven optimizer, or with {@code -c} the search
+     * that lets a match beyond the window copy from the literal stream - with
+     * no seconds, just its opening passes, which are the one-shot heuristic
+     * on the search's parser; with seconds, the search from there.
      */
     private static St4Block parse(int[] units, int unit, int window, int maxOpLength,
                                   boolean copies, double seconds) {
         if (!copies) {
             return St4EventOptimizer.optimize(units, unit, window);
         }
-        if (seconds > 0) {
-            return St4LiteralCopySearch.optimize(units, unit, window, maxOpLength, seconds, true);
-        }
-        return St4LiteralCopyOptimizer.optimize(units, unit, window, true);
+        return St4LiteralCopySearch.optimize(units, unit, window, maxOpLength, seconds,
+                seconds > 0);
     }
 
     /**
