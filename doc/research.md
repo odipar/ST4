@@ -227,12 +227,13 @@ The test corpora are synthetic; the assets this is for are register dumps.
 YMX, the streaming YM player this format was split from, packs a tune as
 twenty-five streams - fourteen sound registers, one value per frame, and
 eleven of a compiled effect script - each decoded through its own ring of
-960 bytes by default. The four example tunes of that repository, their
-stream vectors built as its encoder builds them, packed here one section
-per stream: the previous ST4, which is what YMX packs with today, against
-this one with thirty seconds of search per stream, at the player's ring, at
-one larger and at three smaller. Sizes are the four ST4 streams in bytes,
-summed over the twenty-five streams, without headers or padding.
+960 bytes by default. The four example tunes of that repository and one
+long one, Synergy's Wicked Polygons 2 at 43132 frames, their stream vectors
+built as its encoder builds them, packed here one section per stream: the
+previous ST4, which is what YMX packs with today, against this one with
+thirty seconds of search per stream, at the player's ring, at one larger
+and at three smaller. Sizes are the four ST4 streams in bytes, summed over
+the twenty-five streams, without headers or padding.
 
 At k = 1:
 
@@ -258,6 +259,11 @@ At k = 1:
 |  |  | 512 | 1063 | 1051 | 1% |
 |  |  | 256 | 4646 | 3766 | 19% |
 |  |  | 128 | 7083 | 5941 | 16% |
+| Synergy, Wicked Polygons 2 | 43132 | 1024 | 56781 | 55961 | 1% |
+|  |  | 960 | 57280 | 56442 | 1% |
+|  |  | 512 | 61175 | 60074 | 2% |
+|  |  | 256 | 76034 | 73527 | 3% |
+|  |  | 128 | 94955 | 90684 | 4% |
 
 At k = 2:
 
@@ -283,12 +289,17 @@ At k = 2:
 |  |  | 512 | 1123 | 1108 | 1% |
 |  |  | 256 | 4885 | 3149 | 36% |
 |  |  | 128 | 7197 | 4973 | 31% |
+| Synergy, Wicked Polygons 2 | 43132 | 1024 | 69836 | 67048 | 4% |
+|  |  | 960 | 70472 | 67377 | 4% |
+|  |  | 512 | 77371 | 71288 | 8% |
+|  |  | 256 | 97391 | 84400 | 13% |
+|  |  | 128 | 121815 | 100493 | 18% |
 
 At the player's own ring and above it the copies gain one to four percent:
 the ring already holds what these tunes repeat. The gain is in shrinking
-it: one to fifteen percent at 512 bytes, six to nineteen at 256 and 128 at
-k = 1, and ten to thirty-six at k = 2, where a byte offset reaches twice as
-far. What that buys is RAM: the rings cost 25 × N bytes, 25600 at 1024,
+it: one to fifteen percent at 512 bytes, three to nineteen at 256 and 128
+at k = 1, and ten to thirty-six at k = 2, where a byte offset reaches twice
+as far. What that buys is RAM: the rings cost 25 × N bytes, 25600 at 1024,
 24000 at 960, 12800 at 512, 6400 at 256, 3200 at 128. Read that way, a tune
 packed with copies for another ring against the same tune packed as YMX
 packs it today, for its 960-byte ring:
@@ -303,10 +314,12 @@ packs it today, for its 960-byte ring:
 |  | 2 | 954 | 922 | -3% | 980 | +3% | 1494 | +57% | 1609 | +69% |
 | Cuddly, main menu | 1 | 1063 | 1051 | -1% | 1051 | -1% | 3766 | +254% | 5941 | +459% |
 |  | 2 | 1123 | 1111 | -1% | 1108 | -1% | 3149 | +180% | 4973 | +343% |
+| Synergy, Wicked Polygons 2 | 1 | 57280 | 55961 | -2% | 60074 | +5% | 73527 | +28% | 90684 | +58% |
+|  | 2 | 70472 | 67048 | -5% | 71288 | +1% | 84400 | +20% | 100493 | +43% |
 
 At 512 bytes, half the ring RAM, every tune packs to within five percent
-of what it packs to today, three of the four to within two. Dark Side of
-the Spoon costs two to four percent more at a quarter. The other tunes do
+of what it packs to today, most to within two, the long one included. Dark
+Side of the Spoon costs two to four percent more at a quarter. The others do
 not get that far, since a period stream that repeats at long range is
 match-shaped rather than literal-shaped, and shrinking the ring costs a
 tune that packed to almost nothing the most. The tune data needs nothing
