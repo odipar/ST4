@@ -23,6 +23,15 @@ matches at offset one per short tune and 1600 to 3300 in Wicked Polygons 2,
 which is what the block replaces, eight to ten bits apiece. The player's decoder gets a fill loop
 and leaves offset one installed, so the reps after it are one bit.
 
+**The block that repeats is worth as much again, at a price.** A block of
+units that was just copied and then holds for a bar is the commoner shape
+of the two, a hundred times per short tune at the small rings; a code that
+repeats what the previous operation produced covers it and the hold in one,
+three to seven percent on the short tunes. But it needs the previous
+operation's length kept across the flag, which no decoder register has, and
+the class it would take, the second byte bank, carries a quarter of the
+copies on the long tune.
+
 **Copies across streams are real but small on these tunes, and absent on
 the long one.** Packing all twenty-five streams as one at the full window
 saves six to eight percent against packing the four short tunes' streams
@@ -35,6 +44,15 @@ read pointer, and a layout that puts one stream's literal block directly
 after another's makes the far distances land there - but it needs a prefix
 dictionary in the packer to measure what a small ring gets of that bound,
 and a proxy without it says nothing at small rings.
+
+**Deltas help when a stream asks for them, and hurt when it does not.**
+Packing a stream's differences rather than its values is a coin toss by
+tune, seventeen percent smaller on one and eighteen larger on another. Let
+each stream choose and it only ever helps: eleven to twenty percent on
+Amiga Demo, five to eleven on Wicked Polygons 2, two to six on Dark Side of
+the Spoon, since the few streams that want deltas are the big period
+streams. That is a bit per stream in YMX's header and an add per value in
+its player, nothing in the format, and the largest number in this note.
 
 **The lever the same data shows is elsewhere.** Sizing the rings per stream
 takes a tune from 24000 bytes of ring RAM to 7000-11500 with no growth in
@@ -114,6 +132,80 @@ gamma + 1 times, then install offset one. A fill of n units against a copy
 of n units from one unit back is the same ladder with a register as the
 source; the state afterwards is the match state at offset one, which the
 decoders already have. Tens of bytes per decoder.
+
+## The block that repeats
+
+The run block repeats one unit. A block of m units repeated n times -
+an arpeggio's two or three periods, a vibrato's cycle - is in LZ terms a
+literal run of m and then a match at offset m for the rest, and that match
+costs a class code and an offset byte every time the block is new. The
+generalisation is one code for both shapes: *repeat what the previous
+operation produced*, with the length explicit and the offset implicit,
+equal to the previous operation's length. For an operation of one unit that
+is the hold; for one of m it is the block, whether the block was a literal
+run or a copy from somewhere.
+
+### What the data says
+
+The same walk over the search's parses, now also counting new-offset
+matches whose offset equals the length of the operation just before them -
+the block that repeats what was just produced - split by what produced it,
+and costing the block at the offset byte it drops and the shorter gamma of
+n rather than of the length. The copies are classed by their wire offset,
+since a code for the block has to live somewhere, and the second byte bank,
+`1 1`, is the candidate: none of these rings uses it for ring offsets, so
+what it carries is copies whose wire offset is 257 to 512, each a byte that
+would become a word.
+
+| tune, ring | new-offset matches | holds | blocks after literals | blocks after a copy or match | blocks save | copies in bank 1, cost |
+|---|---:|---:|---:|---:|---:|---:|
+| Dark Side of the Spoon 1, 128 | 1652 | 109 | 16 | 93 | 2.5% | 27 of 369, 0.4% |
+| Dark Side of the Spoon 1, 256 | 811 | 99 | 20 | 32 | 1.8% | 30 of 109, 0.8% |
+| Dark Side of the Spoon 1, 960 | 781 | 84 | 18 | 33 | 1.9% | 15 of 48, 0.4% |
+| Amiga Demo, 128 | 1303 | 184 | 16 | 101 | 3.4% | 0 of 234 |
+| Amiga Demo, 256 | 1205 | 182 | 16 | 94 | 3.4% | 0 of 202 |
+| Amiga Demo, 960 | 505 | 75 | 15 | 24 | 2.3% | 22 of 23, 0.8% |
+| Mad Max 1, 128 | 366 | 53 | 3 | 14 | 1.7% | 0 of 93 |
+| Mad Max 1, 256 | 348 | 48 | 2 | 7 | 1.0% | 0 of 58 |
+| Cuddly, main menu, 128 | 1789 | 188 | 6 | 115 | 3.7% | 0 of 257 |
+| Cuddly, main menu, 256 | 911 | 110 | 3 | 56 | 3.0% | 24 of 179, 0.7% |
+| Wicked Polygons 2, 128 | 24272 | 3320 | 68 | 1051 | 1.5% | 1766 of 7257, 1.7% |
+| Wicked Polygons 2, 256 | 19972 | 2424 | 69 | 562 | 1.0% | 1528 of 4934, 1.8% |
+
+Two things stand out. The shape as first imagined, new literals and then
+their repetition, hardly occurs: two to twenty times per tune. What occurs
+is a block that was just *copied* and then repeats - a figure fetched from
+earlier in the stream and held for a bar - a hundred times per short tune
+at the small rings and a thousand in Wicked Polygons 2. Together the blocks
+are worth one to almost four percent, about what the holds are, and the two
+add: a code that carries both is worth three to seven percent on the short
+tunes at the rings that matter, and two and a half on the long one.
+
+And the second byte bank is nearly free on the short tunes - no copy uses
+it at 128 on three of them, and under a percent anywhere - but not on
+Wicked Polygons 2, where a quarter of the copies sit in it and taking it
+costs 1.7 percent, about what the blocks give back.
+
+### What it would take
+
+The hold needs no state: its implicit offset is the constant one. The block
+needs the previous operation's length when the next flag arrives, and the
+decoders keep no such thing - d1 counts down to zero, the copy ladder walks
+a3 to the end of the source, and the ring decoders have the upper halves of
+d1 and d2 in use for the ring's bounds. Keeping it is either a register the
+contract now leaves to the caller or a deferred update of the literal read
+pointer, so that a3 minus a2 is still the last run's length when the flag
+is read - and that only covers the block after literals, the rare case; the
+block after a copy needs the copy's length, which nothing retains.
+
+So the two codes part company in cost. The hold at the end code's class,
+as the run block above, is the cheap one: tens of bytes per decoder and no
+bank lost, two to three percent. The block at `1 1` is the ambitious one:
+another one to four percent, a register or a pointer discipline in every
+decoder, and the second byte bank given up, which is nothing on tunes like
+the four short ones and everything the block gains on a tune like Wicked
+Polygons 2. The search's cost model can price both exactly before either
+is built.
 
 ## Copies across streams
 
@@ -224,11 +316,68 @@ pattern level, from which the whole of its gain over MYM comes. What none of
 these do is what is proposed here: sources that are the inputs' own literal
 streams as the decoders already read them, at no decoder cost.
 
+## Deltas before packing
+
+A melody transposed is the same sequence of differences; a hold is a run of
+zeros, which is still a one-unit rep; and the value itself is recovered by
+adding as the player goes. So each stream vector was replaced by its byte
+differences, each byte less the byte before it, modulo 256, and packed
+exactly as before: the previous ST4 and thirty seconds of search, at k = 1
+and k = 2, at the three rings. The player's side of this is an add per
+value per stream and a byte of state each, and the decoders' side is
+nothing, since a delta stream is a stream.
+
+The differences do not help across the board. Whole tunes as differences,
+searched size on values against searched size on differences:
+
+| tune | k | ring 960 | ring 256 | ring 128 |
+|---|---:|---:|---:|---:|
+| Dark Side of the Spoon 1 | 1 | 3428 → 3435, +0% | 3645 → 3699, +1% | 6384 → 7015, +10% |
+|  | 2 | 3593 → 3847, +7% | 3797 → 4162, +10% | 5829 → 6006, +3% |
+| Amiga Demo | 1 | 2420 → 2145, −11% | 4696 → 4418, −6% | 5082 → 4949, −3% |
+|  | 2 | 2780 → 2316, −17% | 4837 → 4484, −7% | 5185 → 4917, −5% |
+| Mad Max 1 | 1 | 847 → 868, +2% | 1447 → 1535, +6% | 1677 → 1668, −1% |
+|  | 2 | 918 → 930, +1% | 1494 → 1655, +11% | 1609 → 1810, +12% |
+| Cuddly, main menu | 1 | 1051 → 1129, +7% | 3766 → 4543, +21% | 5941 → 6884, +16% |
+|  | 2 | 1111 → 1265, +14% | 3149 → 3581, +14% | 4973 → 5866, +18% |
+| Wicked Polygons 2 | 1 | 56442 → 56139, −1% | 73527 → 75710, +3% | 90684 → 95671, +5% |
+|  | 2 | 67377 → 62309, −8% | 84400 → 81633, −3% | 100493 → 99953, −1% |
+
+Chosen per stream, values or differences, whichever packs smaller, they
+only ever help - and the streams that prefer differences are few, one to
+ten of the twenty-five, and large, the period streams whose notes move:
+
+| tune | k | ring 960 | ring 256 | ring 128 | streams that prefer deltas |
+|---|---:|---:|---:|---:|---:|
+| Dark Side of the Spoon 1 | 1 | 3215, −6% | 3456, −5% | 6241, −2% | 1 to 2 |
+|  | 2 | 3439, −4% | 3709, −2% | 5619, −4% | 1 to 2 |
+| Amiga Demo | 1 | 2048, −15% | 4196, −11% | 4652, −8% | 2 to 3 |
+|  | 2 | 2216, −20% | 4251, −12% | 4606, −11% | 4 to 6 |
+| Mad Max 1 | 1 | 838, −1% | 1445, −0% | 1566, −7% | 1 to 2 |
+|  | 2 | 895, −3% | 1494, +0% | 1598, −1% | 0 to 2 |
+| Cuddly, main menu | 1 | 1028, −2% | 3752, −0% | 5936, −0% | 1 to 2 |
+|  | 2 | 1096, −1% | 3099, −2% | 4973, +0% | 0 to 2 |
+| Wicked Polygons 2 | 1 | 52540, −7% | 70549, −4% | 88209, −3% | 3 to 5 |
+|  | 2 | 60171, −11% | 78735, −7% | 95693, −5% | 5 to 10 |
+
+The sizes are against the same tune's searched size on values. k = 2 takes
+to differences more readily than k = 1, since a two-byte unit of
+differences repeats where the values' unit does not. The choice is the
+packer's to make per stream by packing both, which is what these numbers
+are; nothing in it touches the format, and the prior art is the delta
+filter every archiver keeps in front of its LZ stage for exactly this kind
+of data - xz's and 7-Zip's `delta`, PNG's per-row filters, the predictors of
+every lossless audio coder.
+
 ## What decides it
 
-The run block first: it is a cost-model change to the search, a day, and
+Deltas per stream first, since they are YMX's to do, cost the player an add
+per value, and are worth the most: a bit per stream in the header, the
+packer trying both. The run block next: it is a cost-model change to the search, a day, and
 the tunes give its number before a decoder is touched; then the decoders,
-tens of bytes each, with the end code moving one bit. The rings per stream
+tens of bytes each, with the end code moving one bit. The block that
+repeats after it, priced in the same cost model against the bank it costs,
+and built only if a register can be found for it. The rings per stream
 belong to YMX and cost nothing here. The prefix dictionary last, since its
 bound is the smallest and its measurement the dearest - unless the assets
 that matter turn out to be the three-channel figures Dark Side of the Spoon
