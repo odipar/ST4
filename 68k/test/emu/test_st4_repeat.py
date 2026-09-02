@@ -211,6 +211,21 @@ def run_ring(control, literal, byte_offsets, word_offsets, expected, unit,
     return drained(uc, control, literal, byte_offsets, word_offsets)
 
 
+def played(file: bytes, data: bytes, unit: int, index: int, target: int) -> str:
+    """dst4 -rN on the container, for enough passes to cover target bytes: it
+    must obey the recurrence the decoders are held to - so the unpacker's
+    repeats are the decoders' - and reach at least as far."""
+    padded = len(data) + (-len(data) % unit)
+    period = padded - index * unit
+    times = 1 + max(0, -(-(target - padded) // period))
+    out = st4.unpack_file(file, times)
+    if len(out) < target:
+        return f'dst4 -r{times} wrote {len(out)} bytes, short of {target}'
+    if out != looped(data, unit, index, len(out)):
+        return f'dst4 -r{times} does not follow the loop from unit {index}'
+    return ''
+
+
 def repeats_for(units_total: int, window: int) -> list[int]:
     """Two loop points: a whole-stream loop as far as the window allows, and a
     tail loop - as indices, the way -rR counts them."""
@@ -236,8 +251,14 @@ def main() -> int:
             target_units = 2 * units_total + 7
 
             for index in repeats_for(units_total, window):
-                streams = st4.pack(data, unit, window, index)[:4]
+                file = st4.pack_file(data, unit, window, index)
+                streams = st4.streams(file, unit)[:4]
                 expected = looped(data, unit, index, target_units * unit)
+                problem = played(file, data, unit, index, len(expected))
+                if problem:
+                    print(f'FAIL k={unit} {name} -r{index} (dst4): {problem}')
+                    failures += 1
+                cases += 1
                 for chunk in linear_chunks:
                     problem = run_linear(*streams, expected, unit,
                                          units_total - index, linear, chunk)
@@ -250,7 +271,14 @@ def main() -> int:
             for ring_bytes, chunk_units in wrap_shapes + ring_shapes:
                 ring_units = ring_bytes // unit
                 for index in repeats_for(units_total, ring_units):
-                    streams = st4.pack(data, unit, min(ring_units, window), index)[:4]
+                    file = st4.pack_file(data, unit, min(ring_units, window), index)
+                    streams = st4.streams(file, unit)[:4]
+                    problem = played(file, data, unit, index, target_units * unit)
+                    if problem:
+                        print(f'FAIL k={unit} {name} -r{index} (dst4, N={ring_bytes}): '
+                              f'{problem}')
+                        failures += 1
+                    cases += 1
                     is_wrap = (ring_bytes, chunk_units) in wrap_shapes
                     if is_wrap:
                         whole = chunk_units * (ring_bytes // (chunk_units * unit))

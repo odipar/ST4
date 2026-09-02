@@ -81,6 +81,21 @@ def pack_file(data: bytes, unit: int, window: int, repeat: int | None = None,
     return key.read_bytes()
 
 
+
+def unpack_file(file: bytes, times: int) -> bytes:
+    """Runs the real unpacker on a container: dst4 -rN, the pass and then N-1
+    repeats of its loop section. Cached by the container and the count."""
+    CACHE.mkdir(exist_ok=True)
+    key = CACHE / f'{hashlib.sha1(file).hexdigest()[:16]}-r{times}.bin'
+    if not key.exists():
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / 'in.st4'
+            source.write_bytes(file)
+            subprocess.run(['java', '-ea', '-cp', str(CLASSES), 'org.st4.Dst4', '-f',
+                            f'-r{times}', str(source), str(key)],
+                           check=True, capture_output=True)
+    return key.read_bytes()
+
 def streams(file: bytes, unit: int) -> tuple:
     """The four streams, the padded size, the rewind point and the window."""
     def long(at):

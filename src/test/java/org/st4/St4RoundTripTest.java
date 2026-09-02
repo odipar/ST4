@@ -507,6 +507,51 @@ final class St4RoundTripTest {
         }
     }
 
+    @Test
+    void theUnpackerPlaysALoopAsManyTimesAsAsked() {
+        // dst4 -rN plays a looping stream's loop N times: the pass, then N-1
+        // repeats of its loop section - whether the stream loops by itself,
+        // where the decoder fills the length, or by rewind, where the pass's
+        // loop section is replayed. A stream that does not loop has one pass.
+        for (int unit : new int[] {1, 2, 4}) {
+            for (byte[] input : inputs()) {
+                byte[] pass = padded(input, unit);
+                int total = pass.length / unit;
+                for (int index : new java.util.TreeSet<>(List.of(0, total / 3, total - 1))) {
+                    for (boolean rewind : new boolean[] {false, true}) {
+                        int window = rewind ? Math.max(1, (total - index) / 2) : total;
+                        St4Compressor.Result packed = rewind
+                                ? packRewinding(input, unit, window, index)
+                                : packRepeating(input, unit, index);
+                        St4Format.Container container = St4Format.read(St4.container(packed));
+                        St4Decompressor.Decoded decoded = St4Decompressor.decode(
+                                container.control(), container.literal(), container.byteOffsets(),
+                                container.wordOffsets(), unit, container.size(),
+                                container.window(), container.rewind());
+                        String shape = "unit " + unit + ", " + input.length + " bytes, -r"
+                                + index + (rewind ? " by rewind" : "");
+                        assertArrayEquals(pass, decoded.output(), shape);
+                        for (int times : new int[] {1, 2, 4}) {
+                            int loop = pass.length - index * unit;
+                            byte[] expected = Arrays.copyOf(pass, pass.length + (times - 1) * loop);
+                            for (int at = pass.length; at < expected.length; at++) {
+                                expected[at] = expected[at - loop];
+                            }
+                            assertArrayEquals(expected, Dst4.played(container, decoded, times),
+                                    shape + " played " + times + " times");
+                        }
+                    }
+                }
+                St4Format.Container plain = St4Format.read(St4.container(pack(input, unit)));
+                St4Decompressor.Decoded once = St4Decompressor.decode(plain.control(),
+                        plain.literal(), plain.byteOffsets(), plain.wordOffsets(), unit,
+                        plain.size(), plain.window(), plain.rewind());
+                assertArrayEquals(pass, Dst4.played(plain, once, 1));
+                assertThrows(IllegalArgumentException.class, () -> Dst4.played(plain, once, 2));
+            }
+        }
+    }
+
     private static final int[] ZX1_SIZES = {4, 6, 1006, 6, 19, 383, 26};
 
     @Test

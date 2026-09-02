@@ -275,6 +275,21 @@ def run_ring(control, literal, byte_offsets, word_offsets, expected, unit,
     return ''
 
 
+def played(file: bytes, data: bytes, unit: int, index: int, target: int) -> str:
+    """dst4 -rN on the container, for enough passes to cover target bytes: a
+    rewind loop is replayed by the caller, and the unpacker's replay must
+    obey the recurrence the decoders are held to, and reach at least as far."""
+    padded = len(data) + (-len(data) % unit)
+    period = padded - index * unit
+    times = 1 + max(0, -(-(target - padded) // period))
+    out = st4.unpack_file(file, times)
+    if len(out) < target:
+        return f'dst4 -r{times} wrote {len(out)} bytes, short of {target}'
+    if out != looped(data, unit, index, len(out)):
+        return f'dst4 -r{times} does not follow the loop from unit {index}'
+    return ''
+
+
 def main() -> int:
     failures = 0
     shapes = [(256, 16)] if QUICK else [(256, 16), (512, 37)]
@@ -305,7 +320,8 @@ def main() -> int:
                     period = units_total - index
                     target = (units_total + 2 * period + period // 2 + 3) * unit
                     expected = looped(data, unit, index, target)
-                    runs = [(f'linear, chunks of {c}', run_linear(
+                    runs = [('dst4', played(file, data, unit, index, target))]
+                    runs += [(f'linear, chunks of {c}', run_linear(
                                 control, literal, byte_offsets, word_offsets, expected,
                                 unit, index, units_total, linear, c)) for c in linear_chunks]
                     runs.append((f'wrap, N={ring_bytes} C={chunk_units}', run_wrap(

@@ -536,6 +536,55 @@ public sealed class RoundTripTests
     }
 
     [Fact]
+    public void TheUnpackerPlaysALoopAsManyTimesAsAsked()
+    {
+        // dnt4 -rN plays a looping stream's loop N times: the pass, then N-1
+        // repeats of its loop section - whether the stream loops by itself,
+        // where the decoder fills the length, or by rewind, where the pass's
+        // loop section is replayed. A stream that does not loop has one pass.
+        foreach (int unit in new[] { 1, 2, 4 })
+        {
+            foreach (byte[] input in Inputs())
+            {
+                byte[] pass = Padded(input, unit);
+                int total = pass.Length / unit;
+                foreach (int index in new SortedSet<int> { 0, total / 3, total - 1 })
+                {
+                    foreach (bool rewind in new[] { false, true })
+                    {
+                        int window = rewind ? Math.Max(1, (total - index) / 2) : total;
+                        Compressor.Result packed = rewind
+                            ? PackRewinding(input, unit, window, index)
+                            : PackRepeating(input, unit, index);
+                        Format.Container container = Format.Read(Nt4.Container(packed));
+                        Decompressor.Decoded decoded = Decompressor.Decode(container.Control,
+                            container.Literal, container.ByteOffsets, container.WordOffsets, unit,
+                            container.Size, container.Window, container.Rewind);
+                        Assert.Equal(pass, decoded.Output);
+                        foreach (int times in new[] { 1, 2, 4 })
+                        {
+                            int loop = pass.Length - index * unit;
+                            byte[] expected = new byte[pass.Length + (times - 1) * loop];
+                            pass.CopyTo(expected, 0);
+                            for (int at = pass.Length; at < expected.Length; at++)
+                            {
+                                expected[at] = expected[at - loop];
+                            }
+                            Assert.Equal(expected, Dnt4.Played(container, decoded, times));
+                        }
+                    }
+                }
+                Format.Container plain = Format.Read(Nt4.Container(Pack(input, unit)));
+                Decompressor.Decoded once = Decompressor.Decode(plain.Control, plain.Literal,
+                    plain.ByteOffsets, plain.WordOffsets, unit, plain.Size, plain.Window,
+                    plain.Rewind);
+                Assert.Equal(pass, Dnt4.Played(plain, once, 1));
+                Assert.Throws<ArgumentException>(() => Dnt4.Played(plain, once, 2));
+            }
+        }
+    }
+
+    [Fact]
     public void UnitOneStaysWithinAFewPercentOfZx1()
     {
         // k=1 is ZX1's parse with everything moved into its own stream. Splitting

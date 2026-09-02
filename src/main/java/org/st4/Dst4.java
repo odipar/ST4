@@ -11,7 +11,9 @@ import java.nio.file.Path;
  * <p>What comes out is the <em>padded</em> data - a whole number of k-byte
  * units - because that is what the format stores and what the 68000 decoders
  * write. At {@code -k1} that is the input exactly; at {@code -k2} or
- * {@code -k4} it can be up to k-1 bytes longer, and this tool says so.
+ * {@code -k4} it can be up to k-1 bytes longer, and this tool says so. For a
+ * stream that loops, {@code -rN} plays the loop N times: the whole pass, and
+ * then N-1 repeats of its loop section.
  */
 public final class Dst4 {
 
@@ -22,10 +24,13 @@ public final class Dst4 {
                 + "based on ZX1 v1.5 by Einar Saukas");
 
         boolean forcedMode = false;
+        int times = 1;
         int i = 0;
         for (; i < args.length && args[i].startsWith("-"); i++) {
             if (args[i].equals("-f")) {
                 forcedMode = true;
+            } else if (args[i].startsWith("-r")) {
+                times = parseNumber(args[i].substring(2));
             } else {
                 throw error("Invalid parameter " + args[i]);
             }
@@ -45,8 +50,10 @@ public final class Dst4 {
             outputName = args[i + 1];
         } else {
             usage("""
-                    Usage: dst4 [-f] input.st4 [output]
+                    Usage: dst4 [-f] [-rN] input.st4 [output]
                       -f      Force overwrite of output file
+                      -rN     Play a looping stream's loop N times: the whole pass, then
+                              N-1 repeats of its loop section (default 1, the pass)
                     The output is padded to a whole number of units, as the format stores it.""");
             return;
         }
@@ -71,19 +78,22 @@ public final class Dst4 {
         }
 
         St4Decompressor.Decoded decoded;
+        byte[] output;
         try {
             // One whole pass: a repeating stream would fill any size, but what
-            // the container stores is the pass.
+            // the container stores is the pass - and -r asks for more of it.
             decoded = St4Decompressor.decode(container.control(), container.literal(),
                     container.byteOffsets(), container.wordOffsets(), container.unit(),
                     container.size(), container.window(), container.rewind());
+            output = played(container, decoded, times);
         } catch (AssertionError | IndexOutOfBoundsException | IllegalStateException e) {
             // With -ea a malformed stream trips a descriptive assertion; the
             // decoder trusts its input, so report rather than pretend.
             throw error("Corrupted or truncated ST4 data in " + inputName
                     + (e.getMessage() == null ? "" : ": " + e.getMessage()));
+        } catch (IllegalArgumentException e) {
+            throw error(e.getMessage() + ": " + inputName);
         }
-        byte[] output = decoded.output();
 
         try {
             Files.write(outputPath, output);
@@ -91,13 +101,63 @@ public final class Dst4 {
             throw error("Cannot write output file " + outputName);
         }
 
-        System.out.printf("File decompressed from %d to %d bytes, k=%d%s%s!%n",
+        System.out.printf("File decompressed from %d to %d bytes, k=%d%s%s%s!%n",
                 file.length, output.length, container.unit(),
                 container.unit() == 1 ? "" : " (a whole number of units)",
                 decoded.repeatIndex() >= 0 ? ", looping from unit " + decoded.repeatIndex()
                         : container.rewind() < 0 ? ""
                         : ", looping from unit " + container.rewind() / container.unit()
-                                + " by rewind");
+                                + " by rewind",
+                times == 1 ? "" : ", played " + times + " times");
+    }
+
+    /**
+     * The pass, and then {@code times - 1} repeats of its loop section: what
+     * a decoder driven past the end of a looping stream produces. A stream
+     * that loops by itself is decoded again to that length, since its repeat
+     * fills whatever the pass did not; a stream that loops by rewind is
+     * replayed as its caller would, and every pass sees the same history, so
+     * the replay is the pass's loop section again.
+     *
+     * @throws IllegalArgumentException when the stream does not loop and more
+     *     than one pass is asked for
+     */
+    static byte[] played(St4Format.Container container, St4Decompressor.Decoded pass,
+                         int times) {
+        byte[] output = pass.output();
+        if (times == 1) {
+            return output;
+        }
+        int unit = container.unit();
+        if (pass.repeatIndex() >= 0) {
+            int loop = output.length - pass.repeatIndex() * unit;
+            return St4Decompressor.decode(container.control(), container.literal(),
+                    container.byteOffsets(), container.wordOffsets(), unit,
+                    output.length + (times - 1) * loop, container.window(), container.rewind())
+                    .output();
+        }
+        if (container.rewind() < 0) {
+            throw new IllegalArgumentException("The stream does not loop, so -r" + times
+                    + " has nothing to repeat");
+        }
+        int loop = output.length - container.rewind();
+        byte[] result = java.util.Arrays.copyOf(output, output.length + (times - 1) * loop);
+        for (int at = output.length; at < result.length; at += loop) {
+            System.arraycopy(output, container.rewind(), result, at, loop);
+        }
+        return result;
+    }
+
+    private static int parseNumber(String argument) {
+        try {
+            int value = Integer.parseInt(argument);
+            if (value <= 0) {
+                throw error("Invalid parameter value " + argument);
+            }
+            return value;
+        } catch (NumberFormatException e) {
+            throw error("Invalid parameter value " + argument);
+        }
     }
 
     private static RuntimeException error(String message) {
