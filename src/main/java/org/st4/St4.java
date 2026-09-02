@@ -27,12 +27,14 @@ public final class St4 {
         int repeatIndex = -1;
         boolean copies = false;
         double search = 0;
+        boolean runs = false;
         boolean forcedMode = false;
         int i = 0;
         for (; i < args.length && args[i].startsWith("-"); i++) {
             switch (args[i]) {
                 case "-f" -> forcedMode = true;
                 case "-c" -> copies = true;
+                case "-R" -> runs = true;
                 default -> {
                     if (args[i].startsWith("-c")) {
                         copies = true;
@@ -64,6 +66,8 @@ public final class St4 {
                       -c      Let a match beyond the -m window copy from the
                               literal stream; needs a decoder built with copies
                       -cS     The same, searching for S seconds for a better parse
+                      -R      Experimental run blocks, in the search's cost model and
+                              the stream: readable by dst4 -R only, not by the decoders
                       -kK     Unit size: 1, 2 or 4 bytes (default 1). Lengths and
                               offsets count units, so the output is padded to a
                               whole number of them
@@ -106,6 +110,9 @@ public final class St4 {
         }
         St4Compressor.Result result;
         int window = offsetLimit;
+        if (runs && (search == 0 || repeatIndex >= 0)) {
+            throw error("-R needs the search, -cS, and no loop");
+        }
         if (repeatIndex >= 0 && units.length - repeatIndex > offsetLimit) {
             // The loop is longer than the window, so no match can reach across
             // it and the decoder cannot loop it alone: the caller will replay
@@ -115,15 +122,15 @@ public final class St4 {
             int[] loop = Arrays.copyOfRange(units, repeatIndex, units.length);
             result = St4Compressor.compressRewinding(
                     intro.length == 0 ? null
-                            : parse(intro, unit, offsetLimit, maxOpLength, copies, search),
-                    parse(loop, unit, offsetLimit, maxOpLength, copies, search),
+                            : parse(intro, unit, offsetLimit, maxOpLength, copies, search, false),
+                    parse(loop, unit, offsetLimit, maxOpLength, copies, search, false),
                     units, unit, maxOpLength, repeatIndex, window);
         } else {
             // The loop fits the window, so the stream loops by itself: its end
             // becomes an endless match back to the loop point.
             result = St4Compressor.compress(
-                    parse(units, unit, offsetLimit, maxOpLength, copies, search), units,
-                    unit, maxOpLength, repeatIndex, window);
+                    parse(units, unit, offsetLimit, maxOpLength, copies, search, runs), units,
+                    unit, maxOpLength, repeatIndex, window, runs);
         }
 
         try {
@@ -142,6 +149,7 @@ public final class St4 {
                 result.operations(),
                 (result.copies() == 0 ? "" : ", " + result.copies()
                         + " copies from the literal stream")
+                        + (result.runs() == 0 ? "" : ", " + result.runs() + " run blocks")
                         + (repeatIndex < 0 ? "" : ", loops from unit " + repeatIndex
                         + (result.rewindIndex() < 0 ? "" : " by rewind")));
         if (result.rewindIndex() >= 0) {
@@ -162,12 +170,13 @@ public final class St4 {
      * one-shot heuristic, or given seconds, the search that starts from it.
      */
     private static St4Block parse(int[] units, int unit, int window, int maxOpLength,
-                                  boolean copies, double seconds) {
+                                  boolean copies, double seconds, boolean runs) {
         if (!copies) {
             return St4EventOptimizer.optimize(units, unit, window);
         }
         if (seconds > 0) {
-            return St4LiteralCopySearch.optimize(units, unit, window, maxOpLength, seconds, true);
+            return St4LiteralCopySearch.optimize(units, unit, window, maxOpLength, seconds, true,
+                    runs);
         }
         return St4LiteralCopyOptimizer.optimize(units, unit, window, true);
     }

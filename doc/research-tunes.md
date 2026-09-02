@@ -13,15 +13,25 @@ before either touches a decoder: the same four YMX example tunes and
 Synergy's Wicked Polygons 2 from its test set, fourteen minutes of music,
 their twenty-five stream vectors each, at k = 2, packed with the search.
 
+How to measure here, learned the slow way: the four short tunes are the
+working set for anything new, at ten seconds of search per stream and
+skipping the streams that pack to twelve bytes or less, which is a few
+minutes for a whole idea; Wicked Polygons 2, seven times longer per stream,
+turns every pass into an hour and is run once, when a thing is final, for
+the tables.
+
 ## Verdict
 
-**The run block is worth two to four percent, and one operation where there
-are two.** It needs no new bit: the end code's class carries it, a literal
-unit from stream B repeated n times, with the end becoming the one run
-length a run cannot use. The search's own parses hold 75 to 164 new-offset
-matches at offset one per short tune and 1600 to 3300 in Wicked Polygons 2,
-which is what the block replaces, eight to ten bits apiece. The player's decoder gets a fill loop
-and leaves offset one installed, so the reps after it are one bit.
+**The run block is worth one to two percent, measured, and one operation
+where there are two.** It needs no new bit: the end code's class carries
+it, a literal unit from stream B repeated n times, with the end becoming
+the one gamma a run cannot have. Counting what it replaces in the search's
+parses said two to four; built into the search's cost model and the
+compressor, and measured on the same dictionary with and without it, it is
+0.5 to 2.1 percent on the short tunes, since the gamma of the whole run
+costs a bit or two more than the hold's, and a hold that followed a longer
+literal run only shortens it by a unit. The player's decoder gets a fill
+loop and leaves offset one installed, so the reps after it are one bit.
 
 **The block that repeats is worth as much again, at a price.** A block of
 units that was just copied and then holds for a bar is the commoner shape
@@ -68,20 +78,22 @@ costs one bit and a gamma when offset one is already the last offset, and
 eleven bits and a gamma when it is not, which is right after every far copy
 or match diverges: the value changes, one literal, then the new value holds.
 Today that is a literal run of one and a new-offset match: 1 + 1 + 8 for
-the literal, then 1 + 2 + 8 + gamma(n − 1) for the hold, 21 bits plus the
+the literal, then 1 + 2 + 8 + gamma(n − 2) for the hold, 21 bits plus the
 gamma. The run block says both at once, "this unit, n times":
 
 ```
-flag 1, class 0 1, gamma(n − 1), and one unit read from stream B
+flag 1, class 0 1, gamma(n), and one unit read from stream B
 ```
 
 11 bits plus the gamma, the value in the literal stream where the literals
 are, so stream A's parity is untouched: a flag, two class bits and an odd
 gamma make an even count, as every operation must, or the decoders pay a
 refill check per data bit. The class `0 1` is the end marker today, read
-once per stream; a run of one unit has no reason to exist, so the end
-becomes `0 1` followed by gamma(1), the single `0` bit, and then its repeat
-bit as now. One bit more per stream, once.
+once per stream; a run of one unit has no reason to exist, so the gamma
+that means one - the single `0` bit - is the end, followed by its repeat
+bit as now, and every other gamma is a run of that many units. One bit more
+per stream, once. The gamma is of n rather than of n − 1 because a run of
+two would otherwise be the end.
 
 After a run the decoder holds offset one, so a value that changes again and
 holds again is a literal and a one-bit rep, as it is today when the offset
@@ -114,6 +126,50 @@ part of those with matches and reps: the change that costs is the one after
 a far reference, and those are the holds. Two to four percent, then, on
 every tune and at every ring, with the literal run's bits and the search's
 preference counted in.
+
+### Measured, in the search
+
+The run block is in the packer: `st4 -R` puts it in the search's cost model
+and in the stream, `dst4 -R` reads it, and the reference decoder decodes
+it; the 68000 decoders do not. The parser proposes it wherever a run of
+equal units ends, at the best length by the same rule that picks a match's
+length, as a state at offset one; the compressor writes it as above, the
+end code one bit longer.
+
+Two measurements, on the four short tunes at k = 2. The exact one: the
+dictionary a plain search settles on, parsed once without the run block and
+once with it, so the parse is optimal for that dictionary both times and
+nothing else differs.
+
+| tune | ring | without | with run blocks | run blocks | smaller by |
+|---|---:|---:|---:|---:|---:|
+| Dark Side of the Spoon 1 | 960 | 28693 bits | 28455 | 43 | 0.8% |
+|  | 256 | 30387 | 30097 | 52 | 1.0% |
+|  | 128 | 51775 | 51469 | 57 | 0.6% |
+| Amiga Demo | 960 | 22029 | 21701 | 47 | 1.5% |
+|  | 256 | 40439 | 39583 | 118 | 2.1% |
+|  | 128 | 43373 | 42469 | 121 | 2.1% |
+| Mad Max 1 | 960 | 7101 | 7041 | 8 | 0.8% |
+|  | 256 | 11751 | 11691 | 8 | 0.5% |
+|  | 128 | 12739 | 12649 | 13 | 0.7% |
+| Cuddly, main menu | 960 | 8671 | 8597 | 9 | 0.9% |
+|  | 256 | 28351 | 28137 | 23 | 0.8% |
+|  | 128 | 44173 | 43931 | 40 | 0.5% |
+
+And the searched one, the search run with the block in its model against
+the search without, thirty seconds a stream each, at the player's ring:
+Dark Side of the Spoon 3593 → 3544 bytes, Amiga Demo 2780 → 2741, Mad Max
+918 → 912, Cuddly 1111 → 1092 - 0.7 to 1.7 percent. At the smaller rings
+that comparison says nothing, since two thirty-second searches with
+different candidate sets land a few percent apart on their own there,
+which is why the exact measure is the one to read.
+
+Why less than the count promised: a hold counted as eight bits, the offset
+byte; the block's gamma is of n where the hold's was of n − 2, one or two
+bits back, and where the literal before the hold was part of a longer run
+the block takes one unit from that run and the run's own flag and gamma
+stay. One to two percent, then, at the cost of a fill loop in each decoder
+and a bit on the end code.
 
 ### Prior art
 
@@ -373,9 +429,9 @@ every lossless audio coder.
 
 Deltas per stream first, since they are YMX's to do, cost the player an add
 per value, and are worth the most: a bit per stream in the header, the
-packer trying both. The run block next: it is a cost-model change to the search, a day, and
-the tunes give its number before a decoder is touched; then the decoders,
-tens of bytes each, with the end code moving one bit. The block that
+packer trying both. The run block is built into the search and measured,
+one to two percent; its decoders next, tens of bytes each, with the end
+code moving one bit, if that is worth a format version. The block that
 repeats after it, priced in the same cost model against the bank it costs,
 and built only if a register can be found for it. The rings per stream
 belong to YMX and cost nothing here. The prefix dictionary last, since its

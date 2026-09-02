@@ -35,7 +35,7 @@ public final class St4Compressor {
     public record Result(byte[] control, byte[] literal, byte[] byteOffsets,
                          byte[] wordOffsets, int unit, int paddedSize, int longestOp,
                          int operations, int rewindIndex, int window, int copies,
-                         int controlBits, boolean repeatWord) {
+                         int controlBits, boolean repeatWord, int runs, int endBits) {
 
         /** Bytes all four streams take together, which is what a comparison wants. */
         public int packedSize() {
@@ -48,7 +48,7 @@ public final class St4Compressor {
          * its repeat bit, and stream A's padding - what a parse's chain counts.
          */
         public int bits() {
-            return controlBits - 4 + 8 * (literal.length + byteOffsets.length
+            return controlBits - endBits + 8 * (literal.length + byteOffsets.length
                     + wordOffsets.length) - (repeatWord ? 16 : 0);
         }
     }
@@ -56,6 +56,7 @@ public final class St4Compressor {
     private final int[] units;
     private final int unit;
     private final int window;
+    private final boolean runs;
     private byte[] control = new byte[256];
     private int controlIndex;
     private byte[] literal;
@@ -70,6 +71,7 @@ public final class St4Compressor {
     private int longestOp;
     private int operations;
     private int copies;
+    private int runBlocks;
 
     // The walk: where the next unit comes from, the literal run gathered but
     // not yet written, the offset the stream currently holds, whether the
@@ -81,10 +83,11 @@ public final class St4Compressor {
     private boolean first = true;
     private final int[] literalsBefore;
 
-    private St4Compressor(int[] units, int unit, int window) {
+    private St4Compressor(int[] units, int unit, int window, boolean runs) {
         this.units = units;
         this.unit = unit;
         this.window = window;
+        this.runs = runs;
         this.literal = new byte[Math.max(unit, units.length * unit)];
         this.literalsBefore = new int[units.length + 1];
     }
@@ -111,9 +114,21 @@ public final class St4Compressor {
      */
     public static Result compress(St4Block optimal, int[] units, int unit, int maxOpLength,
                                   int repeatIndex, int window) {
+        return compress(optimal, units, unit, maxOpLength, repeatIndex, window, false);
+    }
+
+    /**
+     * As above, in the experimental run-block format when {@code runs}: a
+     * {@link St4Block#RUN} block is written as the end code's class followed
+     * by the gamma of its length and one literal unit, and the end itself by
+     * the one gamma a run cannot have, a single 0 bit, before its repeat bit.
+     * The 68000 decoders do not read this format; the reference does.
+     */
+    public static Result compress(St4Block optimal, int[] units, int unit, int maxOpLength,
+                                  int repeatIndex, int window, boolean runs) {
         assert -1 <= repeatIndex && repeatIndex < units.length
                 : "the loop point must be a unit of the stream itself";
-        return new St4Compressor(units, unit, window).run(new St4Block[] {optimal},
+        return new St4Compressor(units, unit, window, runs).run(new St4Block[] {optimal},
                 maxOpLength, repeatIndex, -1);
     }
 
@@ -138,7 +153,7 @@ public final class St4Compressor {
                 : "the rewind point must be a unit of the stream itself";
         assert (intro == null) == (rewindIndex == 0) : "an intro exactly when there is one";
         St4Block[] chains = intro == null ? new St4Block[] {loop} : new St4Block[] {intro, loop};
-        return new St4Compressor(units, unit, window).run(chains, maxOpLength, -1,
+        return new St4Compressor(units, unit, window, false).run(chains, maxOpLength, -1,
                 rewindIndex);
     }
 
@@ -157,6 +172,10 @@ public final class St4Compressor {
 
                 if (block.offset() == 0) {
                     pendingLiterals += length;      // runs merge across a seam
+                    continue;
+                }
+                if (block.offset() == St4Block.RUN) {
+                    emitRun(length, maxOpLength);
                     continue;
                 }
                 if (block.offset() < 0) {
@@ -192,6 +211,9 @@ public final class St4Compressor {
         writeBit(true);
         writeBit(false);
         writeBit(true);
+        if (runs) {
+            writeBit(false);                        // gamma(1): the run no run can be
+        }
         writeBit(repeatIndex >= 0);
         if (repeatIndex >= 0) {
             int scaled = (units.length - repeatIndex) * unit;
@@ -209,7 +231,35 @@ public final class St4Compressor {
                 Arrays.copyOf(byteOffsets, byteOffsetIndex),
                 Arrays.copyOf(wordOffsets, wordOffsetIndex), unit,
                 units.length * unit, longestOp, operations, rewindIndex, window, copies,
-                bitsWritten, repeatIndex >= 0);
+                bitsWritten, repeatIndex >= 0, runBlocks, runs ? 5 : 4);
+    }
+
+    /**
+     * A run block: one literal unit, then {@code size - 1} repeats of it. The
+     * flag and the end code's class, the gamma of the size, the unit into the
+     * literal stream; the decoder is left at offset one, as after a match at
+     * it.
+     */
+    private void emitRun(int size, int maxOpLength) {
+        assert runs : "run blocks need the run-block format";
+        assert size >= 2 && size <= maxOpLength : "a run block is 2..maxOpLength units";
+        flushLiterals();
+        assert !first : "a stream opens with literals, never a run";
+        writeBit(true);
+        writeBit(false);
+        writeBit(true);
+        writeInterlacedEliasGamma(size);
+        Units.write(literal, literalIndex, units[readIndex], unit);
+        literalIndex += unit;
+        literalsBefore[readIndex + 1] = literalsBefore[readIndex] + 1;
+        for (int i = 1; i < size; i++) {
+            literalsBefore[readIndex + i + 1] = literalsBefore[readIndex + 1];
+        }
+        lastOffset = 1;
+        operations++;
+        runBlocks++;
+        readIndex += size;
+        longestOp = Math.max(longestOp, size);
     }
 
     /**

@@ -24,11 +24,14 @@ public final class Dst4 {
                 + "based on ZX1 v1.5 by Einar Saukas");
 
         boolean forcedMode = false;
+        boolean runs = false;
         int times = 1;
         int i = 0;
         for (; i < args.length && args[i].startsWith("-"); i++) {
             if (args[i].equals("-f")) {
                 forcedMode = true;
+            } else if (args[i].equals("-R")) {
+                runs = true;
             } else if (args[i].startsWith("-r")) {
                 times = parseNumber(args[i].substring(2));
             } else {
@@ -50,8 +53,9 @@ public final class Dst4 {
             outputName = args[i + 1];
         } else {
             usage("""
-                    Usage: dst4 [-f] [-rN] input.st4 [output]
+                    Usage: dst4 [-f] [-R] [-rN] input.st4 [output]
                       -f      Force overwrite of output file
+                      -R      The stream was packed with st4 -R, experimental run blocks
                       -rN     Play a looping stream's loop N times: the whole pass, then
                               N-1 repeats of its loop section (default 1, the pass)
                     The output is padded to a whole number of units, as the format stores it.""");
@@ -84,7 +88,7 @@ public final class Dst4 {
             // the container stores is the pass - and -r asks for more of it.
             decoded = St4Decompressor.decode(container.control(), container.literal(),
                     container.byteOffsets(), container.wordOffsets(), container.unit(),
-                    container.size(), container.window(), container.rewind());
+                    container.size(), container.window(), container.rewind(), runs);
             output = played(container, decoded, times);
         } catch (AssertionError | IndexOutOfBoundsException | IllegalStateException e) {
             // With -ea a malformed stream trips a descriptive assertion; the

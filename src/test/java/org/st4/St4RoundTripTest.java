@@ -552,6 +552,76 @@ final class St4RoundTripTest {
         }
     }
 
+    @Test
+    void theRunBlockRoundTripsAndPaysForItself() {
+        // The experimental run block: a run of equal units as one literal unit
+        // and a count, under the end code's class, the end moved to the one
+        // gamma a run cannot have. Every searched parse with it decodes in the
+        // run-block format, and over the corpora it is never dearer than the
+        // search without it by more than the end code's extra bit.
+        for (int unit : new int[] {1, 2, 4}) {
+            for (int window : new int[] {4, 16, 64}) {
+                int withRuns = 0;
+                int without = 0;
+                for (byte[] input : inputs()) {
+                    int[] units = Units.split(input, unit);
+                    String shape = "unit " + unit + ", " + input.length + " bytes, window " + window;
+                    St4Block parse = St4LiteralCopySearch.optimize(units, unit, window,
+                            St4Format.MAX_OP, 40, 5, true);
+                    St4Compressor.Result packed = St4Compressor.compress(parse, units, unit,
+                            St4Format.MAX_OP, -1, window, true);
+                    assertEquals(5, packed.endBits(), shape);
+                    assertArrayEquals(padded(input, unit), St4Decompressor.decode(
+                            packed.control(), packed.literal(), packed.byteOffsets(),
+                            packed.wordOffsets(), unit, packed.paddedSize(), window,
+                            St4Format.NO_REWIND, true).output(), shape);
+                    withRuns += packed.bits();
+                    without += St4Compressor.compress(St4LiteralCopySearch.optimize(units,
+                            unit, window, St4Format.MAX_OP, 40, 5), units, unit,
+                            St4Format.MAX_OP, -1, window).bits();
+                }
+                assertTrue(withRuns <= without + inputs().size(),
+                        "unit " + unit + ", window " + window + ": " + withRuns
+                                + " bits with run blocks, " + without + " without");
+            }
+        }
+    }
+
+    @Test
+    void theRunBlockPacksAValueThatChangesAndHolds() {
+        // A register stream's commonest shape: a new value, then the same value
+        // for a while, after something that left another offset behind. Today
+        // that is a literal and a new-offset match at offset one, eleven bits
+        // more than the run block; over two hundred such changes the search
+        // with run blocks must find most of them.
+        var random = new Random(37);
+        byte[] input = new byte[4000];
+        int at = 0;
+        while (at < input.length) {
+            byte value = (byte) random.nextInt(256);
+            int hold = 3 + random.nextInt(12);
+            for (int i = 0; i < hold && at < input.length; i++) {
+                input[at++] = value;
+            }
+            // A far figure between holds, so the offset is never one already.
+            for (int i = 0; i < 4 && at < input.length; i++) {
+                input[at++] = (byte) (i * 37 + 11);
+            }
+        }
+        int[] units = Units.split(input, 1);
+        St4Compressor.Result plain = St4Compressor.compress(St4LiteralCopySearch.optimize(
+                units, 1, 64, St4Format.MAX_OP, 300, 7), units, 1, St4Format.MAX_OP, -1, 64);
+        St4Compressor.Result runs = St4Compressor.compress(St4LiteralCopySearch.optimize(
+                units, 1, 64, St4Format.MAX_OP, 300, 7, true), units, 1, St4Format.MAX_OP, -1,
+                64, true);
+        assertArrayEquals(input, St4Decompressor.decode(runs.control(), runs.literal(),
+                runs.byteOffsets(), runs.wordOffsets(), 1, runs.paddedSize(), 64,
+                St4Format.NO_REWIND, true).output());
+        assertTrue(runs.runs() >= 150, "run blocks found: " + runs.runs());
+        assertTrue(runs.bits() + 8 * 150 <= plain.bits(),
+                runs.bits() + " bits with run blocks against " + plain.bits());
+    }
+
     private static final int[] ZX1_SIZES = {4, 6, 1006, 6, 19, 383, 26};
 
     @Test

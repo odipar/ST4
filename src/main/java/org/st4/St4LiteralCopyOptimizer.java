@@ -225,6 +225,8 @@ public final class St4LiteralCopyOptimizer {
                 for (int p = previous + 1; p <= block.index(); p++) {
                     literal[p] = true;
                 }
+            } else if (block.offset() == St4Block.RUN) {
+                literal[previous + 1] = true;           // the run's one literal unit
             }
             previous = block.index();
         }

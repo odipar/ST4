@@ -36,6 +36,7 @@ public final class St4LiteralCopySearch {
     private static final byte NEW = 2;          // a ring match at a new offset
     private static final byte COPY = 3;         // a copy from the literal stream
     private static final byte COPYREP = 4;      // a rep of the last copy, after literals
+    private static final byte RUN = 5;          // a run block: one literal unit, repeated
 
     /** Holes of up to this many units between dictionary runs are filled, at the start. */
     private static final int HOLE = 3;
@@ -68,9 +69,20 @@ public final class St4LiteralCopySearch {
      */
     public static St4Block optimize(int[] units, int unit, int window, int maxOpLength,
                                     double seconds, boolean progress) {
+        return optimize(units, unit, window, maxOpLength, seconds, progress, false);
+    }
+
+    /**
+     * As above, with the experimental run block in the cost model when
+     * {@code runs}: a block of equal units written as one literal unit and
+     * its count, which {@link St4Compressor} writes and the reference decoder
+     * reads in the run-block format, and the 68000 decoders do not.
+     */
+    public static St4Block optimize(int[] units, int unit, int window, int maxOpLength,
+                                    double seconds, boolean progress, boolean runs) {
         long deadline = System.nanoTime() + (long) (seconds * 1e9);
-        return new Search(units, unit, window, maxOpLength, 1).run(deadline, Long.MAX_VALUE,
-                progress);
+        return new Search(units, unit, window, maxOpLength, 1, runs).run(deadline,
+                Long.MAX_VALUE, progress);
     }
 
     /**
@@ -79,8 +91,13 @@ public final class St4LiteralCopySearch {
      */
     static St4Block optimize(int[] units, int unit, int window, int maxOpLength, long steps,
                              long seed) {
-        return new Search(units, unit, window, maxOpLength, seed).run(Long.MAX_VALUE, steps,
-                false);
+        return optimize(units, unit, window, maxOpLength, steps, seed, false);
+    }
+
+    static St4Block optimize(int[] units, int unit, int window, int maxOpLength, long steps,
+                             long seed, boolean runs) {
+        return new Search(units, unit, window, maxOpLength, seed, runs).run(Long.MAX_VALUE,
+                steps, false);
     }
 
     // ---------------------------------------------------------------- search
@@ -91,6 +108,7 @@ public final class St4LiteralCopySearch {
         private final int window;
         private final int maxOpLength;
         private final int count;
+        private final boolean runBlocks;
         private final Random random;
         private final Parser parser;
 
@@ -112,14 +130,15 @@ public final class St4LiteralCopySearch {
         private long lastBest;
         private boolean progress;
 
-        Search(int[] units, int unit, int window, int maxOpLength, long seed) {
+        Search(int[] units, int unit, int window, int maxOpLength, long seed, boolean runBlocks) {
             this.units = units;
             this.unit = unit;
             this.window = window;
             this.maxOpLength = maxOpLength;
             this.count = units.length;
+            this.runBlocks = runBlocks;
             this.random = new Random(seed);
-            this.parser = new Parser(units, unit, window);
+            this.parser = new Parser(units, unit, window, runBlocks);
             // Start as the one-shot heuristic does: the full-window parse's
             // literals, holes filled, shrunk to what gets copied from.
             int reach = St4Format.maxOffsetUnits(unit);
@@ -159,7 +178,8 @@ public final class St4LiteralCopySearch {
         private void adopt(boolean[] dictionary, St4Block parsed) {
             parser.accept();
             chain = parsed;
-            bits = St4Compressor.compress(parsed, units, unit, maxOpLength, -1, window).bits();
+            bits = St4Compressor.compress(parsed, units, unit, maxOpLength, -1, window, runBlocks)
+                    .bits();
             forced = literalMask(parsed);
             runs = new ArrayList<>();
             copies = new ArrayList<>();
@@ -174,7 +194,8 @@ public final class St4LiteralCopySearch {
                     }
                     runs.add(new int[] {start, block.index(), used});
                 } else {
-                    copies.add(new int[] {start, block.index(), block.offset() < 0 ? 1 : 0});
+                    boolean copy = block.offset() < 0 && block.offset() != St4Block.RUN;
+                    copies.add(new int[] {start, block.index(), copy ? 1 : 0});
                 }
                 previous = block.index();
             }
@@ -185,7 +206,7 @@ public final class St4LiteralCopySearch {
             boolean[] referenced = new boolean[count];
             int previous = -1;
             for (St4Block block : St4LiteralCopyOptimizer.blocks(chain)) {
-                if (block.offset() < 0) {
+                if (block.offset() < 0 && block.offset() != St4Block.RUN) {
                     int distance = -block.offset();
                     for (int p = previous + 1; p <= block.index(); p++) {
                         referenced[p - distance] = true;
@@ -244,7 +265,8 @@ public final class St4LiteralCopySearch {
         /** Scores a parse: the compressor's bits. A step of the budget. */
         private int evaluate(St4Block parsed) {
             step++;
-            return St4Compressor.compress(parsed, units, unit, maxOpLength, -1, window).bits();
+            return St4Compressor.compress(parsed, units, unit, maxOpLength, -1, window, runBlocks)
+                    .bits();
         }
 
         private void noteBest(String move) {
@@ -460,6 +482,8 @@ public final class St4LiteralCopySearch {
         private final int[] winNode;
         private final int[] matchNodeSlot;         // by end + 1, so -1 has a slot
         private final int[] bestLength;
+        private final int[] bestRun;
+        private final boolean runs;
 
         // The dictionary as prefix counts, and the input's two-unit chains:
         // the previous position with the same two units, whatever the
@@ -513,7 +537,12 @@ public final class St4LiteralCopySearch {
         private int fullNodes;                     // the nodes a parse from scratch takes
 
         Parser(int[] units, int unit, int window) {
+            this(units, unit, window, false);
+        }
+
+        Parser(int[] units, int unit, int window, boolean runs) {
             this.units = units;
+            this.runs = runs;
             this.count = units.length;
             this.literalBits = 8 * unit;
             this.window = window;
@@ -534,6 +563,7 @@ public final class St4LiteralCopySearch {
             winNode = new int[count];
             matchNodeSlot = new int[count + 1];
             bestLength = new int[Math.max(count, 3)];
+            bestRun = new int[Math.max(count, 3)];
             forcedBefore = new int[count + 1];
             prevSame2 = new int[count];
             activePrev = new int[size];
@@ -647,6 +677,7 @@ public final class St4LiteralCopySearch {
                 boolean literalOnly = forced[index];
                 int value = units[index];
                 bestLengthSize = 2;
+                int bestRunSize = 2;
 
                 // The literal channel: the best match or copy end, per gamma
                 // class of the run length that reaches here from it.
@@ -710,6 +741,28 @@ public final class St4LiteralCopySearch {
                             litBits[offset] = stateBits[offset] + 1 + eliasGammaBits(length)
                                     + length * literalBits;
                             litEnd[offset] = index;
+                        }
+                    }
+                }
+
+                // The run block: a run of equal units ending here, written as
+                // its first unit and a count, at the best length. It leaves
+                // offset one installed, so it is a state at offset one, and
+                // its first unit is a literal, so it may start at a forced
+                // unit but not cover one.
+                if (runs && !literalOnly && matchLength[1] >= 1) {
+                    int longest = Math.min(matchLength[1] + 1, index);
+                    if (longest >= 2) {
+                        bestRunSize = extendBestRun(bestRunSize, longest, index);
+                        int length = bestRun[longest];
+                        int bits = optimalBits[index - length] + 3 + eliasGammaBits(length)
+                                + literalBits;
+                        if (stateEnd[1] != index || stateBits[1] > bits) {
+                            setState(1, bits, index, RUN, length, winNode[index - length]);
+                            if (bits < bestMatch) {
+                                bestMatch = bits;
+                                bestMatchIdx = 1;
+                            }
                         }
                     }
                 }
@@ -951,6 +1004,7 @@ public final class St4LiteralCopySearch {
                 inRepable[repable[r]] = true;
             }
             bestLength[2] = 2;
+            bestRun[2] = 2;
         }
 
         private void prepare() {
@@ -962,6 +1016,7 @@ public final class St4LiteralCopySearch {
             Arrays.fill(stamp, -2);
             Arrays.fill(tree, Long.MAX_VALUE);
             bestLength[2] = 2;
+            bestRun[2] = 2;
             nodes = poolTop;
             // The fake block every chain hangs from: one unit back, ending
             // just before the stream, costing -1 so the first flag is free.
@@ -978,6 +1033,24 @@ public final class St4LiteralCopySearch {
                 inRepable[repable[r]] = false;
             }
             repableCount = 0;
+        }
+
+        /** As {@link #extendBestLength}, for runs: the gamma is of the length itself. */
+        private int extendBestRun(int size, int target, int index) {
+            if (size < target) {
+                int bits = optimalBits[index - bestRun[size]] + eliasGammaBits(bestRun[size]);
+                do {
+                    size++;
+                    int longerBits = optimalBits[index - size] + eliasGammaBits(size);
+                    if (longerBits <= bits) {
+                        bestRun[size] = size;
+                        bits = longerBits;
+                    } else {
+                        bestRun[size] = bestRun[size - 1];
+                    }
+                } while (size < target);
+            }
+            return size;
         }
 
         private int extendBestLength(int size, int target, int index) {
@@ -1046,8 +1119,9 @@ public final class St4LiteralCopySearch {
             St4Block chain = new St4Block(-1, -1, St4Optimizer.INITIAL_OFFSET, null);
             for (int i = order.size() - 2; i >= 0; i--) {
                 int node = order.get(i);
-                chain = new St4Block(nodeBits[node], nodeEnd[node],
-                        nodeKind[node] == LITERALS ? 0 : nodeOffset[node], chain);
+                int offset = nodeKind[node] == LITERALS ? 0
+                        : nodeKind[node] == RUN ? St4Block.RUN : nodeOffset[node];
+                chain = new St4Block(nodeBits[node], nodeEnd[node], offset, chain);
             }
             return chain;
         }

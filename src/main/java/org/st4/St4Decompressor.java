@@ -17,6 +17,7 @@ public final class St4Decompressor {
 
     private final int window;
     private final int rewindAt;
+    private final boolean runs;
     private final byte[] control;
     private final byte[] literal;
     private final byte[] byteOffsets;
@@ -36,9 +37,10 @@ public final class St4Decompressor {
 
     private St4Decompressor(byte[] control, byte[] literal, byte[] byteOffsets,
                             byte[] wordOffsets, byte[] output, int unit,
-                            int window, int rewindAt) {
+                            int window, int rewindAt, boolean runs) {
         this.window = window;
         this.rewindAt = rewindAt;
+        this.runs = runs;
         this.control = control;
         this.literal = literal;
         this.byteOffsets = byteOffsets;
@@ -103,10 +105,22 @@ public final class St4Decompressor {
     public static Decoded decode(byte[] control, byte[] literal, byte[] byteOffsets,
                                  byte[] wordOffsets, int unit, int size,
                                  int window, int rewindAt) {
+        return decode(control, literal, byteOffsets, wordOffsets, unit, size, window,
+                rewindAt, false);
+    }
+
+    /**
+     * As above, reading the experimental run-block format when {@code runs}:
+     * the end code's class carries a gamma, a single 0 bit for the end and
+     * otherwise the length of a run of one literal unit.
+     */
+    public static Decoded decode(byte[] control, byte[] literal, byte[] byteOffsets,
+                                 byte[] wordOffsets, int unit, int size,
+                                 int window, int rewindAt, boolean runs) {
         assert St4Format.isUnitSize(unit) : "unit size must be 1, 2 or 4";
         assert size % unit == 0 : "output size must be a whole number of units";
         var decoder = new St4Decompressor(control, literal, byteOffsets, wordOffsets,
-                new byte[size], unit, window, rewindAt);
+                new byte[size], unit, window, rewindAt, runs);
         decoder.run();
         return new Decoded(decoder.output, decoder.repeatIndex);
     }
@@ -163,6 +177,13 @@ public final class St4Decompressor {
             lastOffset = bank * 256 + 256 - (byteOffsets[byteOffsetIndex++] & 0xFF);
         } else {
             if (readBit()) {
+                if (runs) {
+                    int size = readInterlacedEliasGamma();
+                    if (size > 1) {
+                        run(size);
+                        return;
+                    }
+                }
                 endOrRepeat();
                 return;
             }
@@ -205,6 +226,19 @@ public final class St4Decompressor {
      * full. The 68000 decoders run the same match 65535 units at a time,
      * re-armed forever.
      */
+    /** A run block: one unit from the literal stream, {@code size} times; offset one stays. */
+    private void run(int size) {
+        assert literalIndex + unit <= literal.length : "truncated literals";
+        for (int i = 0; i < size; i++) {
+            for (int b = 0; b < unit; b++) {
+                output[outputIndex++] = literal[literalIndex + b];
+            }
+        }
+        literalIndex += unit;
+        lastOffset = 1;
+        state = State.MATCH;
+    }
+
     private void endOrRepeat() {
         if (readBit()) {
             // Stream D holds the distance back to the loop point; the loop

@@ -285,8 +285,8 @@ reach the literals it has already read.
 
 ```sh
 mvn package
-java -ea -cp target/classes org.st4.St4  [-f] [-c[S]] [-kK] [-mN] [-lN] [-rR] input [output.st4]
-java -ea -cp target/classes org.st4.Dst4 [-f] [-rN] input.st4 [output]
+java -ea -cp target/classes org.st4.St4  [-f] [-c[S]] [-R] [-kK] [-mN] [-lN] [-rR] input [output.st4]
+java -ea -cp target/classes org.st4.Dst4 [-f] [-R] [-rN] input.st4 [output]
 ```
 
 `st4` packs, reporting progress and a time estimate as it works; `dst4`
@@ -302,7 +302,10 @@ says at which unit to save the decoder's state and at which to restore it.
 `-c` lets a match beyond `-m` copy from the literal stream, parsed once by
 the readable optimizer, which is slow on large inputs; `-cS` searches for S
 seconds for a better parse from there, printing each improvement as it finds
-it.
+it. `-R` is an experiment on top of that: run blocks, a run of equal units
+written as one literal unit and a count, in the search's cost model and in
+the stream, which `dst4 -R` reads and the 68000 decoders do not;
+[doc/research-tunes.md](doc/research-tunes.md) has what it measures.
 
 Three optimizers select the blocks, all held to each other by tests:
 
