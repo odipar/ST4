@@ -155,16 +155,22 @@ Three decoders, each built for one unit size with `ST4_UNIT`:
 | [ST4_wrap.S](68k/ST4_wrap.S) | 324 B | 328 B | 330 B | `ST4_init`, `ST4_resume` |
 | [ST4_ring.S](68k/ST4_ring.S) | 386 B | 394 B | 396 B | `ST4_init`, `ST4_resume` |
 
+### Which one
+
 ST4.S decodes into one buffer, in one call or by stopping and resuming. The
 other two stream through a ring. ST4_wrap.S is for a caller that knows the
 sizes and counts the wraps itself; it has no DONE state. ST4_ring.S stops
 each call at the ring end, for callers with variable call sizes.
+
+### The copy ladders
 
 Each decoder runs two copy ladders: match runs of at most sixteen units, on
 measured streams four of every five, take a counter-free ladder that falls
 straight into what comes next; literals and longer runs take a counted one.
 Measured on real streams, ST4_wrap spends 12 to 14% fewer cycles in a
 small-budget streaming loop and 3 to 5% fewer in bulk, with no case slower.
+
+### The state
 
 The state is held in registers: `a0`, `a2`, `a4` and `a5` walk the four
 streams, `a1` writes, `d0.w` holds the bit queue, `d1.w` the units left in
@@ -175,6 +181,8 @@ finds its source at the other end. Only `a6`, `d6` and `d7` survive a call.
 The destination, stream B and the ring start on a unit boundary, and the
 ring size is a whole number of units, so a wide move never lands on an odd
 address. Each file states its contract and its numbered assumptions.
+
+### Loops
 
 A stream that loops by itself arms its endless match at the end code and
 re-arms it 65535 units at a time: the bit queue is set to zero, a value no
@@ -191,6 +199,8 @@ staying where the ring has got to, and carry on. Arrange the budgets so a
 call ends on both points; a state saved mid-operation replays like any
 other.
 
+### Copies from the literal stream
+
 A stream with copies from the literal stream needs a decoder built for its
 window: `ST4_WINDOW equ M`, the header's field at byte 24, which one `cmp.l`
 checks. Such a build tells a copy from a match by magnitude, a `cmp.w` and
@@ -205,6 +215,8 @@ packed with copies for a 16-unit ring decodes in ST4_wrap at 65.9 cycles
 per unit, where the same data packed without them for a 256-unit ring takes
 64.8, and for the 16-unit ring, nearly all of it literals, 42.0 for three
 times the bytes.
+
+### What to feed them
 
 The decoders do not check their input; use trusted files made at build time.
 The packers keep every operation within the decoders' 16-bit counters. For a
