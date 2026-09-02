@@ -8,16 +8,13 @@ namespace Nt4;
 /// C#.
 /// </summary>
 /// <remarks>
-/// It is the ZX1 state machine with four changes. Literals come from stream B
-/// and offsets from stream C or D - by width - rather than from the stream the
-/// bits live in; every length and offset is counted in units, so each step
-/// moves k bytes; the end marker carries one more bit, which can turn the end
-/// into an endless match - the repeat; and an offset beyond the window is a
-/// copy from the literal stream, which reads behind the literal read pointer
-/// without moving it and advances the offset by what it copied, exactly as
-/// the 68000 decoders do. Malformed or truncated streams throw
-/// <see cref="InvalidDataException"/>, where the Java reference trips a
-/// <c>-ea</c> assertion.
+/// ZX1's state machine with four changes: literals come from stream B and
+/// offsets from stream C or D by width; lengths and offsets count units; the
+/// end marker's extra bit can turn the end into an endless match, the repeat;
+/// and an offset beyond the window copies from the literal stream behind the
+/// read pointer, which stays put, advancing the offset by what was copied.
+/// Malformed streams throw <see cref="InvalidDataException"/>, where the Java
+/// reference trips a <c>-ea</c> assertion.
 /// </remarks>
 public sealed class Decompressor
 {

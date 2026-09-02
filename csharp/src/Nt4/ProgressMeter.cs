@@ -5,28 +5,16 @@ namespace Nt4;
 
 /// <summary>
 /// The progress report the optimal parsers print: an exact percentage of the
-/// parse's inner-loop steps, and a time estimate fitted to how the parse has
-/// been slowing down.
+/// parse's inner-loop steps, and a time estimate fitted as <c>a*x + b*x^2</c>
+/// in the percentage, the square tracking a parse that finds more matches,
+/// and so slows down, as it goes.
 /// </summary>
-/// <remarks>
-/// The step count is exact and owes nothing to the data - position
-/// <c>index</c> is tried against every offset from 1 to
-/// <c>clamp(index, 1, offsetLimit)</c>, so the total is a closed form known
-/// before the first step. What a step <em>costs</em> is another matter, so the
-/// percentage measures progress, not remaining time. The estimate handles
-/// time: elapsed is fitted as <c>a*x + b*x^2</c> in the percentage, through
-/// the warm-up point, the midpoint and now - the square is what tracks a parse
-/// that finds more matches, and so gets steadily slower, as it goes.
-/// </remarks>
 public sealed class ProgressMeter
 {
-    /// <summary>Percent of the work to finish before estimating anything,
-    /// so the runtime's warm-up is not counted against the rest.</summary>
+    /// <summary>Percent of the work done before estimating, so the warm-up is not counted.</summary>
     private const int Warmup = 5;
 
-    /// <summary>Percent of history the fit needs before it says anything: a
-    /// curve drawn through three points a couple of percent apart is mostly
-    /// noise, and a confidently wrong number is worse than no number.</summary>
+    /// <summary>Percent of history the fit needs before it says anything.</summary>
     private const int Baseline = 15;
 
     private readonly bool _enabled;

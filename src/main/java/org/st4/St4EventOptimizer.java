@@ -8,44 +8,19 @@ import java.util.TreeSet;
  * The event-driven ST4 optimizer: the same costs as {@link St4FastOptimizer},
  * without visiting every (position, offset) pair.
  *
- * <p>The DP's per-step work is redundant in a specific way: between the start
- * and end of a match run, and along a literal stretch, every candidate's cost
- * is a closed form of the position. Only two kinds of event change anything -
- * a match run starting, and one ending - and on real data there are orders of
- * magnitude fewer of those than there are DP steps: 2,922 runs against 76
- * million steps on one measured disk image. So this class walks positions
- * emitting three channel minima per position from range structures, and does
- * per-offset work only at run boundaries:
- *
- * <ul>
- *   <li><b>Literal channel</b>: a chain ending in literals costs
- *       {@code S + 1 + gamma(j-e) + (j-e)*literalBits} for a state (S, e). With
- *       keys stored as {@code S - e*literalBits} in a min-tree indexed by e,
- *       the candidate is key + a per-age-class constant - so one range-min per
- *       gamma class of the age answers the whole window, and nothing moves as
- *       j advances: the query ranges do.</li>
- *   <li><b>Rep-match channel</b>: a run reusing its offset costs
- *       {@code lit + 1 + gamma(j-s+1)} for a run started at s whose literal
- *       cost was frozen then - the same trick, keyed by run start, entries
- *       inserted at run starts and removed at run ends.</li>
- *   <li><b>New-offset channel</b>: the best split length only needs, per gamma
- *       class of the length, a range-min over the recorded position costs,
- *       cut to the longest active run of each offset class - and the longest
- *       active run is just the position minus the oldest active run start.</li>
- * </ul>
- *
- * <p>This reproduces {@link St4FastOptimizer}'s cost array exactly - the
- * equivalence test asserts it element for element - including the reference
- * DP's state-overwrite semantics, replicated by replacing an offset's literal
- * key when its run ends. Where candidates tie, the recorded winner may differ,
- * so the chain (and the packed bytes) can differ from the fast optimizer's
- * while the packed size cannot: both are optimal parses of the same cost.
- *
- * <p>The trade is per-event overhead for per-step savings, so this wins where
- * runs are long (repetitive, aligned data) and loses where nearly every match
- * run is a step or two long. {@link #optimize} therefore counts the events
- * first - one cheap pass - and falls back to {@link St4FastOptimizer} when
- * the data is run-churny.
+ * <p>Between the start and end of a match run, and along a literal stretch,
+ * every candidate's cost is a closed form of the position; only a run
+ * starting or ending changes anything, and on real data those are orders of
+ * magnitude fewer than DP steps. So this class walks positions emitting three
+ * channel minima from range structures - the literal channel keyed by state
+ * end, the rep channel keyed by run start, the new-offset channel a range
+ * minimum over recorded costs per gamma class - and does per-offset work only
+ * at run boundaries, found through occurrence chains keyed by (value,
+ * predecessor) and (value, successor). It reproduces the fast optimizer's
+ * cost array exactly, which the equivalence test asserts; where candidates
+ * tie the chain may differ, the packed size cannot. Per-event overhead loses
+ * where runs are a step or two long, so {@link #optimize} counts the events
+ * first and falls back to {@link St4FastOptimizer} on run-churny data.
  */
 public final class St4EventOptimizer {
 

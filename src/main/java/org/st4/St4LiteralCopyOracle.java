@@ -4,19 +4,12 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * The true optimum of a parse with copies from the literal stream, found by
- * trying every parse the format allows - which is only possible on inputs of
- * a dozen units or so, and is what this is for: it measures how far
- * {@link St4LiteralCopyOptimizer} lands from the optimum it cannot reach in
- * polynomial time, on inputs where the optimum is known.
- *
- * <p>It costs exactly what the compressor writes, and knows everything the
- * decoder does: a literal run, its flag unless it opens the stream; a match
- * within the window, new or a rep of the last offset after literals; a copy
- * from the literal stream at the window plus the literals between its source
- * and itself, strictly shorter than that count, its offset advanced by what
- * it copied; and a rep of a copy after literals, which resumes just past it
- * from wherever the read pointer has got to.
+ * The true optimum of a parse with copies from the literal stream, by trying
+ * every parse the format allows - possible on a dozen units or so, and there
+ * to measure {@link St4LiteralCopyOptimizer} and {@link St4LiteralCopySearch}
+ * against. It costs exactly what the compressor writes: literal runs, matches
+ * new or repeated, copies at the window plus the literals between, strictly
+ * shorter than that count, and reps of a copy, which resume just past it.
  */
 public final class St4LiteralCopyOracle {
 

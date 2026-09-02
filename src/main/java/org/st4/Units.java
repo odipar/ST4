@@ -1,16 +1,10 @@
 package org.st4;
 
 /**
- * The input as an array of k-byte units.
- *
- * <p>A unit is at most four bytes, so it fits an {@code int} and comparisons
- * are plain integer comparisons - which is what makes the optimal parser as
- * cheap at k = 4 as the byte parser is at k = 1, over a quarter as many
- * positions.
- *
- * <p>Input that is not a multiple of k is padded with zeros. The padding is
- * part of the output the decoder produces, so the packer records the padded
- * length; a caller that cares about the original size keeps it elsewhere.
+ * The input as an array of k-byte units, big-endian as the 68000 loads them:
+ * a unit fits an {@code int}, so comparisons are integer comparisons. Input
+ * that is not a multiple of k is padded with zeros, and the padding is part
+ * of the output the decoder produces.
  */
 public final class Units {
 

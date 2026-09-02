@@ -3,15 +3,11 @@
 
 namespace Nt4;
 
-/// <summary>The input as an array of k-byte units.</summary>
-/// <remarks>
-/// A unit is at most four bytes, so it fits an <see cref="int"/> and
-/// comparisons are plain integer comparisons - which is what makes the optimal
-/// parser as cheap at k = 4 as the byte parser is at k = 1, over a quarter as
-/// many positions. Input that is not a multiple of k is padded with zeros; the
-/// padding is part of the output the decoder produces, so the packer records
-/// the padded length.
-/// </remarks>
+/// <summary>
+/// The input as an array of k-byte units, big-endian as the 68000 loads them.
+/// Input that is not a multiple of k is padded with zeros, and the padding is
+/// part of the output the decoder produces.
+/// </summary>
 public static class Units
 {
     /// <summary>Big-endian, so a unit reads the way the 68000 would load it.</summary>

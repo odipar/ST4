@@ -1,136 +1,76 @@
-# Matching into the literal stream: is it new, and does it work?
+# Copies from the literal stream: is it new, and does it work?
 
-*Written when the literal data was stream D and lay last in the container.
-Since format version 7 it is stream B and lies second again: the copies that
-came of this research are measured from the literal read pointer, so nothing
-in the decoders depends on where the ring is.*
-
-The question: put the ring directly behind stream D, the literal data, so that
-a back-reference can reach past the ring into the literals themselves. Then
-the ring no longer has to hold what a match wants, packing improves for small
-rings, and the ring can shrink to almost nothing. The optimizers have to know.
-
-This note records what the literature says, what the mechanism really is,
-and what it would take.
+The question: let a back-reference reach past the ring into the literal
+stream itself. The ring then holds only what a match needs that no literal
+can give, packing improves for small rings, and the ring can shrink to
+almost nothing. The optimizers have to know. This note records what the
+literature says, what the mechanism is, and what it measured.
 
 ## Verdict
 
-The parts are known; the combination is not; it is feasible. Pointers into the
-compressed text and pointers that reach forward are the classical *macro
-scheme* family of Storer and Szymanski, and a dictionary placed flush before
-the output buffer is LZ4's prefix mode. No scheme found uses an asset's own
-literal stream, resident by layout, as a dictionary that reaches both the
-consumed and the not yet emitted literals, to decouple the window from the
-ring. The decoders need little. The parse is the work: the exact problem is in
-an NP-complete class, so the packer needs a heuristic - and one is measured
-below. With the dictionary chosen first, a 16-unit ring with copies from D
-packs block-shaped data like a ring of 256 units and more does today, and
-prose like a ring of 80 to 120 units. No class code is needed: the offset's
-magnitude says which, and that form packs best; the ring-behind-D form
-loses.
+The parts are known; the combination is not; it works. Pointers into the
+compressed text are the classical *macro schemes* of Storer and Szymanski,
+and a dictionary placed before the output buffer is LZ4's prefix mode. No
+scheme found uses an asset's own literal stream, resident because the
+container is, as a dictionary that decouples the window from the ring. The
+decoders need one compare per match. The parse is the work: the exact
+problem is NP-complete, so the packer needs a heuristic, and with a search
+over which units are literal a 16-unit ring with copies packs block-shaped
+data like a ring of 256 units and more does without them, prose like a ring
+of over 200 units at k = 1, and both better than a 256-unit ring at k = 2
+and 4. No class code is needed: the offset's magnitude says whether it is a
+match or a copy, and of the forms tried that one packs best.
 
-## What the idea is, precisely
+## What the idea is
 
-With stream D last in the container and the ring directly behind it, memory
-reads `… D | ring`. A match copies from `write − distance`. Below the ring
-start that address lands in D, and D holds every literal of the stream in
-emission order: the consumed ones, already output and possibly long gone from
-the ring, and the unconsumed ones, which are future output. D is a second
-dictionary that never scrolls.
-
-- Anything that entered the output as a literal can be copied again from D,
-  however small the ring. The ring has to hold only what is *generated* rather
-  than stored: self-overlapping copies — RLE-like periods — and whatever
-  match-of-match chains the packer still chooses.
-- Forward references become possible. Data that appears at p₁ and later as a
-  literal run at p₂ can be a copy from D at p₁ and the literal run at p₂. That
-  is no cheaper by itself, but it needs no ring history.
-- The reach into D is what the word offset allows: 32512 bytes less the ring
-  phase. With a tiny ring that is a 32 KB literal dictionary, which is
-  today's full window at k = 1.
+Stream B holds every literal of the stream in emission order, for as long
+as the container is in memory: a second dictionary that never scrolls.
+Anything that entered the output as a literal can be copied again from it,
+however small the ring, so the ring has to hold only what is generated
+rather than stored - self-overlapping copies, and whatever chains of matches
+the packer still chooses. The reach is what the word offset allows: 32512
+literals less the window, which with a tiny ring is a 32 KB dictionary at
+k = 1, today's whole window.
 
 ## Prior art
 
-**Macro schemes.** Storer and Szymanski's model (STOC 1978, JACM 1982)
-defines a pointer as indicating "a substring of the compressed string, a
-substring of the original string, or a substring of some other string such as
-an external dictionary". LZ77 is the restricted, easy member: pointers into the
-original string, leftward only. A pointer into the literal stream is their
-*compressed-pointer* case; reaching future literals is *bidirectional*.
-Finding an optimal bidirectional macro scheme is NP-complete; Russo, Navarro,
-Correia and Francisco (2020) give approximations, and validity is only that
-decoding never loops. The forward pointers here are the trivially acyclic
-kind: a literal is an explicit symbol, never a pointer.
+**Macro schemes.** Storer and Szymanski (STOC 1978, JACM 1982) define a
+pointer as indicating a substring of the compressed string, of the original
+string, or of an external dictionary. LZ77 is the easy member: pointers into
+the original string, leftward only. A pointer into the literal stream is
+their *compressed-pointer* case. Finding an optimal bidirectional macro
+scheme is NP-complete; Russo, Navarro, Correia and Francisco (2020) give
+approximations.
 
-**LZRR.** Nishimoto and Tabei (2018), "LZ77 parsing with right reference": a
-practical left-to-right parse that may copy from the right when that is
-decodable, with about five percent fewer phrases than LZ77 on benchmarks. The
-closest published relative of the forward-reference half. It references the
-original text, not the literal payload.
+**LZRR.** Nishimoto and Tabei (2018): an LZ77 parse that may copy from the
+right when that is decodable, about five percent fewer phrases than LZ77.
+It references the original text, not the literal payload.
 
-**LZ4 prefix and external dictionaries.** `LZ4_decompress_safe_usingDict`
-treats a separate buffer as the history before the block. Its header notes
-that "decompression speed can be substantially increased when dst ==
-dictStart + dictSize" — a dictionary flush before the buffer costs nothing,
-and anywhere else the decoder pays a range check per match. Streaming
-decompression requires the last 64 KB to stay resident, and admits ring
-buffers under 64 KB only in a synchronized mode. Requirement (1) of the idea
-is exactly prefix mode; the difference is that LZ4's dictionary is external
-data, not the stream's own literals, and never contains the future.
-
-**ZX0**, this format's ancestor, supports in-place overlap with a "delta"
-margin and "decompression with prefix data for improved compression" — the
-same family's external-dictionary trick. External data, backward only.
+**LZ4 and ZX0 prefix dictionaries.** `LZ4_decompress_safe_usingDict` treats
+a separate buffer as the history before the block, and ZX0 decompresses with
+prefix data the same way. External data, backward only, never the stream's
+own literals.
 
 **Static dictionaries** decoupled from the window are the ordinary mental
-model for what D becomes: a fixed dictionary and a sliding window, addressed
-by one offset space when contiguous.
+model for what the literal stream becomes.
 
-## Feasibility
+## The design
 
-**The linear decoder, ST4.S: free.** If the caller loads the container so that
-D ends where the output buffer begins, references into D need no code at all.
-Version 5 put D last for exactly this.
+The packer never writes a ring offset above the window M, so an offset of
+at most M is a match exactly as before, and one beyond M copies from the
+literal stream, M less than that far back from the literal read pointer:
+the same three control bits, the same byte-or-word encoding, a byte offset
+reaching 512 − M literals. The decoder compares an offset against M, which
+it knows at build time, and copies from the read pointer instead of the
+write pointer, without a wrap. Streams that never exceed M decode as they
+always did, and nothing depends on where the ring or the literal stream is.
 
-**The ring decoders: not free by adjacency alone.** Today a source below the
-ring start means "wrap to the other end", and the same condition cannot also
-mean "read D". Three ways out:
-
-1. A no-wrap variant: the write pointer wraps, sources are linear, everything
-   below the ring is D, anchored at its end. The previous lap becomes
-   unreachable, so no match may cross a lap, and D's length must be known
-   before any offset into it can be written.
-2. A *literal-stream match* with a class code of its own: a copy relative to
-   `a2`, the literal read pointer, two more control bits per such match, no
-   layout constraint.
-3. The same by magnitude, with no class code at all. The packer never writes
-   a ring offset above `-m` = N, so an offset of at most N units is a ring
-   match exactly as today, and one beyond N copies from the literal stream,
-   offset minus N literals back from the read pointer. Same three control
-   bits, same byte-or-word encoding, no layout constraint. The decoder
-   compares an offset against N once, when it installs it, and copies from
-   the read pointer instead of the write pointer, without a wrap; the
-   existing streams, which never exceed N, decode unchanged.
-
-The third is the design: it anchors at the read pointer, which the packer
-knows at every point, keeps the ring's whole history, and costs the stream
-nothing.
-
-**The packer: the work.** The dictionary depends on the parse, because the
-parse decides which units are literals, and a reference into D depends on how
-many literals precede its target. That circularity is why the general problem
-is NP-complete; the position-indexed dynamic program cannot express it
-directly. The practical route is two passes: a standard parse gives D₁; a
-second parse admits copies from D₁'s literal runs, pins every run it
-references as literal, and iterates once. With `a2`-relative offsets the
-backward references are clean in the dynamic program — each chain knows its
-own literal count — and only the forward ones need the pinning. The reference
-and fast optimizers can take this; the event-driven one would fall back, since
-references into D need an occurrence index over D rather than run events.
-
-**The gain, bounded from today's packer.** The most the idea can win is the
-gap between a small window and the full one, since D restores the full reach.
-On the five test corpora of 2 KB and up:
+The packer is the work. The parse decides which units are literal, a copy
+is valid only if its source is, and its offset counts the literals between:
+the circularity that makes the general problem NP-complete, which the
+position-indexed dynamic program cannot express. The most a small ring can
+win is the gap to the full window, measured on the test corpora of 2 KB
+and up before anything was built:
 
 | k | ring, units | packed size against the full window |
 |---:|---:|---:|
@@ -142,188 +82,157 @@ On the five test corpora of 2 KB and up:
 | 4 | 16 | +7.3% |
 | 4 | 256 | +3.1% |
 
-A reference into D is nearly always a word offset, a byte more than a ring
-match, so it pays where the small ring forced *literals* — which is where the
-gap comes from. A real gain for rings of a few hundred units or less, marginal
-from a thousand up. The compelling case is a rewind loop through a tiny ring,
-packing close to full-window quality.
+A real gain for rings of a few hundred units or less, marginal from a
+thousand up.
 
 ## The experiment
 
-The packer half, in Java: a variant of the reference optimizer with the far
-candidates added, run on the test corpora plus this README and a Java class
-file, reporting each parse's bit cost, which is the packed size up to
-padding. The experiment class has since become `St4LiteralCopyOptimizer`,
-the packer behind `st4 -c`, and `St4LiteralCopyOracle`, the exhaustive
-search that measures it; the numbers below are the experiment's.
+The packer, on the test corpora plus an earlier README of 15732 bytes and
+a Java class file. The numbers below are the packer's own: `st4 -mN` for
+the ring alone and `st4 -c120 -mN` for the ring with copies - the one-shot
+parse of `St4LiteralCopyOptimizer` and then two minutes of
+`St4LiteralCopySearch` per cell, which on the larger corpora is still
+improving when time runs out. `St4LiteralCopyOracle`, the exhaustive search
+on inputs of a dozen units, holds both to the optimum where it is known.
 
 ### How the circularity was broken
 
-The pinning plan above did not survive contact with the data. On repetitive
-input the first pass chains copies through each other - period 3 copies
-period 2 copies period 1 - and pinning every broken target forces most of
-the text literal. Nor does "literal in the best chain ending here" stand in
-for "literal in the final chain" on prose: thousands of targets broke and
-banning them never converged. What works is choosing the dictionary first.
-The literals of a full-window parse are every first occurrence the data has,
-and few; they are forced to stay literal, a copy may come only from them, and
-the parse is consistent by construction. Holes of up to three units between
-dictionary runs are filled, because an accidental one-unit rep inside a
-period otherwise splits every later copy of it in two. A second pass keeps
-only the dictionary units the first actually copied from and frees the rest.
-
-Each pass is then the ordinary position-indexed DP, `O(n × reach)` - the
-experiment loops every offset, `O(n²)`, only because an `a2` distance can be
-within reach when the output distance is not - and one to four passes settle.
-The dependency the question feared, every offset into D shifting with every
-literal decision, never reaches the DP: with `a2`-relative offsets a backward
-copy's offset depends only on the literals between target and copy, which the
-chain prefix fixes, and the DP needs just the cost class, byte or word, which
-it estimates from the previous pass and can only mis-cost by eight bits.
-
-Three addressings were costed. **A2**: a class code of its own, five
-control bits, the offset relative to the literal read pointer, and ring
-matches as the ring decoders make them today. **By magnitude**: the same
-offset space as a ring match, an offset beyond N reaching the literal stream
-N less than that far back from the read pointer - three control bits, and a
-byte offset reaches 512 minus N literals. **Ring behind D**: no class code
-either, but the ring directly behind D with an ordinary offset reading D past
-the ring start, anchored at D's end; the write pointer wraps by lap, sources
-never do, so no match may cross a lap and ring matches reach only into the
-current lap.
+Pinning every copy target as literal did not survive contact with the data:
+on repetitive input the first pass chains copies through each other, and
+pinning every broken target forces most of the text literal; on prose
+thousands of targets broke and banning them never converged. What works is
+choosing the dictionary first. The literals of a full-window parse are every
+first occurrence the data has, and few; they are forced to stay literal, a
+copy may come only from them, and the parse is consistent by construction.
+Holes of up to three units between dictionary runs are filled, and a second
+pass keeps only the units the first copied from. Each pass is the ordinary
+DP with the copy candidates added: a copy's offset depends only on the
+literals between source and copy, which the chain prefix fixes, and the DP
+needs just the cost class, byte or word, which it takes from the previous
+pass and can mis-cost by eight bits at most. That parse is far too literal,
+and the search starts from it: a greedy sweep frees and trims every literal
+run, keeping what packs smaller, then random moves free, seed, extend or
+trim runs, accepted by annealing, each step an exact parse for its
+dictionary scored by what the compressor writes, with the rep of a copy in
+the cost model.
 
 ### What it found
 
 Packed size in bytes and as a share of the input, the way the packers report
 it: smaller is better. Only ring decoders are compared - a stream that stays
-in one buffer has the whole window and nothing to gain. "Ring alone" is
-today's parse at that ring size, "copies from D" the class-code form, "no
-class code" the ring-behind-D form.
+in one buffer has the whole window and nothing to gain. "Ring alone" is the
+parse at that ring size without copies, "with copies" the same ring with
+copies from the literal stream.
 
 At k = 1:
 
-| corpus | bytes | ring | ring alone | class code | by magnitude | ring behind D |
-|---|---:|---:|---:|---:|---:|---:|
-| far-match: a block, a run, the block | 2900 | 16 | 408 (14.1%) | 210 (7.2%) | 210 (7.2%) | 586 (20.2%) |
-| period-129: 129 random bytes × 8 | 1032 | 16 | 1043 (101.1%) | 156 (15.1%) | 154 (14.9%) | 270 (26.2%) |
-| period-129 | 1032 | 64 | 1043 (101.1%) | 156 (15.1%) | 154 (14.9%) | 183 (17.7%) |
-| period-129 | 1032 | 256 | 135 (13.1%) | 135 (13.1%) | 135 (13.1%) | 160 (15.5%) |
-| word-soup: 20 words, 400 draws | 2925 | 16 | 2795 (95.6%) | 1008 (34.5%) | 924 (31.6%) | 1127 (38.5%) |
-| word-soup | 2925 | 64 | 2114 (72.3%) | 946 (32.3%) | 889 (30.4%) | 966 (33.0%) |
-| word-soup | 2925 | 256 | 1198 (41.0%) | 864 (29.5%) | 847 (29.0%) | 890 (30.4%) |
-| word-soup | 2925 | 1024 | 817 (27.9%) | 806 (27.6%) | 815 (27.9%) | 832 (28.4%) |
-| class file | 11273 | 16 | 9993 (88.6%) | 8757 (77.7%) | 8288 (73.5%) | 9780 (86.8%) |
-| class | 11273 | 64 | 8456 (75.0%) | 7770 (68.9%) | 7542 (66.9%) | 8787 (77.9%) |
-| class | 11273 | 256 | 7155 (63.5%) | 6836 (60.6%) | 6802 (60.3%) | 7593 (67.4%) |
-| class | 11273 | 1024 | 6240 (55.4%) | 6185 (54.9%) | 6199 (55.0%) | 6559 (58.2%) |
-| README, prose | 15732 | 16 | 15163 (96.4%) | 13548 (86.1%) | 12321 (78.3%) | 14436 (91.8%) |
-| README | 15732 | 64 | 13376 (85.0%) | 12231 (77.7%) | 11508 (73.2%) | 13364 (84.9%) |
-| README | 15732 | 256 | 10514 (66.8%) | 10063 (64.0%) | 9927 (63.1%) | 11459 (72.8%) |
-| README | 15732 | 1024 | 8863 (56.3%) | 8687 (55.2%) | 8663 (55.1%) | 9653 (61.4%) |
-| random + its first 500 bytes | 33012 | 16 | 33150 (100.4%) | 32521 (98.5%) | 33018 (100.0%) | 32620 (98.8%) |
-| 32 KB of one byte | 32000 | 16 | 5 (0.0%) | 5 (0.0%) | 5 (0.0%) | 4500 (14.1%) |
+| corpus | bytes | ring | ring alone | with copies |
+|---|---:|---:|---:|---:|
+| far-match: a block, a run, the block | 2900 | 16 | 409 (14.1%) | 210 (7.2%) |
+| period-129: 129 random bytes × 8 | 1032 | 16 | 1044 (101.2%) | 155 (15.0%) |
+| period-129 | 1032 | 64 | 1044 (101.2%) | 155 (15.0%) |
+| period-129 | 1032 | 256 | 135 (13.1%) | 135 (13.1%) |
+| word-soup: 20 words, 400 draws | 2925 | 16 | 2797 (95.6%) | 892 (30.5%) |
+| word-soup | 2925 | 64 | 2115 (72.3%) | 881 (30.1%) |
+| word-soup | 2925 | 256 | 1198 (41.0%) | 847 (29.0%) |
+| word-soup | 2925 | 1024 | 817 (27.9%) | 816 (27.9%) |
+| class file | 11273 | 16 | 9995 (88.7%) | 7424 (65.9%) |
+| class | 11273 | 64 | 8456 (75.0%) | 7111 (63.1%) |
+| class | 11273 | 256 | 7156 (63.5%) | 6648 (59.0%) |
+| class | 11273 | 1024 | 6241 (55.4%) | 6177 (54.8%) |
+| README, prose | 15732 | 16 | 15164 (96.4%) | 10771 (68.5%) |
+| README | 15732 | 64 | 13376 (85.0%) | 10498 (66.7%) |
+| README | 15732 | 256 | 10515 (66.8%) | 9639 (61.3%) |
+| README | 15732 | 1024 | 8863 (56.3%) | 8645 (55.0%) |
+| random + its first 500 bytes | 33012 | 16 | 33151 (100.4%) | 32522 (98.5%) |
+| 32 KB of one byte | 32000 | 16 | 7 (0.0%) | 7 (0.0%) |
 
 At k = 2:
 
-| corpus | bytes | ring | ring alone | class code | by magnitude |
-|---|---:|---:|---:|---:|---:|
-| far-match: a block, a run, the block | 2900 | 16 | 409 (14.1%) | 210 (7.2%) | 210 (7.2%) |
-| period-128: 128 random bytes × 8 | 1024 | 16 | 1027 (100.3%) | 151 (14.7%) | 149 (14.6%) |
-| period-128 | 1024 | 64 | 134 (13.1%) | 134 (13.1%) | 134 (13.1%) |
-| word-soup: 20 words, 400 draws | 2925 | 16 | 2736 (93.5%) | 998 (34.1%) | 921 (31.5%) |
-| word-soup | 2925 | 64 | 2157 (73.7%) | 965 (33.0%) | 912 (31.2%) |
-| word-soup | 2925 | 256 | 1241 (42.4%) | 910 (31.1%) | 896 (30.6%) |
-| class file | 11273 | 16 | 10747 (95.3%) | 9468 (84.0%) | 9350 (82.9%) |
-| class | 11273 | 64 | 9937 (88.1%) | 9176 (81.4%) | 9095 (80.7%) |
-| class | 11273 | 256 | 9132 (81.0%) | 8844 (78.5%) | 8819 (78.2%) |
-| README, prose | 15732 | 16 | 15440 (98.1%) | 11994 (76.2%) | 11441 (72.7%) |
-| README | 15732 | 64 | 14533 (92.4%) | 11644 (74.0%) | 11195 (71.2%) |
-| README | 15732 | 256 | 12934 (82.2%) | 11085 (70.5%) | 10861 (69.0%) |
+| corpus | bytes | ring | ring alone | with copies |
+|---|---:|---:|---:|---:|
+| far-match: a block, a run, the block | 2900 | 16 | 410 (14.1%) | 211 (7.3%) |
+| period-128: 128 random bytes × 8 | 1024 | 16 | 1028 (100.4%) | 153 (14.9%) |
+| period-128 | 1024 | 64 | 135 (13.2%) | 135 (13.2%) |
+| word-soup: 20 words, 400 draws | 2925 | 16 | 2737 (93.6%) | 924 (31.6%) |
+| word-soup | 2925 | 64 | 2157 (73.7%) | 915 (31.3%) |
+| word-soup | 2925 | 256 | 1241 (42.4%) | 896 (30.6%) |
+| class file | 11273 | 16 | 10747 (95.3%) | 8925 (79.2%) |
+| class | 11273 | 64 | 9939 (88.2%) | 8797 (78.0%) |
+| class | 11273 | 256 | 9134 (81.0%) | 8671 (76.9%) |
+| README, prose | 15732 | 16 | 15442 (98.2%) | 10874 (69.1%) |
+| README | 15732 | 64 | 14533 (92.4%) | 10789 (68.6%) |
+| README | 15732 | 256 | 12935 (82.2%) | 10611 (67.4%) |
 
 At k = 4:
 
-| corpus | bytes | ring | ring alone | class code | by magnitude |
-|---|---:|---:|---:|---:|---:|
-| class file | 11273 | 16 | 11055 (98.1%) | 10523 (93.3%) | 10497 (93.1%) |
-| class | 11273 | 64 | 10821 (96.0%) | 10463 (92.8%) | 10443 (92.6%) |
-| class | 11273 | 256 | 10437 (92.6%) | 10325 (91.6%) | 10321 (91.6%) |
-| README, prose | 15732 | 16 | 15618 (99.3%) | 15239 (96.9%) | 15222 (96.8%) |
-| README | 15732 | 64 | 15398 (97.9%) | 15143 (96.3%) | 15130 (96.2%) |
-| README | 15732 | 256 | 15098 (96.0%) | 14928 (94.9%) | 14921 (94.8%) |
-| word-soup: 20 words, 400 draws | 2925 | 16 | 2826 (96.6%) | 2117 (72.4%) | 2064 (70.6%) |
-| word-soup | 2925 | 64 | 2592 (88.6%) | 2085 (71.3%) | 2042 (69.8%) |
-| word-soup | 2925 | 256 | 2066 (70.6%) | 1955 (66.8%) | 1948 (66.6%) |
-| period-128: 128 random bytes × 8 | 1024 | 16 | 1027 (100.3%) | 149 (14.6%) | 147 (14.4%) |
+| corpus | bytes | ring | ring alone | with copies |
+|---|---:|---:|---:|---:|
+| class file | 11273 | 16 | 11057 (98.1%) | 10266 (91.1%) |
+| class | 11273 | 64 | 10822 (96.0%) | 10267 (91.1%) |
+| class | 11273 | 256 | 10438 (92.6%) | 10229 (90.7%) |
+| README, prose | 15732 | 16 | 15618 (99.3%) | 14572 (92.6%) |
+| README | 15732 | 64 | 15398 (97.9%) | 14533 (92.4%) |
+| README | 15732 | 256 | 15099 (96.0%) | 14525 (92.3%) |
+| word-soup: 20 words, 400 draws | 2925 | 16 | 2827 (96.6%) | 1879 (64.2%) |
+| word-soup | 2925 | 64 | 2593 (88.6%) | 1873 (64.0%) |
+| word-soup | 2925 | 256 | 2067 (70.7%) | 1858 (63.5%) |
+| period-128: 128 random bytes × 8 | 1024 | 16 | 1028 (100.4%) | 153 (14.9%) |
 
 Read for the goal - the same ratio from a smaller ring - the tables say what
-ring today's decoders need to match a 16-unit ring with copies from D:
+ring a decoder without copies needs to match a 16-unit ring with them:
 
-| corpus | k | 16 units, copies from D by magnitude | ring alone, for the same ratio |
+| corpus | k | 16 units with copies | ring alone, for the same ratio |
 |---|---:|---:|---:|
 | far-match | 1 | 7.2% | any ring shorter than the gap gives 14.1% |
-| period-129 | 1 | 14.9% | 256 units (13.1%); 64 units give 101.1% |
-| word-soup | 1 | 31.6% | between 256 (41.0%) and 1024 (27.9%) |
-| class file | 1 | 73.5% | between 64 (75.0%) and 256 (63.5%) |
-| README | 1 | 78.3% | between 64 (85.0%) and 256 (66.8%) |
-| class file | 2 | 82.9% | between 64 (88.1%) and 256 (81.0%) |
-| README | 2 | 72.7% | more than 256 units (82.2%) |
-| word-soup | 2 | 31.5% | more than 256 units (42.4%) |
-| class file | 4 | 93.1% | between 64 (96.0%) and 256 (92.6%) |
-| README | 4 | 96.8% | between 64 (97.9%) and 256 (96.0%) |
-| word-soup | 4 | 70.6% | 256 units (70.6%) |
+| period-129 | 1 | 15.0% | 256 units (13.1%); 64 units give 101.2% |
+| word-soup | 1 | 30.5% | between 256 (41.0%) and 1024 (27.9%) |
+| class file | 1 | 65.9% | just short of 256 units (63.5%); 64 give 75.0% |
+| README | 1 | 68.5% | just short of 256 units (66.8%); 64 give 85.0% |
+| class file | 2 | 79.2% | more than 256 units (81.0%) |
+| README | 2 | 69.1% | more than 256 units (82.2%) |
+| word-soup | 2 | 31.6% | more than 256 units (42.4%) |
+| class file | 4 | 91.1% | more than 256 units (92.6%) |
+| README | 4 | 92.6% | more than 256 units (96.0%) |
+| word-soup | 4 | 64.2% | more than 256 units (70.7%) |
 
 ### What that means
 
-**Of the two forms without a class code, only the magnitude split works.**
-The ring placed behind D, with D's end the anchor and its laps uncrossable,
-costs more than a class code saves everywhere and is catastrophic on runs:
-32 KB of one byte packs to 5 bytes with a ring and to 3.7 KB without one. The
-same offset space split at N - a ring match up to N, a copy from the literal
-stream beyond - beats the class code on every corpus but one, by its two
-control bits and its longer byte reach. What it gives up is reach into D,
-which shrinks by N, and the random stream with its head repeated shows it:
-the one copy 32512 literals back no longer fits. That is the design.
+**A smaller ring at the same ratio is real.** Where the repeats are whole
+blocks or periods that lie further apart than the ring, a 16-unit ring with
+copies packs like a ring of 256 units and more without them, and the copy is
+a hair cheaper than a match at full reach would be, because an offset that
+counts literals is a byte where one that counts output is a word. At k = 2
+and k = 4, where the decoders live, a 16-unit ring with copies beats a
+256-unit ring without them on all three larger corpora, and a 64-unit ring
+with copies packs the README at k = 4 to 92.4% where 256 units alone give
+96.0%.
 
-**A smaller ring at the same ratio is real for block-shaped repetition.**
-Where the repeats are whole blocks or periods that lie further apart than the
-ring - a pattern, a periodic dump, a repeated routine - a 16-unit ring with
-copies from D packs like a ring of 256 units and more today, and the copy
-from D is a hair cheaper than a match at full reach would be, because an
-offset that counts literals is a byte where one that counts output is a word.
-At k = 4, where the decoders live, a 16-unit ring with copies from D packs
-like a ring of 180 to 256 units today on all three larger corpora.
+**Prose gains less, and the search is what makes it gain.** A ring's
+advantage on text is a cheap reference to the most recent occurrence, which
+is usually match output, not a literal; a copy has to reach the first
+occurrence instead, often a word offset away, unless the parse makes a
+nearer occurrence literal to serve the ones after it - which is what the
+search finds and a one-shot parse cannot. On the README a 16-unit ring with
+copies packs to 68.5% at k = 1, just short of a 256-unit ring alone, where
+the one-shot parse gave 78.3%; the class file to 65.9% against 73.5%.
 
-**Prose gains the least.** A ring's advantage on text is a cheap reference
-to the most recent occurrence, which is usually match output, not a literal;
-a copy from D has to reach the first occurrence instead, often a word offset
-away, and has no rep form. On the README a 16-unit ring with copies from D
-packs to 78.3%, like a ring of about 120 units today at k = 1; the class file
-to 73.5%, like about 80 units. At k = 2 the same ring takes the README to
-72.7% where the ring alone gives 98.1%, and the class file to 82.9% against
-95.3%.
-
-**The cost model still has slack.** Copies are backward only, at least two
-units, without a rep form; a rep for the copy that continues the last one
-would take back some of what prose loses. The dictionary is the full parse's
-literals with holes filled, not an optimum, and the fixed point sometimes
-returns to its first pass.
+**What gave up reach.** The magnitude form's reach into the literal stream
+shrinks by the window, and the random stream with its head repeated shows
+it: the one copy 32512 literals back no longer fits.
 
 ### What decides it
 
 The test corpora are synthetic. Whether the demo's assets - register dumps,
-speedcode, samples - are block-shaped or prose-shaped is what decides the
-ring size this buys, and the experiment runs on any file. The packer writes
-offsets beyond N with `-c`, and the decoders take them when built with
-`ST4_WINDOW`: one compare per match segment, and a copy whose source is the
-literal read pointer rather than the write pointer, without a wrap, 14-22
-bytes each. `st4 -cS` then searches for S seconds beyond the one-shot
-parse: `St4LiteralCopySearch` descends and anneals over which units are
-literal, each step an exact parse for that choice scored by what the
-compressor writes, with the rep of a copy in its cost model - on this
-README at k = 1 and a 64-unit window it takes the one-shot parse's 78% of
-the input to 61% in ten minutes, and is still going. What is left is
-one-unit copies in the cost model, and the same candidates in the fast
-optimizer, the event-driven one falling back.
+speedcode, samples - are block-shaped or prose-shaped decides the ring size
+this buys, and the packer runs on any file. `st4 -c` writes the one-shot
+parse and the decoders take it when built with `ST4_WINDOW`; `st4 -cS`
+searches for S seconds beyond it, descending and annealing over which units
+are literal with an exact parse for each choice and the rep of a copy in its
+cost model - on this README at k = 1 and a 64-unit window that takes the
+one-shot parse's 78% of the input to 61% in ten minutes, still improving.
+What is left is one-unit copies in the cost model, and the same candidates
+in the fast optimizer, the event-driven one falling back.
 
 ## Sources
 

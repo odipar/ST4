@@ -14,34 +14,17 @@ namespace Nt4;
 /// <c>St4LiteralCopySearch</c>.
 /// </summary>
 /// <remarks>
-/// <para>The exact optimum is NP-hard - see <see cref="LiteralCopyOptimizer"/>,
-/// which chooses its dictionary once and stops. This class keeps choosing. A
-/// dictionary is a set of forced literals: they stay literal, a copy may come
-/// only from them, and everything else is the parse's to decide. For a given
-/// dictionary the parse is a dynamic program, and the search descends and
-/// anneals over dictionaries: a greedy sweep frees and trims every literal
-/// run, keeping what packs smaller; then random moves - free a run, seed one
-/// where a copy or match sits so later copies can come from nearby, extend
-/// or trim one - are accepted when they pack smaller and now and then when
-/// they do not, less and less as time runs out; and when nothing has improved
-/// for a while, the search returns to the best and sweeps again. It starts
-/// where the one-shot heuristic ends, so it is never worse.</para>
-/// <para>The parse is <see cref="FastOptimizer"/>'s DP with the copies added.
-/// Per ring offset the state of the reference; per copy distance the same
-/// state, visited only where two units of the dictionary recur - a chain over
-/// pairs, since a copy needs two - plus the runs in progress and the
-/// distances whose last copy could be repped. A copy's rep after literals
-/// continues from just past what it copied, which in output terms is the same
-/// distance again, so it is a ring rep with one more condition: the literals
-/// between must have literal shadows at the source. The literal channel is a
-/// range minimum per gamma class over a min-tree keyed by match end. Chains
-/// are rebuilt from a pool of nodes materialised only for run ends and
-/// position winners. A parse restarts from the last checkpoint before its
-/// dictionary first differs from the last accepted one's.</para>
-/// <para>Copies are costed with the dictionary's own literal count between
-/// source and copy, a lower bound on what the compressor will see, so every
-/// copy is valid and a byte offset can only turn out to be a word; the
-/// compressor's bits are what the search scores.</para>
+/// A dictionary is a set of forced literals: they stay literal, a copy may
+/// come only from them, the parse decides the rest. The search starts where
+/// <see cref="LiteralCopyOptimizer"/> ends, sweeps every literal run keeping
+/// what packs smaller, then anneals with random moves that free, seed, extend
+/// or trim runs, returning to the best when it stalls. The parse is
+/// <see cref="FastOptimizer"/>'s DP with copies added - sources through
+/// two-unit chains over the dictionary, the rep of a copy as a ring rep at the
+/// same output distance, a min-tree literal channel, a node pool, and
+/// checkpointed restarts from the first changed unit. Copies are costed with
+/// the dictionary's own literal count, a lower bound, so every copy is valid;
+/// the compressor's bits are the score.
 /// </remarks>
 public static class LiteralCopySearch
 {

@@ -4,23 +4,16 @@
 namespace Nt4;
 
 /// <summary>
-/// <see cref="Optimizer"/>, restructured to not allocate: the same parse,
-/// found the same way, producing byte-identical output - measured at a
-/// fraction of the time.
+/// <see cref="Optimizer"/> restructured to not allocate: the same parse, the
+/// same bytes out, at a fraction of the time.
 /// </summary>
 /// <remarks>
-/// <para>The reference walks the same dynamic program but materialises every
-/// candidate as a <see cref="Block"/>, and nearly all of them lose and become
-/// garbage. This version runs in two passes: <b>forward</b>, the identical DP
-/// on primitive arrays, recording per position the winning cost and a
-/// three-int descriptor of which candidate won; and <b>backward</b>, chain
-/// reconstruction by <see cref="ChainRebuilder"/>, building only the blocks
-/// the winning parse actually contains.</para>
-/// <para>The candidates are evaluated in the same order with the same
-/// strictly-better replacement rule, so ties fall exactly as in the reference
-/// and the output is byte-identical - which the equivalence test asserts, and
-/// which is the reason <see cref="Optimizer"/> stays in the tree: it is the
-/// specification this class is checked against.</para>
+/// The identical DP runs forward on primitive arrays, recording per position
+/// the winning cost and a three-int descriptor of the winner, and
+/// <see cref="ChainRebuilder"/> builds only the winning chain. Candidates are
+/// evaluated in the same order with the same strictly-better rule, so ties
+/// fall as in the reference and the output is byte-identical, which the
+/// equivalence test asserts.
 /// </remarks>
 public sealed class FastOptimizer
 {
