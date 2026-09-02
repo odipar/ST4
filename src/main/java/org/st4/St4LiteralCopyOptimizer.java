@@ -9,7 +9,7 @@ import org.jspecify.annotations.Nullable;
  * dictionary, and the dictionary is a choice.
  *
  * <p>A copy from the literal stream is an ordinary far match whose source is
- * literal in the same parse, since the units it copies are in stream D, in
+ * literal in the same parse, since the units it copies are in stream B, in
  * order, whatever the ring has forgotten. That is a circularity - the parse
  * decides which units are literal, a copy is only valid if its source is, and
  * its offset counts the literals between - and it is what makes the exact
@@ -22,7 +22,7 @@ import org.jspecify.annotations.Nullable;
  * may come only from them, and the parse is then the reference DP with the
  * copy candidates added, exact for that dictionary. Holes of a few units
  * between dictionary runs are filled, since a copy cannot step over what is
- * not in D. A second pass keeps only the dictionary units the first one
+ * not in B. A second pass keeps only the dictionary units the first one
  * copied from, frees the rest to be matched, and the best pass wins.
  *
  * <p>{@link St4LiteralCopyOracle} finds the true optimum by exhaustion on

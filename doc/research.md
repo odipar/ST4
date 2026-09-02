@@ -1,5 +1,10 @@
 # Matching into the literal stream: is it new, and does it work?
 
+*Written when the literal data was stream D and lay last in the container.
+Since format version 7 it is stream B and lies second again: the copies that
+came of this research are measured from the literal read pointer, so nothing
+in the decoders depends on where the ring is.*
+
 The question: put the ring directly behind stream D, the literal data, so that
 a back-reference can reach past the ring into the literals themselves. Then
 the ring no longer has to hold what a match wants, packing improves for small

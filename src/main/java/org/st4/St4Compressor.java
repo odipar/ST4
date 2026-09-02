@@ -9,7 +9,7 @@ import org.jspecify.annotations.Nullable;
  *
  * <p>Stream A carries nothing but bits - the block-type flags and the gamma
  * lengths - so it holds no byte-sized value that a word-wide refill could trip
- * over. Stream D carries nothing but literal units, so its first byte is as
+ * over. Stream B carries nothing but literal units, so its first byte is as
  * aligned as the caller places it and every literal run is a whole number of
  * units. Streams B and C carry the offsets, split by width: bytes in B, words
  * in C, so each is uniform and C is word-aligned by construction.
@@ -123,7 +123,7 @@ public final class St4Compressor {
      * As above, but the stream ends by repeating instead of stopping: the
      * container encodes the infinite input {@code units[0..R) units[R..O)}
      * repeated forever, so after its last unit the output continues from unit
-     * {@code repeatIndex} and never stops. -1 means a plain end. What stream C
+     * {@code repeatIndex} and never stops. -1 means a plain end. What stream D
      * stores is the distance O-R back to the loop point, an offset like any
      * other, so the caller holds it to the window the stream was packed for.
      */
@@ -218,7 +218,7 @@ public final class St4Compressor {
         assert readIndex == units.length : "the parses did not cover the input";
 
         // End marker, then the repeat bit: end for good, or install one last
-        // word offset from stream C - the distance back to the loop point -
+        // word offset from stream D - the distance back to the loop point -
         // and match it forever.
         writeBit(true);
         writeBit(false);
@@ -312,7 +312,7 @@ public final class St4Compressor {
 
     /**
      * Writes the literal run gathered so far, if there is one: its flag -
-     * unless it opens the stream - its length, and its units into stream D.
+     * unless it opens the stream - its length, and its units into stream B.
      */
     private void flushLiterals() {
         if (pendingLiterals == 0) {

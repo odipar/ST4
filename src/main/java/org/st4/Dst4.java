@@ -18,7 +18,7 @@ public final class Dst4 {
     private Dst4() {}
 
     public static void main(String[] args) {
-        System.out.println("DST4: aligned split-stream unpacker v6.0 by Robbert van Dalen, "
+        System.out.println("DST4: aligned split-stream unpacker v7.0 by Robbert van Dalen, "
                 + "based on ZX1 v1.5 by Einar Saukas");
 
         boolean forcedMode = false;

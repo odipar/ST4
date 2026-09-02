@@ -3,7 +3,7 @@
 
 A stream packed with -c at a window of M units writes a match beyond M as a
 copy from the literal stream: offset minus M literal units behind the read
-pointer, in stream D, without moving it. A decoder built with ST4_WINDOW set
+pointer, in stream B, without moving it. A decoder built with ST4_WINDOW set
 to M tells the two apart by magnitude. This packs corpora that way at unit
 sizes 1, 2 and 4 and windows of 16, 64 and 256 units, builds the decoders for
 each window, and decodes under Unicorn as a plain 68000 - linearly with
@@ -73,9 +73,9 @@ def seed(uc, control, literal, byte_offsets, word_offsets, destination):
 def drained(uc, control, literal, byte_offsets, word_offsets) -> str:
     for name, register, base, stream in (
             ('A', UC_M68K_REG_A0, t.SRC, control),
-            ('D', UC_M68K_REG_A2, st4.LITERAL, literal),
-            ('B', UC_M68K_REG_A4, st4.BYTE_OFFSETS, byte_offsets),
-            ('C', UC_M68K_REG_A5, st4.WORD_OFFSETS, word_offsets)):
+            ('B', UC_M68K_REG_A2, st4.LITERAL, literal),
+            ('C', UC_M68K_REG_A4, st4.BYTE_OFFSETS, byte_offsets),
+            ('D', UC_M68K_REG_A5, st4.WORD_OFFSETS, word_offsets)):
         problem = st4.consumed(name, uc.reg_read(register) - base, stream)
         if problem:
             return problem

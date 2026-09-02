@@ -8,7 +8,7 @@
 ; ZX1 through ST4 (see LICENSE).
 ;
 ; ST4_wrap is ST1_wrap with ST4's four streams and units: the literal payload
-; comes from stream D in a2 and the offsets from stream B in a4 (bytes) or C in
+; comes from stream B in a2 and the offsets from stream C in a4 (bytes) or D in
 ; a5 (words), lengths and budgets count units of ST4_UNIT bytes, and the copy
 ; moves a unit at a time. With the offsets gone, stream A holds nothing but
 ; bits, so the queue refills a word at a time. Set the unit size before
@@ -20,9 +20,9 @@
 ; ST4_WINDOW, the ring size in units, is the second build-time constant, and
 ; optional. A stream packed with st4 -c writes a copy from the literal stream
 ; as an offset beyond the window: it copies offset-M literal units from behind
-; the stream D read pointer, without moving it. A decoder built with
+; the stream B read pointer, without moving it. A decoder built with
 ; ST4_WINDOW = M tells such a copy from a match by magnitude - one compare per
-; match segment - and reads its source straight out of stream D, skipping the
+; match segment - and reads its source straight out of stream B, skipping the
 ; ring's wrap arithmetic. A build without ST4_WINDOW, or with 0, has no copy
 ; code and is byte for byte the decoder there was before:
 ;
@@ -58,8 +58,8 @@
 ;
 ; The container is ST4.S's: twenty-eight bytes of header - signature, O, where
 ; streams B, C and D begin, the rewind point and the window - then A, B, C and D in
-; order, the literal payload last so it borders whatever the caller loads
-; after the container. See ST4.S for the eight instructions that open one, and
+; order: the bits, the literals, the byte offsets and the word offsets. See
+; ST4.S for the eight instructions that open one, and
 ; for the rewind: a loop longer than the window is replayed by saving the
 ; state registers - all but a1 - at the rewind point and restoring them at O,
 ; every pass, which this decoder needs no code for.
@@ -67,8 +67,8 @@
 ; THE STATE IS YOUR REGISTERS:
 ;
 ;   a0.l  position in stream A          a1.l  write pointer
-;   a2.l  position in stream D          a4.l  stream B, the byte offsets
-;   a5.l  stream C, the word offsets    d0.w  bit queue ($8000 empty,
+;   a2.l  position in stream B          a4.l  stream C, the byte offsets
+;   a5.l  stream D, the word offsets    d0.w  bit queue ($8000 empty,
 ;                                            zero once a repeat is armed)
 ;   d1.l  -ring_start.low : units remaining
 ;   d2.l  N : signed byte offset (+lastOffset*UNIT literals, - during a match)
@@ -87,7 +87,7 @@
 ;   4. no operation is longer than 65535 units - compress with -l65535
 ;   5. the caller knows O and makes exactly T = ceil(O/C) calls, as ST1_wrap -
 ;      unless the stream repeats: then any number of calls is fine
-;   6. streams A and C start on even addresses, and A holds an even number of
+;   6. streams A and D start on even addresses, and A holds an even number of
 ;      bytes: the bit queue is refilled with a move.w, and so is a word offset
 ;   6. a stream with copies was packed with -m equal to ST4_WINDOW, and every
 ;      copy is shorter than its distance, so the offset never reaches zero -
@@ -97,10 +97,10 @@
 ; literal stream on a build with ST4_WINDOW = ring/UNIT.
 ; -----------------------------------------------------------------------------
 
-; The asset's signature for this build: 'S4', format version 6, and the unit
+; The asset's signature for this build: 'S4', format version 7, and the unit
 ; size this decoder was assembled for. One cmp.l against a file's first long
 ; proves all three at once.
-ST4_SIGNATURE   equ     $53340600+ST4_UNIT
+ST4_SIGNATURE   equ     $53340700+ST4_UNIT
 
 ; ST4_WINDOW, the window in units, is optional: a build without it has no
 ; copies from the literal stream and is the decoder there was before.
@@ -160,14 +160,14 @@ source_wrapped:
 
         .if ST4_WINDOW
 copy_source:                            ; the offset is beyond the window, so
-; the source is stream D, offset-M units behind the read pointer, which stays
-; where it is. Stream D never wraps, so none of the ring arithmetic applies.
+; the source is stream B, offset-M units behind the read pointer, which stays
+; where it is. Stream B never wraps, so none of the ring arithmetic applies.
 ; The offset moves on by what this segment copies: a copy the budget or the
 ; ring end cuts continues where it stopped, and a rep after it starts just
 ; past it. It stays beyond the window, since a copy is shorter than its
 ; distance.
         .if ST4_WINDOW*ST4_UNIT<128
-        lea     ST4_WINDOW*ST4_UNIT(a2,d2.w),a3 ; D + M*UNIT + -offset*UNIT
+        lea     ST4_WINDOW*ST4_UNIT(a2,d2.w),a3 ; B + M*UNIT + -offset*UNIT
         .else
         lea     ST4_WINDOW*ST4_UNIT(a2),a3 ; the same in two, past a byte
         adda.w  d2,a3                   ; displacement
@@ -240,7 +240,7 @@ resume_return:
         rts
 
 literal_source:
-        movea.l a2,a3                   ; literals copy from stream D
+        movea.l a2,a3                   ; literals copy from stream B
         sub.w   d4,d1                   ; consume n from the operation
         sub.w   d4,d3                   ; and from this call's budget
 copy_slow:                              ; any n; the subs are already done
