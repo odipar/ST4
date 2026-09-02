@@ -9,24 +9,27 @@ n times" when the last offset is not one. And *copies across streams*: the
 three channels of a chip play the same figures, so one stream's literals
 could serve the others, and the copy mechanism already reads literals from
 wherever the literal read pointer points. This note takes both to the data
-before either touches a decoder: the same four YMX example tunes, their
-twenty-five stream vectors each, at k = 2, packed with the search.
+before either touches a decoder: the same four YMX example tunes and
+Synergy's Wicked Polygons 2 from its test set, fourteen minutes of music,
+their twenty-five stream vectors each, at k = 2, packed with the search.
 
 ## Verdict
 
 **The run block is worth two to four percent, and one operation where there
 are two.** It needs no new bit: the end code's class carries it, a literal
 unit from stream B repeated n times, with the end becoming the one run
-length a run cannot use. On the four tunes the search's own parses hold 75
-to 158 new-offset matches at offset one each, which is what the block
-replaces, eight to ten bits apiece. The player's decoder gets a fill loop
+length a run cannot use. The search's own parses hold 75 to 164 new-offset
+matches at offset one per short tune and 1600 to 3300 in Wicked Polygons 2,
+which is what the block replaces, eight to ten bits apiece. The player's decoder gets a fill loop
 and leaves offset one installed, so the reps after it are one bit.
 
-**Copies across streams are real but small on these tunes.** Packing all
-twenty-five streams as one at the full window saves six to eight percent
-against packing them alone, an upper bound on what any cross-stream scheme
-can reach, and it lies almost entirely in the three channels' period
-streams, where a pair shares eight to twenty-one percent. The mechanism
+**Copies across streams are real but small on these tunes, and absent on
+the long one.** Packing all twenty-five streams as one at the full window
+saves six to eight percent against packing the four short tunes' streams
+alone, an upper bound on what any cross-stream scheme can reach, and a
+third of a percent on Wicked Polygons 2; where there is anything it lies
+almost entirely in the three channels' period streams, where a pair shares
+eight to twenty-one percent. The mechanism
 costs the decoders nothing - a copy reads `back` literal units behind its
 read pointer, and a layout that puts one stream's literal block directly
 after another's makes the far distances land there - but it needs a prefix
@@ -78,14 +81,20 @@ and by the runs the parse would choose once they were cheaper.
 | tune, ring | bytes | literal units | ring matches new, rep | copies new, rep | holds | holds save |
 |---|---:|---:|---:|---:|---:|---:|
 | Dark Side of the Spoon 1, 128 | 6191 | 1070 | 1535, 128 | 330, 5 | 100 | 100 bytes, 1.6% |
+| Dark Side of the Spoon 1, 256 | 3812 | 819 | 811, 135 | 109, 0 | 99 | 99 bytes, 2.6% |
 | Dark Side of the Spoon 1, 960 | 3604 | 784 | 784, 140 | 47, 0 | 87 | 87 bytes, 2.4% |
 | Amiga Demo, 128 | 5301 | 973 | 1199, 155 | 238, 1 | 158 | 158 bytes, 3.0% |
+| Amiga Demo, 256 | 4956 | 946 | 1101, 159 | 203, 1 | 164 | 164 bytes, 3.3% |
 | Amiga Demo, 960 | 2781 | 680 | 505, 111 | 23, 0 | 75 | 75 bytes, 2.7% |
+| Wicked Polygons 2, 128 | 99571 | 17113 | 23336, 2107 | 8210, 170 | 3304 | 3304 bytes, 3.3% |
+| Wicked Polygons 2, 256 | 85332 | 16090 | 19985, 1968 | 5025, 85 | 2431 | 2431 bytes, 2.8% |
+| Wicked Polygons 2, 960 | 67510 | 13804 | 15954, 1793 | 1589, 37 | 1588 | 1588 bytes, 2.4% |
 
-The register streams change value 26000 to 27000 times per tune, and the
-parse covers all but a thousand of those with matches and reps: the change
-that costs is the one after a far reference, and those are the holds. Two
-to four percent, then, with the literal run's bits and the search's
+The register streams change value 26000 to 27000 times per short tune and
+226000 times in Wicked Polygons 2, and the parse covers all but a small
+part of those with matches and reps: the change that costs is the one after
+a far reference, and those are the holds. Two to four percent, then, on
+every tune and at every ring, with the literal run's bits and the search's
 preference counted in.
 
 ### Prior art
@@ -149,38 +158,54 @@ sum.
 | Amiga Demo, Overscan screen | 2526 | 2387 | 6% |
 | Mad Max 1 | 887 | 821 | 7% |
 | Cuddly, main menu | 1066 | 1004 | 6% |
+| Synergy, Wicked Polygons 2 | 60397 | 60196 | 0% |
 
 Where it is: in Dark Side of the Spoon, stream 2, channel B's period low
 byte, packed after stream 0, channel A's, is 21% smaller than alone; 0
 after 2, 8%; 4 after 2, 9%; the period high bytes 3 after 1, 16%. In Amiga
 Demo, 2 after 0 saves 11% and 1 after 8, 13%. Mad Max and Cuddly share
 almost nothing between any two streams - the best pair saves six and twelve
-bytes - and their six to seven percent is spread thin. The volume and
-script streams share nothing worth a copy anywhere.
+bytes - and their six to seven percent is spread thin. Wicked Polygons 2,
+fourteen minutes long, shares nothing: its best pair, channel A's period
+low byte after channel B's, is four percent of a 5.8 KB stream, and the
+whole tune as one is a third of a percent smaller than its streams alone.
+The volume and script streams share nothing worth a copy anywhere.
 
-**What a group gets at the player's ring.** The three period-low streams,
-the three period-high, and the three volumes, each group packed as one with
-sixty seconds of search against the three alone with thirty each, at the
-960-byte ring:
+**What a group gets at the player's ring, and at a quarter of it.** The
+three period-low streams, the three period-high, and the three volumes,
+each group packed as one with sixty seconds of search against the three
+alone with thirty each:
 
-| tune | period low 0, 2, 4 | period high 1, 3, 5 | volumes 8, 9, 10 |
-|---|---:|---:|---:|
-| Dark Side of the Spoon 1 | 2019 → 1941, 4% | 672 → 643, 4% | 465 → 443, 5% |
-| Amiga Demo | 1527 → 1500, 2% | 517 → 515, 0% | 421 → 420, 0% |
-| Mad Max 1 | 331 → 330, 0% | 239 → 238, 0% | 194 → 188, 3% |
-| Cuddly, main menu | 483 → 482, 0% | 167 → 166, 1% | 248 → 237, 4% |
+| tune | ring | period low 0, 2, 4 | period high 1, 3, 5 | volumes 8, 9, 10 |
+|---|---:|---:|---:|---:|
+| Dark Side of the Spoon 1 | 960 | 2019 → 1941, 4% | 672 → 643, 4% | 465 → 443, 5% |
+|  | 256 | 2118 → 2006, 5% | 727 → 708, 3% | 510 → 492, 4% |
+| Amiga Demo | 960 | 1527 → 1500, 2% | 517 → 515, 0% | 421 → 420, 0% |
+|  | 256 | 2781 → 2852, −3% | 1095 → 1108, −1% | 603 → 611, −1% |
+| Mad Max 1 | 960 | 331 → 330, 0% | 239 → 238, 0% | 194 → 188, 3% |
+|  | 256 | 484 → 483, 0% | 391 → 390, 0% | 366 → 361, 1% |
+| Cuddly, main menu | 960 | 483 → 482, 0% | 167 → 166, 1% | 248 → 237, 4% |
+|  | 256 | 1130 → 1330, −18% | 699 → 725, −4% | 694 → 703, −1% |
+| Synergy, Wicked Polygons 2 | 960 | 20672 → 20338, 2% | 7103 → 7074, 0% | 7309 → 7251, 1% |
+|  | 256 | 25169 → 25038, 1% | 10562 → 10801, −2% | 9136 → 9184, −1% |
+
+Dark Side of the Spoon, the one tune whose channels share, keeps its three
+to five percent at the smaller ring; every other group at 256 is within a
+percent of nothing or below it.
 
 **And at a small ring, nothing a proxy can say.** The same groups at a
 128-byte ring pack no smaller together than alone, and often larger, up to
-14%; that is the search, not the data - a thrice longer input with the same
-budget converges less - and the whole tune as one at 128 comes out above the
-sum of its streams for the same reason. The small-ring number is the one
-that matters, since that is where the copies are needed, and it needs the
-prefix dictionary to be measured.
+14%, as the losses at 256 above already are; that is the search, not the
+data - a thrice longer input with the same budget converges less - and the
+whole tune as one at 128 comes out above the sum of its streams for the
+same reason. The small-ring number is the one that matters, since that is
+where the copies are needed, and it needs the prefix dictionary to be
+measured.
 
-So the bound on these tunes is six to eight percent of the file at any
-ring, concentrated in the period streams, with two to five percent
-reachable by ordinary matches at the player's ring and the rest to be found.
+So the bound on the four short tunes is six to eight percent of the file at
+any ring, concentrated in the period streams, with two to five percent
+reachable by ordinary matches at the player's ring and the rest to be
+found; and on the long tune there is nothing to find.
 
 ### Prior art
 
