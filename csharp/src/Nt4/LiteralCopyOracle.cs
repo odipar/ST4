@@ -6,7 +6,7 @@ namespace Nt4;
 /// <summary>
 /// The true optimum of a parse with copies from the literal stream, by trying
 /// every parse the format allows - possible on a dozen units or so, and there
-/// to measure the optimizers against. The twin of the Java
+/// to measure the search against. The twin of the Java
 /// <c>St4LiteralCopyOracle</c>.
 /// </summary>
 /// <remarks>

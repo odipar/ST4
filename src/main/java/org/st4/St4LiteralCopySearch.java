@@ -14,8 +14,10 @@ import org.jspecify.annotations.Nullable;
  * writes, run for as long as it is given.
  *
  * <p>A dictionary is a set of forced literals: they stay literal, a copy may
- * come only from them, the parse decides the rest. The search starts where
- * {@link St4LiteralCopyOptimizer} ends, sweeps every literal run - freed whole,
+ * come only from them, the parse decides the rest. The search opens with the
+ * one-shot heuristic - the literals of a full-window parse, holes filled,
+ * shrunk to what gets copied from - which is what {@code st4 -c} alone
+ * writes; given time it sweeps every literal run - freed whole,
  * trimmed at either end - keeping what packs smaller, then anneals with random
  * moves that free, seed, extend or trim runs, returning to the best and
  * sweeping again when it stalls. The parse is {@link St4FastOptimizer}'s DP
@@ -57,8 +59,8 @@ public final class St4LiteralCopySearch {
     }
 
     /**
-     * Searches for {@code seconds}, reporting improvements on stdout, and
-     * returns the best parse found: copies from the literal stream as
+     * Searches for {@code seconds}, none for the opening passes alone,
+     * reporting improvements on stdout, and returns the best parse found: copies from the literal stream as
      * negative offsets, matches within {@code window} as positive ones.
      *
      * @param unit        bytes per unit
@@ -123,11 +125,11 @@ public final class St4LiteralCopySearch {
             // Start as the one-shot heuristic does: the full-window parse's
             // literals, holes filled, shrunk to what gets copied from.
             int reach = St4Format.maxOffsetUnits(unit);
-            boolean[] dictionary = filled(St4LiteralCopyOptimizer.literalMask(
+            boolean[] dictionary = filled(St4LiteralCopySearch.literalMask(
                     St4EventOptimizer.optimize(units, unit, reach, false), count));
             St4Block first = parser.parse(dictionary);
             chain = first;
-            forced = St4LiteralCopyOptimizer.literalMask(first, count);
+            forced = St4LiteralCopySearch.literalMask(first, count);
             adopt(dictionary, first);
             best = chain;
             bestBits = bits;
@@ -165,7 +167,7 @@ public final class St4LiteralCopySearch {
             copies = new ArrayList<>();
             boolean[] referenced = referenced();
             int previous = -1;
-            for (St4Block block : St4LiteralCopyOptimizer.blocks(parsed)) {
+            for (St4Block block : blocks(parsed)) {
                 int start = previous + 1;
                 if (block.offset() == 0) {
                     int used = 0;
@@ -184,7 +186,7 @@ public final class St4LiteralCopySearch {
         private boolean[] referenced() {
             boolean[] referenced = new boolean[count];
             int previous = -1;
-            for (St4Block block : St4LiteralCopyOptimizer.blocks(chain)) {
+            for (St4Block block : blocks(chain)) {
                 if (block.offset() < 0) {
                     int distance = -block.offset();
                     for (int p = previous + 1; p <= block.index(); p++) {
@@ -407,8 +409,32 @@ public final class St4LiteralCopySearch {
         }
 
         private boolean[] literalMask(St4Block parsed) {
-            return St4LiteralCopyOptimizer.literalMask(parsed, count);
+            return St4LiteralCopySearch.literalMask(parsed, count);
         }
+    }
+
+    /** The blocks of a chain, first block first. */
+    static List<St4Block> blocks(St4Block chain) {
+        var list = new java.util.ArrayList<St4Block>();
+        for (St4Block block = chain; block != null && block.index() >= 0; block = block.chain()) {
+            list.add(block);
+        }
+        java.util.Collections.reverse(list);
+        return list;
+    }
+
+    static boolean[] literalMask(St4Block chain, int count) {
+        boolean[] literal = new boolean[count];
+        int previous = -1;
+        for (St4Block block : blocks(chain)) {
+            if (block.offset() == 0) {
+                for (int p = previous + 1; p <= block.index(); p++) {
+                    literal[p] = true;
+                }
+            }
+            previous = block.index();
+        }
+        return literal;
     }
 
     private static boolean[] filled(boolean[] dictionary) {

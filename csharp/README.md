@@ -2,8 +2,12 @@
 
 `nt4` is the .NET 10 workbench for the ST4 project and a port of the Java
 `st4` tools. It packs and unpacks ST4 containers and independently mirrors the
-compressor, the readable reference optimizer, the two fast ones and the
-reference decoder the 68000 code is verified against.
+compressor, the optimizers and the reference decoder the 68000 code is
+verified against.
+
+This port is not necessary. The Java tools are the reference and complete on
+their own; the port follows them when that is worth the work, and may lag
+behind them.
 
 ## Build and test
 

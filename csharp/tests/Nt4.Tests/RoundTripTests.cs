@@ -327,7 +327,7 @@ public sealed class RoundTripTests
                 int[] units = Units.Split(input, unit);
                 foreach (int window in new[] { 4, 16, 64 })
                 {
-                    Block parse = LiteralCopyOptimizer.Optimize(units, unit, window, false);
+                    Block parse = LiteralCopySearch.Optimize(units, unit, window, Format.MaxOp, 0, 1);
                     Compressor.Result packed = Compressor.Compress(parse, units, unit,
                         Format.MaxOp, -1, window);
                     Assert.Equal(Padded(input, unit), Decompressor.Decompress(
@@ -373,11 +373,11 @@ public sealed class RoundTripTests
     }
 
     [Fact]
-    public void TheHeuristicIsMeasuredAgainstTheOracle()
+    public void TheOpeningPassesAreMeasuredAgainstTheOracle()
     {
-        // The optimizer chooses its dictionary first and is exact for it; the
-        // oracle tries everything. The heuristic can only be dearer, and how
-        // much dearer is a number.
+        // The search's opening passes - what nt4 -c alone writes - choose a
+        // dictionary first and are exact for it; the oracle tries everything.
+        // The passes can only be dearer, and how much dearer is a number.
         var random = new JavaRandom(23);
         int oracleBits = 0;
         int heuristicBits = 0;
@@ -391,7 +391,7 @@ public sealed class RoundTripTests
             }
             int window = 2 + random.NextInt(3);
             int oracle = LiteralCopyOracle.Optimize(units, 1, window).Bits;
-            Block parse = LiteralCopyOptimizer.Optimize(units, 1, window, false);
+            Block parse = LiteralCopySearch.Optimize(units, 1, window, Format.MaxOp, 0, trial);
             int heuristic = Compressor.Compress(parse, units, 1, Format.MaxOp, -1, window).Bits;
             Assert.True(oracle <= heuristic, $"trial {trial}: the oracle is the optimum");
             oracleBits += oracle;
@@ -431,7 +431,7 @@ public sealed class RoundTripTests
             int window = 2 + random.NextInt(3);
             int oracle = LiteralCopyOracle.Optimize(units, 1, window).Bits;
             int heuristic = Compressor.Compress(
-                LiteralCopyOptimizer.Optimize(units, 1, window, false), units, 1,
+                LiteralCopySearch.Optimize(units, 1, window, Format.MaxOp, 0, trial), units, 1,
                 Format.MaxOp, -1, window).Bits;
             Block parse = LiteralCopySearch.Optimize(units, 1, window, Format.MaxOp, 200, trial);
             Compressor.Result packed = Compressor.Compress(parse, units, 1, Format.MaxOp, -1,
@@ -474,12 +474,12 @@ public sealed class RoundTripTests
                         units, unit, Format.MaxOp, -1, window);
                     Assert.Equal(packed.Control, again.Control);
                     Assert.Equal(packed.Literal, again.Literal);
-                    Compressor.Result heuristic = Compressor.Compress(
-                        LiteralCopyOptimizer.Optimize(units, unit, window, false), units, unit,
-                        Format.MaxOp, -1, window);
-                    Assert.True(packed.Bits <= heuristic.Bits,
+                    Compressor.Result passes = Compressor.Compress(
+                        LiteralCopySearch.Optimize(units, unit, window, Format.MaxOp, 0, 5), units,
+                        unit, Format.MaxOp, -1, window);
+                    Assert.True(packed.Bits <= passes.Bits,
                         $"unit {unit}, {input.Length} bytes, window {window}: "
-                        + $"{packed.Bits} bits searched, {heuristic.Bits} one-shot");
+                        + $"{packed.Bits} bits searched, {passes.Bits} from the passes");
                 }
             }
         }
@@ -518,8 +518,8 @@ public sealed class RoundTripTests
                 Array.Fill(dictionary, value, at, Math.Min(count, at + size) - at);
                 Block restarted = parser.Parse(dictionary);
                 Block fresh = new LiteralCopySearch.Parser(units, 1, window).Parse(dictionary);
-                List<Block> a = LiteralCopyOptimizer.Blocks(restarted);
-                List<Block> b = LiteralCopyOptimizer.Blocks(fresh);
+                List<Block> a = LiteralCopySearch.Blocks(restarted);
+                List<Block> b = LiteralCopySearch.Blocks(fresh);
                 Assert.Equal(b.Count, a.Count);
                 for (int i = 0; i < a.Count; i++)
                 {
@@ -582,36 +582,6 @@ public sealed class RoundTripTests
                 Assert.Throws<ArgumentException>(() => Dnt4.Played(plain, once, 2));
             }
         }
-    }
-
-    [Fact]
-    public void TheSearchsOpeningPassesAreTheReferenceHeuristic()
-    {
-        // -c is the search with no time: its opening passes, which choose
-        // and shrink the dictionary as the readable optimizer does, on the
-        // search's parser. Over the corpora and windows the two must pack to
-        // the same size, give or take the eight bits a copy's class can
-        // differ by between the two ways of counting the literals between.
-        int reference = 0;
-        int passes = 0;
-        int cases = 0;
-        foreach (int unit in new[] { 1, 2, 4 })
-        {
-            foreach (byte[] input in Inputs())
-            {
-                int[] units = Units.Split(input, unit);
-                foreach (int window in new[] { 4, 16, 64 })
-                {
-                    reference += Compressor.Compress(LiteralCopyOptimizer.Optimize(units, unit,
-                        window, false), units, unit, Format.MaxOp, -1, window).Bits;
-                    passes += Compressor.Compress(LiteralCopySearch.Optimize(units, unit, window,
-                        Format.MaxOp, 0, 1), units, unit, Format.MaxOp, -1, window).Bits;
-                    cases++;
-                }
-            }
-        }
-        Assert.True(passes <= reference + 8 * cases,
-            $"{passes} bits from the search's passes, {reference} from the reference, over {cases} cases");
     }
 
     [Fact]
