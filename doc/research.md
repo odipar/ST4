@@ -311,9 +311,14 @@ ring size this buys, and the experiment runs on any file. The packer writes
 offsets beyond N with `-c`, and the decoders take them when built with
 `ST4_WINDOW`: one compare per match segment, and a copy whose source is the
 literal read pointer rather than the write pointer, without a wrap, 14-22
-bytes each. If the assets read like the periodic corpora, what is left is
-the rep form and one-unit copies in the cost model, and the same candidates
-in the fast optimizer, the event-driven one falling back.
+bytes each. `st4 -cS` then searches for S seconds beyond the one-shot
+parse: `St4LiteralCopySearch` descends and anneals over which units are
+literal, each step an exact parse for that choice scored by what the
+compressor writes, with the rep of a copy in its cost model - on this
+README at k = 1 and a 64-unit window it takes the one-shot parse's 78% of
+the input to 61% in ten minutes, and is still going. What is left is
+one-unit copies in the cost model, and the same candidates in the fast
+optimizer, the event-driven one falling back.
 
 ## Sources
 

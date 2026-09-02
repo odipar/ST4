@@ -35,6 +35,7 @@ public static class Nt4
         int maxOpLength = Format.MaxOp;
         int repeatIndex = -1;
         bool copies = false;
+        double search = 0;
         bool forcedMode = false;
         int index = 0;
         for (; index < args.Length
@@ -49,6 +50,16 @@ public static class Nt4
                     copies = true;
                     break;
                 default:
+                    if (args[index].StartsWith("-c", StringComparison.Ordinal))
+                    {
+                        copies = true;
+                        search = Cli.ParseNumber(args[index][2..]);
+                        if (search <= 0)
+                        {
+                            return Cli.Error($"Invalid parameter value {args[index][2..]}");
+                        }
+                        break;
+                    }
                     if (args[index].StartsWith("-r", StringComparison.Ordinal))
                     {
                         // An index, not a count: -r0 is valid and loops it all.
@@ -96,10 +107,11 @@ public static class Nt4
         else
         {
             return Cli.Usage(
-                "Usage: nt4 [-f] [-c] [-kK] [-mN] [-lN] [-rR] input [output.st4]\n"
+                "Usage: nt4 [-f] [-c[S]] [-kK] [-mN] [-lN] [-rR] input [output.st4]\n"
                 + "  -f      Force overwrite of output file\n"
                 + "  -c      Let a match beyond the -m window copy from the\n"
                 + "          literal stream; needs a decoder built with copies\n"
+                + "  -cS     The same, searching for S seconds for a better parse\n"
                 + "  -kK     Unit size: 1, 2 or 4 bytes (default 1). Lengths and\n"
                 + "          offsets count units, so the output is padded to a\n"
                 + "          whole number of them\n"
@@ -157,15 +169,17 @@ public static class Nt4
             int[] intro = units[..repeatIndex];
             int[] loop = units[repeatIndex..];
             result = Compressor.CompressRewinding(
-                intro.Length == 0 ? null : Parse(intro, unit, offsetLimit, copies),
-                Parse(loop, unit, offsetLimit, copies),
+                intro.Length == 0 ? null
+                    : Parse(intro, unit, offsetLimit, maxOpLength, copies, search),
+                Parse(loop, unit, offsetLimit, maxOpLength, copies, search),
                 units, unit, maxOpLength, repeatIndex, window);
         }
         else
         {
             // The loop fits the window, so the stream loops by itself: its end
             // becomes an endless match back to the loop point.
-            result = Compressor.Compress(Parse(units, unit, offsetLimit, copies), units, unit,
+            result = Compressor.Compress(
+                Parse(units, unit, offsetLimit, maxOpLength, copies, search), units, unit,
                 maxOpLength, repeatIndex, window);
         }
 
@@ -208,9 +222,19 @@ public static class Nt4
     /// lets a match beyond the window copy from the literal stream, which is
     /// the readable reference and slow on large inputs.
     /// </summary>
-    private static Block Parse(int[] units, int unit, int window, bool copies) =>
-        copies ? LiteralCopyOptimizer.Optimize(units, unit, window, true)
-            : EventOptimizer.Optimize(units, unit, window);
+    private static Block Parse(int[] units, int unit, int window, int maxOpLength, bool copies,
+                               double seconds)
+    {
+        if (!copies)
+        {
+            return EventOptimizer.Optimize(units, unit, window);
+        }
+        if (seconds > 0)
+        {
+            return LiteralCopySearch.Optimize(units, unit, window, maxOpLength, seconds, true);
+        }
+        return LiteralCopyOptimizer.Optimize(units, unit, window, true);
+    }
 
     /// <summary>
     /// Twenty-eight bytes of header, then A, B, C and D in order, each

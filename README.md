@@ -152,7 +152,24 @@ longer decides the best parse and the optimum is NP-hard — so
 `St4LiteralCopyOptimizer` chooses the dictionary first, the literals of a
 full-window parse, and is exact for it; `St4LiteralCopyOracle` tries every
 parse on inputs small enough for that, and puts the heuristic within about a
-percent of the true optimum on those. What copies buy is the ring: measured
+percent of the true optimum on those.
+
+`st4 -cS` keeps going for S seconds. `St4LiteralCopySearch` descends and
+anneals over which units are literal — a greedy sweep that frees and trims
+every literal run, then random moves that free, seed, extend or trim runs,
+accepted when they pack smaller and now and then when they do not — and
+scores each step by an exact parse for that choice and by what the
+compressor then writes, so its number is the packed size. The parse is the
+fast optimizer's DP with copies added, their sources found through the
+dictionary's two-unit chains, the rep of a copy in its cost model, restarted
+from a checkpoint before the first changed unit: some ten milliseconds a
+step on this README. On the tiny inputs the oracle can exhaust, it reaches
+the optimum on 59 of 60. On this README at k = 1 with a 64-unit window, the
+one-shot parse packs to 78.2% of the input and a 256-unit ring without
+copies to 66.3%; ten minutes of search take the 64-unit ring to 60.8%, and
+it was still improving when time ran out. The whole window packs to 46.1%.
+
+What copies buy is the ring: measured
 on the test corpora at k = 1, a 16-unit ring with copies packs word-soup to
 31.6% of the input where the ring alone gives 95.6%, and block-shaped data to
 within a point or two of the full window; [doc/research.md](doc/research.md)
@@ -268,7 +285,7 @@ reach the literals it has already read.
 
 ```sh
 mvn package
-java -ea -cp target/classes org.st4.St4  [-f] [-c] [-kK] [-mN] [-lN] [-rR] input [output.st4]
+java -ea -cp target/classes org.st4.St4  [-f] [-c[S]] [-kK] [-mN] [-lN] [-rR] input [output.st4]
 java -ea -cp target/classes org.st4.Dst4 [-f] input.st4 [output]
 ```
 
@@ -280,9 +297,10 @@ stores — for a looping stream, one whole pass, and it says where the loop is.
 splits long matches — the default already fits the 68000 decoders — and `-rR`
 makes the stream loop from unit R. When the loop is longer than `-m`, `st4`
 says at which unit to save the decoder's state and at which to restore it.
-`-c` lets a match beyond `-m` copy from the literal stream; it runs the
-readable optimizer, which tries every offset at every position and is slow on
-large inputs.
+`-c` lets a match beyond `-m` copy from the literal stream, parsed once by
+the readable optimizer, which is slow on large inputs; `-cS` searches for S
+seconds for a better parse from there, printing each improvement as it finds
+it.
 
 Three optimizers select the blocks, all held to each other by tests:
 
@@ -332,6 +350,7 @@ python3 68k/test/emu/test_st4_ring.py     # general ring, both wrap modes, overs
 python3 68k/test/emu/test_st4_repeat.py   # streams that loop by themselves, past two passes
 python3 68k/test/emu/test_st4_rewind.py   # loops longer than the ring, replayed by rewind
 python3 68k/test/emu/test_st4_copies.py   # copies from the literal stream, on window builds
+java -ea -cp target/classes org.st4.St4 -k1 -m64 -c600 README.md   # ten minutes of search
 python3 68k/test/emu/bench_bits.py        # why the lengths are still Elias gamma
 ```
 

@@ -1,11 +1,12 @@
 // ZX1 by Einar Saukas; ST4 and this C# port by Claude (Anthropic's Claude
 // Code) under Robbert van Dalen's direction. See LICENSE for the terms.
 
-namespace Nt4.Tests;
+namespace Nt4;
 
 /// <summary>
-/// The test fixtures in the Java suite use java.util.Random. System.Random
-/// produces a different sequence, so keep the Java 48-bit LCG here.
+/// java.util.Random, the 48-bit LCG, so that the search steps as the Java
+/// one does from the same seed and the test fixtures in the Java suite are
+/// byte-identical here. System.Random produces a different sequence.
 /// </summary>
 internal sealed class JavaRandom
 {
@@ -43,6 +44,10 @@ internal sealed class JavaRandom
 
         return value;
     }
+
+    internal bool NextBoolean() => Next(1) != 0;
+
+    internal double NextDouble() => (((long)Next(26) << 27) + Next(27)) * (1.0 / (1L << 53));
 
     internal void NextBytes(byte[] bytes)
     {
