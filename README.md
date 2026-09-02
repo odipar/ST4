@@ -373,7 +373,7 @@ and the search reaches it on 59 of 60. On this README at k = 1 with a
 64-unit window, the opening passes pack to 78.2% of the input, ten minutes
 of search to 60.8%, a 256-unit ring without copies to 66.3%, and the whole
 window to 46.1%. [doc/research.md](doc/research.md) has the test corpora
-and five YMX tunes at every ring size.
+and four YMX tunes at every ring size.
 
 ## C# tools
 
