@@ -490,7 +490,10 @@ public sealed class RoundTripTests
     {
         // A parse restarted from a checkpoint before the first changed unit
         // must be the parse from scratch, block for block - accepted or
-        // not, and whatever the parses in between did to the arrays.
+        // not, and whatever the parses in between did to the arrays. At a
+        // 512-unit window a single parse makes more nodes than a small
+        // input's worth, which is where the pool's compaction has to know
+        // what a full parse takes rather than go round again.
         var random = new JavaRandom(31);
         int count = 6000;
         int[] units = new int[count];
@@ -499,32 +502,35 @@ public sealed class RoundTripTests
             units[i] = i > 40 && random.NextInt(3) > 0 ? units[i - 1 - random.NextInt(40)]
                 : random.NextInt(6);
         }
-        var parser = new LiteralCopySearch.Parser(units, 1, 16);
-        bool[] dictionary = new bool[count];
-        for (int i = 0; i < count; i++)
+        foreach (int window in new[] { 16, 512 })
         {
-            dictionary[i] = random.NextInt(4) == 0;
-        }
-        for (int trial = 0; trial < 40; trial++)
-        {
-            int at = random.NextInt(count);
-            int size = 1 + random.NextInt(24);
-            bool value = random.NextBoolean();
-            Array.Fill(dictionary, value, at, Math.Min(count, at + size) - at);
-            Block restarted = parser.Parse(dictionary);
-            Block fresh = new LiteralCopySearch.Parser(units, 1, 16).Parse(dictionary);
-            List<Block> a = LiteralCopyOptimizer.Blocks(restarted);
-            List<Block> b = LiteralCopyOptimizer.Blocks(fresh);
-            Assert.Equal(b.Count, a.Count);
-            for (int i = 0; i < a.Count; i++)
+            var parser = new LiteralCopySearch.Parser(units, 1, window);
+            bool[] dictionary = new bool[count];
+            for (int i = 0; i < count; i++)
             {
-                Assert.Equal(b[i].Index, a[i].Index);
-                Assert.Equal(b[i].Offset, a[i].Offset);
-                Assert.Equal(b[i].Bits, a[i].Bits);
+                dictionary[i] = random.NextInt(4) == 0;
             }
-            if (random.NextBoolean())
+            for (int trial = 0; trial < 40; trial++)
             {
-                parser.Accept();
+                int at = random.NextInt(count);
+                int size = 1 + random.NextInt(24);
+                bool value = random.NextBoolean();
+                Array.Fill(dictionary, value, at, Math.Min(count, at + size) - at);
+                Block restarted = parser.Parse(dictionary);
+                Block fresh = new LiteralCopySearch.Parser(units, 1, window).Parse(dictionary);
+                List<Block> a = LiteralCopyOptimizer.Blocks(restarted);
+                List<Block> b = LiteralCopyOptimizer.Blocks(fresh);
+                Assert.Equal(b.Count, a.Count);
+                for (int i = 0; i < a.Count; i++)
+                {
+                    Assert.Equal(b[i].Index, a[i].Index);
+                    Assert.Equal(b[i].Offset, a[i].Offset);
+                    Assert.Equal(b[i].Bits, a[i].Bits);
+                }
+                if (random.NextBoolean())
+                {
+                    parser.Accept();
+                }
             }
         }
     }
