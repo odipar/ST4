@@ -23,7 +23,7 @@ optimizers held to the reference parse.
 ## Command-line tools
 
 ```sh
-dotnet run --project csharp/src/Nt4.Cli -- [-f] [-c] [-kK] [-mN] [-lN] [-rR] input [output.st4]
+dotnet run --project csharp/src/Nt4.Cli -- [-f] [-c[S]] [-kK] [-mN] [-lN] [-rR] input [output.st4]
 dotnet run --project csharp/src/Dnt4.Cli -- [-f] input.st4 [output]
 ```
 

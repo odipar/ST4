@@ -407,6 +407,129 @@ public sealed class RoundTripTests
     private static readonly int[] Zx1Sizes = [4, 6, 1006, 6, 19, 383, 26];
 
     [Fact]
+    public void TheSearchStartsWhereTheHeuristicEndsAndIsMeasuredAgainstTheOracle()
+    {
+        // The search descends and anneals over dictionaries from the
+        // heuristic's, scoring each by what the compressor writes, so it can
+        // only improve on the heuristic - and on inputs small enough to
+        // exhaust, how often it reaches the optimum is a number.
+        var random = new JavaRandom(29);
+        int oracleBits = 0;
+        int heuristicBits = 0;
+        int searchBits = 0;
+        int optimal = 0;
+        for (int trial = 0; trial < 60; trial++)
+        {
+            int count = 6 + random.NextInt(6);
+            int[] units = new int[count];
+            byte[] input = new byte[count];
+            for (int i = 0; i < count; i++)
+            {
+                units[i] = random.NextInt(3);
+                input[i] = (byte)units[i];
+            }
+            int window = 2 + random.NextInt(3);
+            int oracle = LiteralCopyOracle.Optimize(units, 1, window).Bits;
+            int heuristic = Compressor.Compress(
+                LiteralCopyOptimizer.Optimize(units, 1, window, false), units, 1,
+                Format.MaxOp, -1, window).Bits;
+            Block parse = LiteralCopySearch.Optimize(units, 1, window, Format.MaxOp, 200, trial);
+            Compressor.Result packed = Compressor.Compress(parse, units, 1, Format.MaxOp, -1,
+                window);
+            string shape = $"trial {trial}, window {window}";
+            Assert.True(oracle <= packed.Bits, $"{shape}: the oracle is the optimum");
+            Assert.Equal(input, Decompressor.Decompress(packed.Control, packed.Literal,
+                packed.ByteOffsets, packed.WordOffsets, 1, count, window));
+            oracleBits += oracle;
+            heuristicBits += heuristic;
+            searchBits += packed.Bits;
+            optimal += packed.Bits == oracle ? 1 : 0;
+        }
+        Assert.True(searchBits <= heuristicBits, "the search starts where the heuristic ends");
+        Assert.True(optimal >= 45, $"the search reaches the optimum on most small inputs: {optimal} of 60");
+    }
+
+    [Fact]
+    public void TheSearchIsReproducibleAndItsParsesDecode()
+    {
+        // A seeded search is a function of its input: the same steps give the
+        // same parse. Every parse it scores decodes, whatever the corpus or
+        // window, and its best is never dearer than the heuristic's.
+        foreach (int unit in new[] { 1, 2, 4 })
+        {
+            foreach (byte[] input in Inputs())
+            {
+                int[] units = Units.Split(input, unit);
+                foreach (int window in new[] { 4, 16, 64 })
+                {
+                    Block parse = LiteralCopySearch.Optimize(units, unit, window, Format.MaxOp,
+                        40, 5);
+                    Compressor.Result packed = Compressor.Compress(parse, units, unit,
+                        Format.MaxOp, -1, window);
+                    Assert.Equal(Padded(input, unit), Decompressor.Decompress(packed.Control,
+                        packed.Literal, packed.ByteOffsets, packed.WordOffsets, unit,
+                        packed.PaddedSize, window));
+                    Compressor.Result again = Compressor.Compress(
+                        LiteralCopySearch.Optimize(units, unit, window, Format.MaxOp, 40, 5),
+                        units, unit, Format.MaxOp, -1, window);
+                    Assert.Equal(packed.Control, again.Control);
+                    Assert.Equal(packed.Literal, again.Literal);
+                    Compressor.Result heuristic = Compressor.Compress(
+                        LiteralCopyOptimizer.Optimize(units, unit, window, false), units, unit,
+                        Format.MaxOp, -1, window);
+                    Assert.True(packed.Bits <= heuristic.Bits,
+                        $"unit {unit}, {input.Length} bytes, window {window}: "
+                        + $"{packed.Bits} bits searched, {heuristic.Bits} one-shot");
+                }
+            }
+        }
+    }
+
+    [Fact]
+    public void TheSearchParserRestartsFromItsCheckpointsExactly()
+    {
+        // A parse restarted from a checkpoint before the first changed unit
+        // must be the parse from scratch, block for block - accepted or
+        // not, and whatever the parses in between did to the arrays.
+        var random = new JavaRandom(31);
+        int count = 6000;
+        int[] units = new int[count];
+        for (int i = 0; i < count; i++)
+        {
+            units[i] = i > 40 && random.NextInt(3) > 0 ? units[i - 1 - random.NextInt(40)]
+                : random.NextInt(6);
+        }
+        var parser = new LiteralCopySearch.Parser(units, 1, 16);
+        bool[] dictionary = new bool[count];
+        for (int i = 0; i < count; i++)
+        {
+            dictionary[i] = random.NextInt(4) == 0;
+        }
+        for (int trial = 0; trial < 40; trial++)
+        {
+            int at = random.NextInt(count);
+            int size = 1 + random.NextInt(24);
+            bool value = random.NextBoolean();
+            Array.Fill(dictionary, value, at, Math.Min(count, at + size) - at);
+            Block restarted = parser.Parse(dictionary);
+            Block fresh = new LiteralCopySearch.Parser(units, 1, 16).Parse(dictionary);
+            List<Block> a = LiteralCopyOptimizer.Blocks(restarted);
+            List<Block> b = LiteralCopyOptimizer.Blocks(fresh);
+            Assert.Equal(b.Count, a.Count);
+            for (int i = 0; i < a.Count; i++)
+            {
+                Assert.Equal(b[i].Index, a[i].Index);
+                Assert.Equal(b[i].Offset, a[i].Offset);
+                Assert.Equal(b[i].Bits, a[i].Bits);
+            }
+            if (random.NextBoolean())
+            {
+                parser.Accept();
+            }
+        }
+    }
+
+    [Fact]
     public void UnitOneStaysWithinAFewPercentOfZx1()
     {
         // k=1 is ZX1's parse with everything moved into its own stream. Splitting

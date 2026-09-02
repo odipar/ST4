@@ -26,6 +26,7 @@ public final class St4 {
         int maxOpLength = St4Format.MAX_OP;
         int repeatIndex = -1;
         boolean copies = false;
+        double search = 0;
         boolean forcedMode = false;
         int i = 0;
         for (; i < args.length && args[i].startsWith("-"); i++) {
@@ -33,7 +34,10 @@ public final class St4 {
                 case "-f" -> forcedMode = true;
                 case "-c" -> copies = true;
                 default -> {
-                    if (args[i].startsWith("-k")) {
+                    if (args[i].startsWith("-c")) {
+                        copies = true;
+                        search = parseNumber(args[i].substring(2));
+                    } else if (args[i].startsWith("-k")) {
                         unit = parseNumber(args[i].substring(2));
                     } else if (args[i].startsWith("-m")) {
                         offsetLimit = parseNumber(args[i].substring(2));
@@ -55,10 +59,11 @@ public final class St4 {
             outputName = args[i + 1];
         } else {
             usage("""
-                    Usage: st4 [-f] [-c] [-kK] [-mN] [-lN] [-rR] input [output.st4]
+                    Usage: st4 [-f] [-c[S]] [-kK] [-mN] [-lN] [-rR] input [output.st4]
                       -f      Force overwrite of output file
                       -c      Let a match beyond the -m window copy from the
                               literal stream; needs a decoder built with copies
+                      -cS     The same, searching for S seconds for a better parse
                       -kK     Unit size: 1, 2 or 4 bytes (default 1). Lengths and
                               offsets count units, so the output is padded to a
                               whole number of them
@@ -109,13 +114,15 @@ public final class St4 {
             int[] intro = Arrays.copyOfRange(units, 0, repeatIndex);
             int[] loop = Arrays.copyOfRange(units, repeatIndex, units.length);
             result = St4Compressor.compressRewinding(
-                    intro.length == 0 ? null : parse(intro, unit, offsetLimit, copies),
-                    parse(loop, unit, offsetLimit, copies),
+                    intro.length == 0 ? null
+                            : parse(intro, unit, offsetLimit, maxOpLength, copies, search),
+                    parse(loop, unit, offsetLimit, maxOpLength, copies, search),
                     units, unit, maxOpLength, repeatIndex, window);
         } else {
             // The loop fits the window, so the stream loops by itself: its end
             // becomes an endless match back to the loop point.
-            result = St4Compressor.compress(parse(units, unit, offsetLimit, copies), units,
+            result = St4Compressor.compress(
+                    parse(units, unit, offsetLimit, maxOpLength, copies, search), units,
                     unit, maxOpLength, repeatIndex, window);
         }
 
@@ -151,12 +158,18 @@ public final class St4 {
 
     /**
      * The parse: the event-driven optimizer, or with {@code -c} the one that
-     * lets a match beyond the window copy from the literal stream, which is
-     * the readable reference and slow on large inputs.
+     * lets a match beyond the window copy from the literal stream - the
+     * one-shot heuristic, or given seconds, the search that starts from it.
      */
-    private static St4Block parse(int[] units, int unit, int window, boolean copies) {
-        return copies ? St4LiteralCopyOptimizer.optimize(units, unit, window, true)
-                : St4EventOptimizer.optimize(units, unit, window);
+    private static St4Block parse(int[] units, int unit, int window, int maxOpLength,
+                                  boolean copies, double seconds) {
+        if (!copies) {
+            return St4EventOptimizer.optimize(units, unit, window);
+        }
+        if (seconds > 0) {
+            return St4LiteralCopySearch.optimize(units, unit, window, maxOpLength, seconds, true);
+        }
+        return St4LiteralCopyOptimizer.optimize(units, unit, window, true);
     }
 
     /**

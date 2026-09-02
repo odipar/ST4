@@ -385,6 +385,123 @@ final class St4RoundTripTest {
      * odipar/ST1 at commit 132aef0. The inputs are deterministic, so these can
      * only drift if the ZX1 reference itself would - which it does not.
      */
+    @Test
+    void theSearchStartsWhereTheHeuristicEndsAndIsMeasuredAgainstTheOracle() {
+        // The search anneals over dictionaries from the heuristic's, scoring
+        // each by what the compressor writes, so it can only improve on the
+        // heuristic - and on inputs small enough to exhaust, how often it
+        // reaches the optimum is a number, as is how far it lands otherwise.
+        var random = new Random(29);
+        int oracleBits = 0;
+        int heuristicBits = 0;
+        int searchBits = 0;
+        int optimal = 0;
+        for (int trial = 0; trial < 60; trial++) {
+            int count = 6 + random.nextInt(6);
+            int[] units = new int[count];
+            byte[] input = new byte[count];
+            for (int i = 0; i < count; i++) {
+                units[i] = random.nextInt(3);
+                input[i] = (byte) units[i];
+            }
+            int window = 2 + random.nextInt(3);
+            int oracle = St4LiteralCopyOracle.optimize(units, 1, window).bits();
+            int heuristic = St4Compressor.compress(
+                    St4LiteralCopyOptimizer.optimize(units, 1, window, false), units, 1,
+                    St4Format.MAX_OP, -1, window).bits();
+            St4Block parse = St4LiteralCopySearch.optimize(units, 1, window, St4Format.MAX_OP,
+                    200, trial);
+            St4Compressor.Result packed = St4Compressor.compress(parse, units, 1,
+                    St4Format.MAX_OP, -1, window);
+            String shape = "trial " + trial + ", window " + window + ", "
+                    + java.util.Arrays.toString(units);
+            assertTrue(oracle <= packed.bits(), shape + ": the oracle is the optimum");
+            assertArrayEquals(input, St4Decompressor.decompress(packed.control(),
+                    packed.literal(), packed.byteOffsets(), packed.wordOffsets(), 1, count,
+                    window), shape);
+            oracleBits += oracle;
+            heuristicBits += heuristic;
+            searchBits += packed.bits();
+            optimal += packed.bits() == oracle ? 1 : 0;
+        }
+        System.out.printf("literal copies: search %d bits, heuristic %d bits, oracle %d bits; "
+                + "the search is +%.1f%% over the optimum and optimal on %d of 60%n",
+                searchBits, heuristicBits, oracleBits,
+                100.0 * (searchBits - oracleBits) / oracleBits, optimal);
+        assertTrue(searchBits <= heuristicBits, "the search starts where the heuristic ends");
+        assertTrue(optimal >= 45, "the search reaches the optimum on most small inputs");
+    }
+
+    @Test
+    void theSearchIsReproducibleAndItsParsesDecode() {
+        // A seeded search is a function of its input: the same steps give the
+        // same parse. Every parse it scores decodes, whatever the corpus or
+        // window, and its best is never dearer than the heuristic's.
+        for (int unit : new int[] {1, 2, 4}) {
+            for (byte[] input : inputs()) {
+                int[] units = Units.split(input, unit);
+                for (int window : new int[] {4, 16, 64}) {
+                    String shape = "unit " + unit + ", " + input.length + " bytes, window " + window;
+                    St4Block parse = St4LiteralCopySearch.optimize(units, unit, window,
+                            St4Format.MAX_OP, 40, 5);
+                    St4Compressor.Result packed = St4Compressor.compress(parse, units, unit,
+                            St4Format.MAX_OP, -1, window);
+                    assertArrayEquals(padded(input, unit), St4Decompressor.decompress(
+                            packed.control(), packed.literal(), packed.byteOffsets(),
+                            packed.wordOffsets(), unit, packed.paddedSize(), window), shape);
+                    St4Compressor.Result again = St4Compressor.compress(
+                            St4LiteralCopySearch.optimize(units, unit, window, St4Format.MAX_OP,
+                                    40, 5), units, unit, St4Format.MAX_OP, -1, window);
+                    assertArrayEquals(packed.control(), again.control(), shape);
+                    assertArrayEquals(packed.literal(), again.literal(), shape);
+                    St4Compressor.Result heuristic = St4Compressor.compress(
+                            St4LiteralCopyOptimizer.optimize(units, unit, window, false), units,
+                            unit, St4Format.MAX_OP, -1, window);
+                    assertTrue(packed.bits() <= heuristic.bits(), shape + ": "
+                            + packed.bits() + " bits searched, " + heuristic.bits() + " one-shot");
+                }
+            }
+        }
+    }
+
+    @Test
+    void theSearchParserRestartsFromItsCheckpointsExactly() {
+        // A parse restarted from a checkpoint before the first changed unit
+        // must be the parse from scratch, block for block - accepted or
+        // not, and whatever the parses in between did to the arrays.
+        var random = new Random(31);
+        int count = 6000;
+        int[] units = new int[count];
+        for (int i = 0; i < count; i++) {
+            units[i] = i > 40 && random.nextInt(3) > 0 ? units[i - 1 - random.nextInt(40)]
+                    : random.nextInt(6);
+        }
+        var parser = new St4LiteralCopySearch.Parser(units, 1, 16);
+        boolean[] dictionary = new boolean[count];
+        for (int i = 0; i < count; i++) {
+            dictionary[i] = random.nextInt(4) == 0;
+        }
+        for (int trial = 0; trial < 40; trial++) {
+            int at = random.nextInt(count);
+            int size = 1 + random.nextInt(24);
+            boolean value = random.nextBoolean();
+            Arrays.fill(dictionary, at, Math.min(count, at + size), value);
+            St4Block restarted = parser.parse(dictionary);
+            St4Block fresh = new St4LiteralCopySearch.Parser(units, 1, 16).parse(dictionary);
+            List<St4Block> a = St4LiteralCopyOptimizer.blocks(restarted);
+            List<St4Block> b = St4LiteralCopyOptimizer.blocks(fresh);
+            assertEquals(b.size(), a.size(), "trial " + trial + ": block count");
+            for (int i = 0; i < a.size(); i++) {
+                assertEquals(b.get(i).index(), a.get(i).index(), "trial " + trial + " block " + i);
+                assertEquals(b.get(i).offset(), a.get(i).offset(), "trial " + trial + " block " + i);
+                assertEquals(b.get(i).bits(), a.get(i).bits(), "trial " + trial + " block " + i);
+            }
+            if (random.nextBoolean()) {
+                parser.accept();
+            }
+        }
+    }
+
     private static final int[] ZX1_SIZES = {4, 6, 1006, 6, 19, 383, 26};
 
     @Test
