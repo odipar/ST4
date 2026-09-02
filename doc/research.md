@@ -221,18 +221,48 @@ the one-shot parse gave 78.3%; the class file to 65.9% against 73.5%.
 shrinks by the window, and the random stream with its head repeated shows
 it: the one copy 32512 literals back no longer fits.
 
+### Real tunes
+
+The test corpora are synthetic; the assets this is for are register dumps.
+YMX, the streaming YM player this format was split from, packs a tune as
+twenty-five streams - fourteen sound registers, one value per frame, and
+eleven of a compiled effect script - each decoded through its own ring of
+960 bytes by default, at k = 2. The four example tunes of that repository,
+their stream vectors built as its encoder builds them and packed here one
+section per stream, plain and with thirty seconds of search per stream, at
+its ring and at three smaller ones. Sizes are the four ST4 streams in
+bytes, summed over the twenty-five, without headers or padding; the plain
+sizes at 960 are YMX's own sections up to alignment padding.
+
+| tune | frames | ring 960: plain, with copies | ring 256 | ring 128 | ring 64 |
+|---|---:|---:|---:|---:|---:|
+| Dark Side of the Spoon 1 | 6144 | 3737, 3593 | 4198, 3797 | 8096, 5829 | 11507, 7494 |
+| Amiga Demo, Overscan screen | 6912 | 2853, 2780 | 6545, 4837 | 7074, 5185 | 9110, 5959 |
+| Mad Max 1 | 3838 | 954, 918 | 1940, 1494 | 2342, 1609 | 4200, 1918 |
+| Cuddly, main menu | 6650 | 1123, 1111 | 4885, 3149 | 7197, 4973 | 10280, 5532 |
+
+The rings cost 25 × N bytes of RAM: 24000 at 960, 6400 at 256, 3200 at 128,
+1600 at 64. At the player's own ring the gain is one to four percent - the
+ring already holds what these tunes repeat. The gain is in shrinking it:
+copies take a quarter to a third off at 128 and 64 bytes on every tune, and
+half off Mad Max at 64. Dark Side of the Spoon at a 256-byte ring with
+copies is 3797 bytes against 3737 at 960 without them, the same file for a
+quarter of the ring RAM; the other tunes do not get that far, since a period
+stream that repeats at long range is match-shaped rather than
+literal-shaped, and shrinking the ring costs a tune that packed to almost
+nothing the most. The tune data needs nothing for this: copies read the
+literal stream out of the file the player already keeps in memory.
+
 ### What decides it
 
-The test corpora are synthetic. Whether the demo's assets - register dumps,
-speedcode, samples - are block-shaped or prose-shaped decides the ring size
-this buys, and the packer runs on any file. `st4 -c` writes the one-shot
-parse and the decoders take it when built with `ST4_WINDOW`; `st4 -cS`
-searches for S seconds beyond it, descending and annealing over which units
-are literal with an exact parse for each choice and the rep of a copy in its
-cost model - on this README at k = 1 and a 64-unit window that takes the
-one-shot parse's 78% of the input to 61% in ten minutes, still improving.
-What is left is one-unit copies in the cost model, and the same candidates
-in the fast optimizer, the event-driven one falling back.
+`st4 -c` writes the one-shot parse and the decoders take it when built with
+`ST4_WINDOW`; `st4 -cS` searches for S seconds beyond it, descending and
+annealing over which units are literal with an exact parse for each choice
+and the rep of a copy in its cost model - on this README at k = 1 and a
+64-unit window that takes the one-shot parse's 78% of the input to 61% in
+ten minutes, still improving. What is left is one-unit copies in the cost
+model, and the same candidates in the fast optimizer, the event-driven one
+falling back.
 
 ## Sources
 
