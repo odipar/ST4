@@ -3,14 +3,15 @@
 
 A stream packed with -c at a window of M units writes a match beyond M as a
 copy from the literal stream: offset minus M literal units behind the read
-pointer, in stream B, without moving it. A decoder built with ST4_WINDOW = M
-tells the two apart by magnitude. This packs corpora that way at unit sizes
-1, 2 and 4 and windows of 16, 64 and 256 units, builds the decoders for each
-window, and decodes under Unicorn as a plain 68000, into one buffer with
-ST4.S, through a ring the size of the window with ST4_wrap.S, and with
-ST4_ring.S in both wrap modes, checking every output byte, that all four
-streams are consumed exactly, and that nothing is written outside the ring.
-The same builds decode streams packed without copies as the plain build does.
+pointer, in stream B, without moving it. A decoder built with ST4_WINDOW
+tells the two apart by magnitude, against the window ST4_init wrote into
+its code. This packs corpora that way at unit sizes 1, 2 and 4 and windows
+of 16, 64 and 256 units, builds the three decoders once per unit size, and
+decodes under Unicorn as a plain 68000, into one buffer with ST4.S, through
+a ring the size of the window with ST4_wrap.S, and with ST4_ring.S in both
+wrap modes, checking every output byte, that all four streams are consumed
+exactly, and that nothing is written outside the ring. The same builds
+decode streams packed without copies as the plain build does.
 
     python3 68k/test/emu/test_st4_copies.py [--quick]
 """
@@ -39,13 +40,13 @@ from unicorn.m68k_const import (                                     # noqa: E40
 )
 
 
-def assemble(name: str, unit: int, window: int) -> bytes:
-    """A decoder built for one unit size and one window."""
+def assemble(name: str, unit: int) -> bytes:
+    """A decoder built for one unit size, with the copy code."""
     with tempfile.TemporaryDirectory() as directory:
         source = Path(directory) / 'build.S'
         binary = Path(directory) / 'build.bin'
         source.write_text(f'ST4_UNIT    equ     {unit}\n'
-                          f'ST4_WINDOW  equ     {window}\n'
+                          f'ST4_WINDOW  equ     1\n'
                           f'        include "{REPO / "68k" / name}"\n')
         result = subprocess.run(
             ['rmac', '-m68000', '-fr', '+o3', '-o', str(binary), str(source)],
@@ -81,12 +82,14 @@ def drained(uc, control, literal, byte_offsets, word_offsets) -> str:
     return ''
 
 
-def run_linear(control, literal, byte_offsets, word_offsets, expected, unit, code, chunk) -> str:
-    """ST4.S: resumed in chunks, the copies reaching D from a plain buffer."""
+def run_linear(control, literal, byte_offsets, word_offsets, expected, unit, code, chunk,
+               window_bytes) -> str:
+    """ST4.S: resumed in chunks, the copies reaching B from a plain buffer."""
     uc = t.make_emu(control)
     uc.mem_write(t.CODE, code)
     seed(uc, control, literal, byte_offsets, word_offsets, t.DST)
-    t.call(uc, t.CODE)                                  # ST4_init at +0
+    uc.reg_write(UC_M68K_REG_D3, 0xBEEF0000 | window_bytes)
+    t.call(uc, t.CODE)                                  # ST4_init, the window in d3
     calls = 0
     while True:
         calls += 1
@@ -199,10 +202,10 @@ def main() -> int:
     windows = [16] if QUICK else [16, 64, 256]
     for unit in (1, 2, 4):
         cases = 0
+        linear = assemble('ST4.S', unit)
+        wrap = assemble('ST4_wrap.S', unit)
+        ring = assemble('ST4_ring.S', unit)
         for window in windows:
-            linear = assemble('ST4.S', unit, window)
-            wrap = assemble('ST4_wrap.S', unit, window)
-            ring = assemble('ST4_ring.S', unit, window)
             ring_bytes = window * unit
             chunk = 16 if window >= 16 * 1 else window
             for name, data, _ in t.testcases():
@@ -221,7 +224,7 @@ def main() -> int:
                         continue
                     label = f'k={unit} {name} M={window} {"copies" if copies else "plain"}'
                     runs = [('linear', run_linear(control, literal, byte_offsets, word_offsets,
-                                                  padded, unit, linear, 7))]
+                                                  padded, unit, linear, 7, ring_bytes))]
                     if ring_bytes % (chunk * unit) == 0:
                         runs.append(('wrap', run_wrap(control, literal, byte_offsets,
                                                       word_offsets, padded, unit, wrap,

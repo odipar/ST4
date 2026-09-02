@@ -268,11 +268,14 @@ other.
 
 ### Copies from the literal stream
 
-A stream with copies from the literal stream needs a decoder built for its
-window: `ST4_WINDOW equ M`, the header's field at byte 24, which one `cmp.l`
-checks. Such a build tells a copy from a match by magnitude, a `cmp.w` and
-a short branch per match segment, and takes a copy's source from the stream
-B read pointer with one `lea` in place of the ring arithmetic a match needs:
+A stream with copies from the literal stream needs a decoder built with
+`ST4_WINDOW equ 1`, and the window it was packed for, the header's field at
+byte 24: `ST4_init` takes it in `d3`, in bytes, and writes it into the two
+instructions that use it. For the ring decoders that is the ring size
+`ST4_init` has already. Such a build tells a copy from a match by magnitude,
+a `cmp.w` and a short branch per match segment, and takes a copy's source
+from the stream B read pointer with one `lea` in place of the ring
+arithmetic a match needs:
 
 ```
 d2 >= -M*k    a match     a3 = a1 + d2            the output, M units back at most
@@ -280,15 +283,17 @@ d2 <  -M*k    a copy      a3 = a2 + M*k + d2      stream B, offset-M units behin
                           d2 += n*k               the offset advances by the segment
 ```
 
-No state and no install-time work: the window is a constant. A window build
-is 14 to 22 bytes larger, and a build without `ST4_WINDOW` is byte for byte
-the decoder above. Measured on the test corpora, streams without copies pay
-1.8 to 3.9% more cycles on a window build than on a plain one, and a stream
-with copies runs at the rate its operation count sets: word-soup at k = 1
-packed with copies for a 16-unit ring decodes in ST4_wrap at 65.9 cycles
-per unit, where the same data packed without them for a 256-unit ring takes
-64.8, and for the 16-unit ring, nearly all of it literals, 42.0 for three
-times the bytes.
+One build per unit size serves every window, and the decoder holds no
+state for it: the window sits in its code. So the decoder is code in RAM,
+and a 68030 caller flushes the instruction cache after `ST4_init`. A window
+build is 30 to 40 bytes larger, and a build without `ST4_WINDOW` is byte for
+byte the decoder above. Measured on the test corpora, streams without copies
+pay 2.0 to 4.0% more cycles on a window build than on a plain one, and a
+stream with copies runs at the rate its operation count sets: word-soup at
+k = 1 packed with copies for a 16-unit ring decodes in ST4_wrap at 66.5
+cycles per unit, where the same data packed without them for a 256-unit
+ring takes 64.8, and for the 16-unit ring, nearly all of it literals, 42.0
+for three times the bytes.
 
 ### What to feed them
 
@@ -296,7 +301,7 @@ The decoders do not check their input; use trusted files made at build time.
 The packers keep every operation within the decoders' 16-bit counters. For a
 ring of N units, pack with `-mN` so the decoder never needs data that has
 left the ring, which also decides how a loop is packed; add `-c` and build
-with `ST4_WINDOW equ N` to let the ring reach the literals it has read.
+with `ST4_WINDOW equ 1` to let the ring reach the literals it has read.
 
 ## Java tools
 

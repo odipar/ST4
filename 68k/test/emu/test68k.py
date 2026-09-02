@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
-"""Differential test: 68k dzx1_68000.S (emulated with Unicorn) vs Java Zx1-compressed streams."""
+"""The Unicorn harness the ST4 rigs share: the memory map, a call into the
+decoder, the register checks and the test corpora. In odipar/ST1 this file is
+also a runnable ST1 test; here it runs only when a binary is named."""
 import hashlib
 import math
 import re
