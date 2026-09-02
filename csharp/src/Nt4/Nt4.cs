@@ -225,7 +225,7 @@ public static class Nt4
         {
             return EventOptimizer.Optimize(units, unit, window);
         }
-        return LiteralCopySearch.Optimize(units, unit, window, maxOpLength, seconds, seconds > 0);
+        return LiteralCopySearch.Optimize(units, unit, window, maxOpLength, seconds, true);
     }
 
     /// <summary>
