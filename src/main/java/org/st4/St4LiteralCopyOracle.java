@@ -6,8 +6,7 @@ import java.util.List;
 /**
  * The true optimum of a parse with copies from the literal stream, by trying
  * every parse the format allows - possible on a dozen units or so, and there
- * to measure {@link St4LiteralCopyOptimizer} and {@link St4LiteralCopySearch}
- * against. It costs exactly what the compressor writes: literal runs, matches
+ * to measure {@link St4LiteralCopySearch} against. It costs exactly what the compressor writes: literal runs, matches
  * new or repeated, copies at the window plus the literals between, strictly
  * shorter than that count, and reps of a copy, which resume just past it.
  */

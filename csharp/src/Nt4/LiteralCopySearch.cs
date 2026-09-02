@@ -15,8 +15,10 @@ namespace Nt4;
 /// </summary>
 /// <remarks>
 /// A dictionary is a set of forced literals: they stay literal, a copy may
-/// come only from them, the parse decides the rest. The search starts where
-/// <see cref="LiteralCopyOptimizer"/> ends, sweeps every literal run keeping
+/// come only from them, the parse decides the rest. The search opens with the
+/// one-shot heuristic - the literals of a full-window parse, holes filled,
+/// shrunk to what gets copied from - which is what <c>nt4 -c</c> alone
+/// writes; given time it sweeps every literal run keeping
 /// what packs smaller, then anneals with random moves that free, seed, extend
 /// or trim runs, returning to the best when it stalls. The parse is
 /// <see cref="FastOptimizer"/>'s DP with copies added - sources through
@@ -124,11 +126,11 @@ public static class LiteralCopySearch
             // Start as the one-shot heuristic does: the full-window parse's
             // literals, holes filled, shrunk to what gets copied from.
             int reach = Format.MaxOffsetUnits(unit);
-            bool[] dictionary = Filled(LiteralCopyOptimizer.LiteralMask(
+            bool[] dictionary = Filled(LiteralCopySearch.LiteralMask(
                 EventOptimizer.Optimize(units, unit, reach, false), count));
             Block first = parser.Parse(dictionary);
             chain = first;
-            forced = LiteralCopyOptimizer.LiteralMask(first, count);
+            forced = LiteralCopySearch.LiteralMask(first, count);
             Adopt(first);
             best = chain;
             bestBits = bits;
@@ -167,7 +169,7 @@ public static class LiteralCopySearch
             copies = new List<int[]>();
             bool[] referenced = Referenced();
             int previous = -1;
-            foreach (Block block in LiteralCopyOptimizer.Blocks(parsed))
+            foreach (Block block in Blocks(parsed))
             {
                 int start = previous + 1;
                 if (block.Offset == 0)
@@ -192,7 +194,7 @@ public static class LiteralCopySearch
         {
             bool[] referenced = new bool[count];
             int previous = -1;
-            foreach (Block block in LiteralCopyOptimizer.Blocks(chain))
+            foreach (Block block in Blocks(chain))
             {
                 if (block.Offset < 0)
                 {
@@ -464,7 +466,36 @@ public static class LiteralCopySearch
             }
         }
 
-        private bool[] LiteralMask(Block parsed) => LiteralCopyOptimizer.LiteralMask(parsed, count);
+        private bool[] LiteralMask(Block parsed) => LiteralCopySearch.LiteralMask(parsed, count);
+    }
+
+    internal static List<Block> Blocks(Block chain)
+    {
+        var list = new List<Block>();
+        for (Block? block = chain; block != null && block.Index >= 0; block = block.Chain)
+        {
+            list.Add(block);
+        }
+        list.Reverse();
+        return list;
+    }
+
+    internal static bool[] LiteralMask(Block chain, int count)
+    {
+        bool[] literal = new bool[count];
+        int previous = -1;
+        foreach (Block block in Blocks(chain))
+        {
+            if (block.Offset == 0)
+            {
+                for (int p = previous + 1; p <= block.Index; p++)
+                {
+                    literal[p] = true;
+                }
+            }
+            previous = block.Index;
+        }
+        return literal;
     }
 
     private static bool[] Filled(bool[] dictionary)

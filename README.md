@@ -149,12 +149,9 @@ the parse decides which units are literal, a copy is only valid if its source
 is, and its offset counts the literals between, so the best chain so far no
 longer decides the best parse and the optimum is NP-hard — so the dictionary
 is chosen first, the literals of a full-window parse, and the parse is exact
-for it. `St4LiteralCopyOptimizer` is the readable form of that, one block
-per candidate and slow on large inputs; `-c` runs the same passes on the
-search's parser, in tens of milliseconds where the reference takes seconds,
-to the same size. `St4LiteralCopyOracle` tries every parse on inputs small
-enough for that, and puts the heuristic within about a percent of the true
-optimum on those.
+for it - the search's opening passes, which is all `-c` alone runs.
+`St4LiteralCopyOracle` tries every parse on inputs small enough for that,
+and puts those passes within about a percent of the true optimum on those.
 
 `st4 -cS` keeps going for S seconds. `St4LiteralCopySearch` descends and
 anneals over which units are literal — a greedy sweep that frees and trims
@@ -334,10 +331,12 @@ ZX1 C compressor.
 ## C# tools
 
 [csharp/](csharp/README.md) is `nt4`, a .NET 10 port of the Java tools: the
-same library classes, the same three optimizers, the same options. The
-containers are interchangeable — measured byte-identical to the Java packer's
-on real data at every unit size, looping or not — and the tests are the Java
-suite, corpus for corpus.
+same library classes, the same optimizers, the same options. The containers
+are interchangeable — measured byte-identical to the Java packer's on real
+data at every unit size, looping or not — and the tests are the Java suite,
+corpus for corpus. The port is not necessary: the Java tools are the
+reference and complete on their own, and the port follows them when that is
+worth the work, not as a rule.
 
 ```sh
 dotnet run --project csharp/src/Nt4.Cli -- [-f] [-c] [-kK] [-mN] [-lN] [-rR] input [output.st4]

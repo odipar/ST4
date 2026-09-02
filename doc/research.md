@@ -90,8 +90,8 @@ thousand up.
 The packer, on the test corpora plus an earlier README of 15732 bytes and
 a Java class file. The numbers below are the packer's own: `st4 -mN` for
 the ring alone and `st4 -c120 -mN` for the ring with copies - the one-shot
-parse of `St4LiteralCopyOptimizer` and then two minutes of
-`St4LiteralCopySearch` per cell, which on the larger corpora is still
+passes of `St4LiteralCopySearch` and then two minutes of its search per
+cell, which on the larger corpora is still
 improving when time runs out. `St4LiteralCopyOracle`, the exhaustive search
 on inputs of a dozen units, holds both to the optimum where it is known.
 
