@@ -538,6 +538,8 @@ public final class St4LiteralCopySearch {
         private boolean hasBase;
         private int poolTop;
         private int sharedUpTo;                    // checkpoints the parse under way shares
+        private boolean fresh;                     // the parse under way started from scratch
+        private int fullNodes;                     // the nodes a parse from scratch takes
 
         Parser(int[] units, int unit, int window) {
             this.units = units;
@@ -656,6 +658,7 @@ public final class St4LiteralCopySearch {
                 slot--;
             }
             sharedUpTo = slot;
+            fresh = slot == 0;
             forced = dictionary;
             int start = slot * checkpoint;
             if (slot == 0) {
@@ -887,6 +890,21 @@ public final class St4LiteralCopySearch {
          * the next parse is compared against.
          */
         void accept() {
+            settle();
+            if (poolTop > 4L * fullNodes + 65536) {
+                // The pool holds the tails of every parse since the last full
+                // one; one full parse of the base compacts it. The yardstick
+                // is what a full parse takes, so the compaction cannot find
+                // the pool too big again.
+                hasBase = false;
+                poolTop = 0;
+                parse(baseForced);
+                settle();
+            }
+        }
+
+        /** The parse just made becomes the base. */
+        private void settle() {
             for (int m = sharedUpTo + 1; m < base.length; m++) {
                 Snapshot kept = base[m];
                 base[m] = proposal[m];
@@ -895,15 +913,10 @@ public final class St4LiteralCopySearch {
             }
             baseForced = forced.clone();
             hasBase = true;
-            poolTop = nodes;
-            if (poolTop > 32 * count + 65536) {
-                // The pool holds the tails of every parse since the last full
-                // one; one full parse of the base compacts it.
-                hasBase = false;
-                poolTop = 0;
-                parse(baseForced);
-                accept();
+            if (fresh) {
+                fullNodes = nodes - poolTop;
             }
+            poolTop = nodes;
         }
 
         private void snapshot(Snapshot into, int position) {

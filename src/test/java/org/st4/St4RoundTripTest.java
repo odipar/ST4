@@ -468,7 +468,10 @@ final class St4RoundTripTest {
     void theSearchParserRestartsFromItsCheckpointsExactly() {
         // A parse restarted from a checkpoint before the first changed unit
         // must be the parse from scratch, block for block - accepted or
-        // not, and whatever the parses in between did to the arrays.
+        // not, and whatever the parses in between did to the arrays. At a
+        // 512-unit window a single parse makes more nodes than a small
+        // input's worth, which is where the pool's compaction has to know
+        // what a full parse takes rather than go round again.
         var random = new Random(31);
         int count = 6000;
         int[] units = new int[count];
@@ -476,28 +479,30 @@ final class St4RoundTripTest {
             units[i] = i > 40 && random.nextInt(3) > 0 ? units[i - 1 - random.nextInt(40)]
                     : random.nextInt(6);
         }
-        var parser = new St4LiteralCopySearch.Parser(units, 1, 16);
-        boolean[] dictionary = new boolean[count];
-        for (int i = 0; i < count; i++) {
-            dictionary[i] = random.nextInt(4) == 0;
-        }
-        for (int trial = 0; trial < 40; trial++) {
-            int at = random.nextInt(count);
-            int size = 1 + random.nextInt(24);
-            boolean value = random.nextBoolean();
-            Arrays.fill(dictionary, at, Math.min(count, at + size), value);
-            St4Block restarted = parser.parse(dictionary);
-            St4Block fresh = new St4LiteralCopySearch.Parser(units, 1, 16).parse(dictionary);
-            List<St4Block> a = St4LiteralCopyOptimizer.blocks(restarted);
-            List<St4Block> b = St4LiteralCopyOptimizer.blocks(fresh);
-            assertEquals(b.size(), a.size(), "trial " + trial + ": block count");
-            for (int i = 0; i < a.size(); i++) {
-                assertEquals(b.get(i).index(), a.get(i).index(), "trial " + trial + " block " + i);
-                assertEquals(b.get(i).offset(), a.get(i).offset(), "trial " + trial + " block " + i);
-                assertEquals(b.get(i).bits(), a.get(i).bits(), "trial " + trial + " block " + i);
+        for (int window : new int[] {16, 512}) {
+            var parser = new St4LiteralCopySearch.Parser(units, 1, window);
+            boolean[] dictionary = new boolean[count];
+            for (int i = 0; i < count; i++) {
+                dictionary[i] = random.nextInt(4) == 0;
             }
-            if (random.nextBoolean()) {
-                parser.accept();
+            for (int trial = 0; trial < 40; trial++) {
+                int at = random.nextInt(count);
+                int size = 1 + random.nextInt(24);
+                boolean value = random.nextBoolean();
+                Arrays.fill(dictionary, at, Math.min(count, at + size), value);
+                St4Block restarted = parser.parse(dictionary);
+                St4Block fresh = new St4LiteralCopySearch.Parser(units, 1, window).parse(dictionary);
+                List<St4Block> a = St4LiteralCopyOptimizer.blocks(restarted);
+                List<St4Block> b = St4LiteralCopyOptimizer.blocks(fresh);
+                assertEquals(b.size(), a.size(), "trial " + trial + ": block count");
+                for (int i = 0; i < a.size(); i++) {
+                    assertEquals(b.get(i).index(), a.get(i).index(), "trial " + trial + " block " + i);
+                    assertEquals(b.get(i).offset(), a.get(i).offset(), "trial " + trial + " block " + i);
+                    assertEquals(b.get(i).bits(), a.get(i).bits(), "trial " + trial + " block " + i);
+                }
+                if (random.nextBoolean()) {
+                    parser.accept();
+                }
             }
         }
     }

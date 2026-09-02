@@ -589,6 +589,8 @@ public static class LiteralCopySearch
         private bool hasBase;
         private int poolTop;
         private int sharedUpTo;                    // checkpoints the parse under way shares
+        private bool fresh;                        // the parse under way started from scratch
+        private int fullNodes;                     // the nodes a parse from scratch takes
 
         internal Parser(int[] units, int unit, int window)
         {
@@ -719,6 +721,7 @@ public static class LiteralCopySearch
                 slot--;
             }
             sharedUpTo = slot;
+            fresh = slot == 0;
             forced = dictionary;
             int start = slot * checkpoint;
             if (slot == 0)
@@ -999,6 +1002,23 @@ public static class LiteralCopySearch
         /// </summary>
         internal void Accept()
         {
+            Settle();
+            if (poolTop > 4L * fullNodes + 65536)
+            {
+                // The pool holds the tails of every parse since the last full
+                // one; one full parse of the base compacts it. The yardstick
+                // is what a full parse takes, so the compaction cannot find
+                // the pool too big again.
+                hasBase = false;
+                poolTop = 0;
+                Parse(baseForced);
+                Settle();
+            }
+        }
+
+        /// <summary>The parse just made becomes the base.</summary>
+        private void Settle()
+        {
             for (int m = sharedUpTo + 1; m < baseline.Length; m++)
             {
                 (baseline[m], proposal[m]) = (proposal[m], baseline[m]);
@@ -1006,16 +1026,11 @@ public static class LiteralCopySearch
             }
             baseForced = (bool[])forced.Clone();
             hasBase = true;
-            poolTop = nodes;
-            if (poolTop > 32 * count + 65536)
+            if (fresh)
             {
-                // The pool holds the tails of every parse since the last full
-                // one; one full parse of the base compacts it.
-                hasBase = false;
-                poolTop = 0;
-                Parse(baseForced);
-                Accept();
+                fullNodes = nodes - poolTop;
             }
+            poolTop = nodes;
         }
 
         private void TakeSnapshot(Snapshot into, int position)
