@@ -4,22 +4,18 @@
 namespace Nt4;
 
 /// <summary>
-/// The readable optimizer for streams whose matches beyond the window copy
+/// The one-shot optimizer for streams whose matches beyond the window copy
 /// from the literal stream: exact for a given dictionary, the dictionary a
 /// choice - the twin of the Java <c>St4LiteralCopyOptimizer</c>.
 /// </summary>
 /// <remarks>
-/// <para>A copy from the literal stream is an ordinary far match whose source
-/// is literal in the same parse. The parse decides which units are literal, a
-/// copy is only valid if its source is, and its offset counts the literals
-/// between - which makes the exact optimum NP-hard, since the best chain so
-/// far no longer decides the best parse. The dictionary is therefore chosen
-/// first: the literals of a full-window parse, forced to stay literal, holes of
-/// a few units between them filled; a copy may come only from them, and the
-/// parse is the reference DP with the copy candidates added. A second pass
-/// keeps only what the first copied from, and the best pass wins.</para>
-/// <para><see cref="LiteralCopyOracle"/> finds the true optimum by exhaustion
-/// on inputs small enough for that.</para>
+/// A copy is valid only if its source is literal in the same parse, which
+/// makes the exact optimum NP-hard. The dictionary is chosen first - the
+/// literals of a full-window parse, forced to stay literal, holes filled - a
+/// copy may come only from them, and the parse is the reference DP with the
+/// copy candidates added; passes shrink the dictionary to what was copied
+/// from. <see cref="LiteralCopyOracle"/> measures it, and
+/// <see cref="LiteralCopySearch"/> keeps searching from here.
 /// </remarks>
 public static class LiteralCopyOptimizer
 {

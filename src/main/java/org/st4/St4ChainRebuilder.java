@@ -6,21 +6,13 @@ import org.jspecify.annotations.Nullable;
 
 /**
  * Rebuilds an optimal parse chain from what a forward cost pass recorded: the
- * winning cost per position and a three-int descriptor of the winning
- * candidate - its kind, its offset, and the one value that cannot be
- * recomputed later.
- *
- * <p>Everything else is re-derived on demand from those costs and the data
- * itself: a match run's extent and the previous match at an offset by scanning
- * the units, which costs what the chain covers; the best split of a new-offset
- * match by minimising over the same recorded costs the forward pass minimised
- * over. Only the blocks the winning chain actually contains are ever built.
- *
- * <p>Both {@link St4FastOptimizer} and {@link St4EventOptimizer} feed this
- * class. Their descriptors may name different winners where candidates tie -
- * any winner a forward pass records reconstructs to a chain of exactly the
- * recorded cost - so the chains may differ between them while the packed size
- * cannot.
+ * winning cost per position and a three-int descriptor of the winner - its
+ * kind, its offset, and the one value that cannot be recomputed. Everything
+ * else is re-derived from those costs and the data: a match run's extent by
+ * scanning the units, the best split of a new-offset match by minimising over
+ * the recorded costs. Only the blocks the winning chain contains are built.
+ * {@link St4FastOptimizer} and {@link St4EventOptimizer} both feed it; their
+ * winners may differ where candidates tie, their packed size cannot.
  */
 final class St4ChainRebuilder {
 

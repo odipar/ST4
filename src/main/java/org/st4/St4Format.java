@@ -2,42 +2,16 @@ package org.st4;
 
 /**
  * ST4: ZX1's three block types at a chosen unit granularity, split across four
- * streams so a 68000 can read each of them the fastest way that exists for it.
+ * streams so a 68000 can read each of them the fastest way it has.
  *
- * <p>A ZX1 stream interleaves everything: flag bits, gamma lengths, offset
- * bytes and literal payload all share one byte sequence. Two things follow from
- * that, and both cost real cycles. The literal payload lands at whatever parity
- * the preceding control bytes leave it at, so a 68000 can only ever copy it a
- * byte at a time - a {@code move.w} or {@code move.l} needs both source and
- * destination even. And the bit reservoir sits in the same sequence as the
- * offset bytes, so it can only ever be refilled a byte at a time: a
- * {@code move.w (a0)+,d0} would desynchronise the moment an offset byte moved
- * the pointer by one. ST4 splits all three apart:
- *
- * <ul>
- *   <li><b>stream A</b> - nothing but bits: the block-type flags and the
- *       interlaced Elias gamma lengths. Because no byte-sized read ever comes
- *       out of it, the reservoir refills a word at a time, halving the
- *       refills.</li>
- *   <li><b>stream B</b> - the literal payload, nothing else. Its alignment is
- *       therefore a property of the format rather than luck.</li>
- *   <li><b>stream C</b> - the byte offsets, one byte each.</li>
- *   <li><b>stream D</b> - the word offsets, one word each, so it is
- *       word-aligned by construction and a match source is one
- *       {@code move.w} away.</li>
- * </ul>
- *
- * <p>Which of the two an offset came from used to be encoded in the low bit of
- * the offset byte itself, ZX1-style; it is now a control code, so neither
- * stream carries a selector and each one holds values of a single width. That
- * costs <em>two</em> control bits per new-offset match rather than one, and the
- * second is not a filler. Stream A's decoder skips the refill check on every
- * bit but a gamma continuation, which is sound only because each operation
- * contributes an even number of bits - a gamma is odd, its flag makes it even.
- * One extra bit would make it odd again and cost a check on every data bit, far
- * more than the offsets save. So a new-offset match spends two: the first says
- * byte or word, and the second picks which 256-unit bank a byte offset names,
- * which is what keeps the split from costing ratio.
+ * <p>A ZX1 stream interleaves flags, lengths, offsets and literals in one byte
+ * sequence, so a 68000 can copy literals and refill its bit reservoir only a
+ * byte at a time. ST4 splits them: stream A holds nothing but bits - the flags
+ * and the interlaced Elias gamma lengths - so the reservoir refills a word at
+ * a time; stream B the literal payload, whole units; stream C the byte
+ * offsets; stream D the word offsets, word-aligned by construction. Which
+ * stream an offset comes from is a control code rather than a bit of the
+ * offset, so each stream holds values of one width:
  *
  * <pre>
  *   1 0   byte offset from stream C, 1..256 units
@@ -46,106 +20,49 @@ package org.st4;
  *   0 1   end of stream: one more bit says whether it truly ends
  * </pre>
  *
- * <p>What an offset reaches depends on the window M the stream was packed
- * for, which the header records. An offset of at most M is a match: it
- * copies output from that many units back, out of the ring. An offset beyond
- * M is a <em>copy from the literal stream</em>: it copies literal units from
- * {@code offset - M} units behind the literal read pointer, in stream B, and
- * leaves the pointer where it was. That is how a small ring reaches what it
- * has long forgotten - every literal the stream ever had is in D, in order,
- * for as long as the container is in memory. A copy advances its offset by
- * what it copied, because a decoder that is interrupted mid-copy has nothing
- * else to continue from; a rep after a copy therefore resumes just past it,
- * and every copy is strictly shorter than its distance, so the offset never
- * reaches zero. Streams packed without copies never exceed M and decode as
- * they always did.
+ * Two class bits rather than one keep every operation an even number of bits,
+ * which is what lets a decoder skip the refill check on every bit but a gamma
+ * continuation.
  *
- * <p>The end code is followed by a single bit. A 0 ends the stream as it
- * always did. A 1 means the stream <em>repeats</em> from a loop point R: the
- * container encodes the infinite input {@code units[0..R) units[R..O)}
- * repeated forever, so after the last unit the output continues from unit R
- * and never stops. What stream D stores as its one last word is the distance
- * O-R back to the loop point - an offset like any other - and the decoder
- * becomes an endless match at it. A decoder driven by budgets simply never
- * runs dry; the reference decoder fills whatever output it was asked for. The
- * loop distance obeys the same limits as any other offset, which is what
- * keeps a looping stream safe for the ring it was packed for.
+ * <p>Lengths and offsets count units of k bytes, k being 1, 2 or 4. At k = 1
+ * this is ZX1's parse with the payload moved out; at 2 or 4 every operation
+ * covers k times as much and the decoder copies k bytes at a time, at the
+ * cost that only k-aligned matches can be expressed.
  *
- * <p>On top of that, lengths and offsets are counted in <em>units</em> of
- * {@code k} bytes, where k is 1, 2 or 4. At k = 1 that is ZX1's parse with the
- * payload moved out. At k = 2 or 4 every operation covers k times as much
- * output, so the decoder runs k times fewer operations and can copy k bytes at
- * a time - and, for free, a one-byte offset reaches 128 units instead of 128
- * bytes.
+ * <p>An offset of at most the window M, which the header records, is a match
+ * from the output. One beyond M is a copy from the literal stream: it copies
+ * {@code offset - M} units from behind the literal read pointer, leaves the
+ * pointer where it was, and advances the offset by what it copied, so a rep
+ * after a copy resumes just past it; every copy is strictly shorter than its
+ * distance. Streams packed without copies never exceed M.
  *
- * <p>The cost is quantisation: an offset or length that is not a multiple of k
- * cannot be expressed, so the packer only finds matches that line up with the
- * unit grid. That is a bargain on data whose structure is k-aligned and a
- * disaster on data that is not, which is why the mode is chosen per asset and
- * recorded in the header.
+ * <p>The end code's extra bit: 0 ends the stream; 1 repeats it from a loop
+ * point R - the container encodes {@code units[0..R) units[R..O)} forever -
+ * with the distance O-R as one last word in stream D, which the decoder
+ * matches endlessly. A loop longer than the window is replayed instead: the
+ * header names the rewind point in bytes, the caller saves the decoder's
+ * registers there and restores them, all but the write pointer, at O, and the
+ * packer parses the loop on its own so every pass sees the same history.
  *
- * <p>The header is twenty-eight bytes and holds only what cannot be worked
- * out:
+ * <p>The header is twenty-eight bytes:
  *
  * <pre>
  *   0   4  signature: 'S', '4', format version, k
- *   4   4  O, the output size in bytes; always a multiple of k
+ *   4   4  O, the output size in bytes, a multiple of k
  *   8   4  stream B, the literals, as a byte offset from the header
  *  12   4  stream C, the byte offsets
  *  16   4  stream D, the word offsets
  *  20   4  the rewind point in bytes, or $FFFFFFFF when there is none
- *  24   4  M, the window in units: matches within it, copies from B beyond
- *  28  ..  streams A, B, C and D, in that order
+ *  24   4  M, the window in units
+ *  28  ..  streams A, B, C and D, in that order, each on a long boundary
  * </pre>
  *
- * <p>The rewind point is how a stream loops when its loop is longer than the
- * window: the decoder cannot match that far back, so the caller replays the
- * encoded stream instead. Every decoder keeps its whole state in registers,
- * so the caller saves them when the output reaches the rewind point and
- * restores them - all but the write pointer - when it reaches O, and does so
- * every pass. The packer makes that sound by parsing the loop {@code [R,O)}
- * on its own, so no match in it reaches before R or straddles R: every pass
- * then sees the same history, whatever came before. The field is set only
- * when the caller has something to do; a stream that ends, or that loops by
- * itself through the repeat bit, says $FFFFFFFF.
- *
- * <p>Everything else follows from those. Stream A begins where the header ends,
- * so it needs no field. No length is stored: the streams are laid out in order,
- * so each one runs to the next, and the last runs to the end of the file. None
- * of the four decoders reads a length anyway - it stops on the end marker and
- * the other streams run out with it.
- *
- * <p>Stream B, the literal payload, comes second, right after the bits, as
- * version 4 had it. Versions 5 and 6 put it last, so that a ring placed
- * directly after the container would border the literal data; but a copy
- * from the literal stream is measured from the literal read pointer, not
- * from the ring, so nothing in the decoders depends on where the ring is,
- * and version 7 put the stream back.
- *
- * <p>The shape is chosen for the 68000 that has to load it. The signature packs
- * the magic, the version AND the unit size into one long, so a decoder built
- * for a particular k proves an asset matches it with a single {@code cmp.l}
- * rather than three compares. Each stream starts on a long boundary, so a wide
- * move is safe at every unit size. And the offsets are relative to the header
- * rather than absolute, so a loader that has the asset's address in a register
- * needs one {@code adda.l} per stream and no relocation:
- *
- * <pre>
- *         lea     asset(pc),a3
- *         cmp.l   #ST4_SIGNATURE,(a3)     ; magic, version and k in one compare
- *         bne.s   wrong_asset
- *         lea     28(a3),a0               ; stream A, where the header ends
- *         movea.l a3,a2
- *         adda.l  8(a3),a2                ; stream B, the literals
- *         movea.l a3,a4
- *         adda.l  12(a3),a4               ; stream C, the byte offsets
- *         movea.l a3,a5
- *         adda.l  16(a3),a5               ; stream D, the word offsets
- * </pre>
- *
- * <p>A derived length can be up to three bytes longer than what the packer
- * wrote, because a stream is padded to the next long boundary. Nothing reads
- * the padding.
+ * Stream A begins where the header ends, each stream runs to the next and no
+ * length is stored: the decoders stop on the end marker. The signature packs
+ * magic, version and k into one long, so a decoder built for one k checks an
+ * asset with a single {@code cmp.l}, and the starts are header-relative, so
+ * opening a container is one {@code adda.l} per stream. A derived length can
+ * be up to three bytes of padding longer than what was written.
  */
 public final class St4Format {
 

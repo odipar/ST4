@@ -5,23 +5,13 @@ namespace Nt4;
 
 /// <summary>
 /// Optimal LZ parser for ST4: ZX1's optimal parser, moved from bytes to k-byte
-/// units.
+/// units - the readable reference the fast implementations are checked against.
 /// </summary>
 /// <remarks>
-/// <para>The algorithm is unchanged - for every position it keeps, per offset,
-/// the cheapest chain that ends in a literal run and the cheapest that ends in
-/// a match, then picks the best of the two - because the format's shape is
-/// unchanged. Only the units differ, and with them two things in the cost
-/// model: a literal unit costs <c>8 * k</c> bits rather than 8, and an offset
-/// counts units rather than bytes. A new-offset match pays three control bits
-/// - the flag and the two that name its offset's width and bank - plus eight
-/// or sixteen for the offset itself.</para>
-/// <para>This is the readable reference the fast implementations are checked
-/// against; it allocates a block per candidate and most of them lose. The
-/// result is a chain of <see cref="Block"/>s, last block first, which
-/// <see cref="Compressor"/> walks in reverse. The Java reference inlines the
-/// progress report; this port uses <see cref="ProgressMeter"/>, which prints
-/// the same lines.</para>
+/// For every position it keeps, per offset, the cheapest chain ending in a
+/// literal run and the cheapest ending in a match, and picks the best; only
+/// the costs differ from ZX1's. The result is a chain of <see cref="Block"/>s,
+/// last block first, which <see cref="Compressor"/> walks in reverse.
 /// </remarks>
 public static class Optimizer
 {

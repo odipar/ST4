@@ -5,35 +5,16 @@ namespace Nt4;
 
 /// <summary>Writes an ST4 parse out as four streams.</summary>
 /// <remarks>
-/// <para>Stream A carries nothing but bits - the block-type flags and the
-/// gamma lengths. Stream B carries nothing but literal units. Streams B and C
-/// carry the offsets, split by width: bytes in B, words in C. A word offset is
-/// written as <c>-offset * unit</c>, which is exactly what the 68000 decoders
-/// keep in a register; a byte offset is written as
-/// <c>bank * 256 + 256 - offset</c>, pre-negated the same way. Stream A is
-/// padded to an even length, because the 68000 decoders refill their bit queue
-/// with a <c>move.w</c>.</para>
-/// <para>Matches longer than the operation limit are split: the 68000 decoders
-/// count an operation's remaining length in a word, so nothing may exceed
-/// 65535 units. A literal run cannot be split - after a literal run a 0 bit
-/// means a match, so the format has no way to say "more literals" - and
-/// <see cref="Result.LongestOp"/> reports what actually came out.</para>
-/// <para>A copy from the literal stream is written as a match whose offset lies
-/// beyond the window: the window plus the number of literal units between the
-/// copy's source and the copy, which is what the decoder walks back from its
-/// literal read pointer. The parse names the source by its output position;
-/// the count is taken here, from the literals actually written so far. A copy
-/// must be strictly shorter than that count, because the decoder advances the
-/// offset by what it copies and must never see it reach zero; the one copy
-/// that would be exactly as long gives up its last unit to a literal.</para>
-/// <para>A stream may be written from more than one parse, back to back: that
-/// is how a loop longer than the window is packed, the intro and the loop each
-/// parsed on their own so that nothing in the loop reaches before it. Two
-/// literal runs that meet at the seam become one, since the format cannot say
-/// "literals again"; and a one-unit match that the loop's parse meant as a rep
-/// of the stream's initial offset goes out as a literal when the intro left a
-/// different offset behind. Every flag is derived from the stream as actually
-/// written, so the seam is otherwise just a block boundary.</para>
+/// Bits and gamma lengths go in A, literal units in B, byte offsets in C and
+/// word offsets in D, offsets pre-negated as the 68000 decoders keep them and
+/// stream A padded to an even length for their word-wide refill. Matches
+/// longer than the operation limit are split; a literal run cannot be, and
+/// <see cref="Result.LongestOp"/> reports what came out. A copy from the
+/// literal stream is written as an offset beyond the window: the window plus
+/// the literal units between its source and itself, strictly shorter than
+/// that count - the one copy that would not be gives up its last unit. Two
+/// parses written back to back, the intro and the loop of a rewind stream,
+/// merge literal runs that meet at the seam.
 /// </remarks>
 public sealed class Compressor
 {

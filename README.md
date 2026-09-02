@@ -169,10 +169,11 @@ copies to 66.3%; ten minutes of search take the 64-unit ring to 60.8%, and
 it was still improving when time ran out. The whole window packs to 46.1%.
 
 What copies buy is the ring: measured
-on the test corpora at k = 1, a 16-unit ring with copies packs word-soup to
-31.6% of the input where the ring alone gives 95.6%, and block-shaped data to
-within a point or two of the full window; [doc/research.md](doc/research.md)
-has the tables. The decoders take them when built with `ST4_WINDOW`; see
+on the test corpora with two minutes of search per file, a 16-unit ring with
+copies packs word-soup at k = 1 to 30.5% of the input where the ring alone
+gives 95.6%, prose like a ring of over 200 units, and at k = 2 and 4 better
+than a 256-unit ring alone; [doc/research.md](doc/research.md) has the
+tables. The decoders take them when built with `ST4_WINDOW`; see
 [68000 decoders](#68000-decoders).
 
 ### Loops

@@ -2,33 +2,18 @@ package org.st4;
 
 /**
  * The progress report the optimal parsers print: an exact percentage of the
- * parse's inner-loop steps, and a time estimate fitted to how the parse has
- * been slowing down.
- *
- * <p>The step count is exact and owes nothing to the data - position {@code
- * index} is tried against every offset from 1 to {@code clamp(index, 1,
- * offsetLimit)}, so the total is a closed form known before the first step.
- * What a step <em>costs</em> is another matter - one that finds a match does
- * more work than one that finds nothing - so the percentage measures progress,
- * not remaining time. The estimate handles time: elapsed is fitted as {@code
- * a*x + b*x^2} in the percentage, through the warm-up point, the midpoint and
- * now. The square is what makes it work on real assets: a parse that finds
- * more matches as it goes gets steadily slower, and a rate measured over any
- * window - however recent - keeps predicting the past.
+ * parse's inner-loop steps - position {@code index} tries offsets 1 to
+ * {@code clamp(index, 1, offsetLimit)}, a closed form known before the first
+ * step - and a time estimate, elapsed time fitted as {@code a*x + b*x^2} in
+ * the percentage through the warm-up point, the midpoint and now. The square
+ * tracks a parse that finds more matches, and so slows down, as it goes.
  */
 public final class ProgressMeter {
 
-    /**
-     * Percent of the work to finish before estimating anything, so the JIT's
-     * warm-up is not counted against the rest.
-     */
+    /** Percent of the work done before estimating, so the JIT's warm-up is not counted. */
     private static final int WARMUP = 5;
 
-    /**
-     * Percent of history the fit needs before it says anything. A curve drawn
-     * through three points a couple of percent apart is mostly noise, and a
-     * confidently wrong number is worse than no number.
-     */
+    /** Percent of history the fit needs before it says anything. */
     private static final int BASELINE = 15;
 
     private final boolean enabled;

@@ -5,28 +5,17 @@ namespace Nt4;
 
 /// <summary>
 /// The event-driven ST4 optimizer: the same costs as <see cref="FastOptimizer"/>,
-/// without visiting every (position, offset) pair.
+/// without visiting every (position, offset) pair. The Java
+/// <c>St4EventOptimizer</c> is the reference.
 /// </summary>
 /// <remarks>
-/// <para>The DP's per-step work is redundant in a specific way: between the
-/// start and end of a match run, and along a literal stretch, every candidate's
-/// cost is a closed form of the position. Only two kinds of event change
-/// anything - a match run starting, and one ending - and on real data there are
-/// orders of magnitude fewer of those than there are DP steps. So this class
-/// walks positions emitting three channel minima per position from range
-/// structures, and does per-offset work only at run boundaries. The Java
-/// <c>St4EventOptimizer</c> is the reference and documents the three channels
-/// at length.</para>
-/// <para>This reproduces <see cref="FastOptimizer"/>'s cost array exactly -
-/// the equivalence test asserts it element for element. Where candidates tie,
-/// the recorded winner may differ, so the chain (and the packed bytes) can
-/// differ from the fast optimizer's while the packed size cannot: both are
-/// optimal parses of the same cost.</para>
-/// <para>The trade is per-event overhead for per-step savings, so this wins
-/// where runs are long and loses where nearly every match run is a step or two
-/// long. <see cref="Optimize(int[], int, int, bool)"/> therefore counts the
-/// events first - one cheap pass - and falls back to
-/// <see cref="FastOptimizer"/> when the data is run-churny.</para>
+/// Between the start and end of a match run every candidate's cost is a closed
+/// form of the position, so this class emits three channel minima per position
+/// from range structures and does per-offset work only where a run starts or
+/// ends. It reproduces the fast optimizer's cost array exactly; where
+/// candidates tie the chain may differ, the packed size cannot.
+/// <see cref="Optimize(int[], int, int, bool)"/> counts the events first and
+/// falls back to <see cref="FastOptimizer"/> on run-churny data.
 /// </remarks>
 public sealed class EventOptimizer
 {

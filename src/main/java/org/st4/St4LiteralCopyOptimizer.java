@@ -4,41 +4,21 @@ import java.util.List;
 import org.jspecify.annotations.Nullable;
 
 /**
- * The readable optimizer for streams whose matches beyond the window copy
- * from the literal stream - and the honest one: it is exact for a given
- * dictionary, and the dictionary is a choice.
+ * The one-shot optimizer for streams whose matches beyond the window copy
+ * from the literal stream: exact for a given dictionary, the dictionary a
+ * choice.
  *
- * <p>A copy from the literal stream is an ordinary far match whose source is
- * literal in the same parse, since the units it copies are in stream B, in
- * order, whatever the ring has forgotten. That is a circularity - the parse
- * decides which units are literal, a copy is only valid if its source is, and
- * its offset counts the literals between - and it is what makes the exact
- * optimum NP-hard: a slightly worse chain with one more literal can make a
- * later copy a byte instead of a word, so the best chain so far no longer
- * decides the best parse, and the position DP that makes {@link St4Optimizer}
- * exact does not apply. This class breaks the circularity by choosing the
- * dictionary first. The literals of a full-window parse are every first
- * occurrence the data has, and few; they are forced to stay literal, a copy
- * may come only from them, and the parse is then the reference DP with the
- * copy candidates added, exact for that dictionary. Holes of a few units
- * between dictionary runs are filled, since a copy cannot step over what is
- * not in B. A second pass keeps only the dictionary units the first one
- * copied from, frees the rest to be matched, and the best pass wins.
- *
- * <p>{@link St4LiteralCopyOracle} finds the true optimum by exhaustion on
- * inputs small enough for that, which is how far this heuristic is from it
- * gets measured rather than guessed.
- *
- * <p>Costs are the format's: a match, or a copy, is a flag, two class bits,
- * a byte or a word, and the gamma of its length less one; a copy's offset is
- * the window plus the literals between its source and itself, so a byte
- * reaches 512 minus the window of them. That count is taken from the previous
- * pass, and can only mis-cost a candidate by eight bits; the compressor
- * writes the real one. A copy is kept strictly shorter than that count, for
- * the decoder's sake.
- *
- * <p>The DP tries every offset at every position, as the reference does, so
- * it is slow on large inputs; that is what the fast optimizers are for.
+ * <p>A copy is valid only if its source is literal in the same parse, and
+ * its offset counts the literals between, so the best chain so far no longer
+ * decides the best parse: the exact optimum is NP-hard. This class chooses the
+ * dictionary first - the literals of a full-window parse, forced to stay
+ * literal, holes of a few units between them filled - lets a copy come only
+ * from them, and runs the reference DP with the copy candidates added. Passes
+ * then shrink the dictionary to what was copied from, and the best pass wins.
+ * Copies are costed with the previous pass's literal count, which can be off
+ * by eight bits; the compressor writes the real one. {@link St4LiteralCopyOracle}
+ * measures how far this lands from the optimum on inputs small enough to
+ * exhaust, and {@link St4LiteralCopySearch} keeps searching from here.
  */
 public final class St4LiteralCopyOptimizer {
 

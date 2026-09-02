@@ -8,53 +8,24 @@ import java.util.Random;
 import org.jspecify.annotations.Nullable;
 
 /**
- * The long-running optimizer for streams whose matches beyond the window
- * copy from the literal stream: a search over which units are literal, each
- * step scored by an exact parse for that choice and by what the compressor
- * then writes, run for as long as it is given.
+ * The long-running optimizer for streams whose matches beyond the window copy
+ * from the literal stream: a search over which units are literal, each step
+ * scored by an exact parse for that choice and by what the compressor then
+ * writes, run for as long as it is given.
  *
- * <p>The exact optimum is NP-hard - see {@link St4LiteralCopyOptimizer},
- * which chooses its dictionary once and stops. This class keeps choosing.
- * A dictionary is a set of forced literals: they stay literal, a copy may
- * come only from them, and everything else is the parse's to decide. For a
- * given dictionary the parse is a dynamic program, and the search descends
- * and anneals over dictionaries. A greedy sweep frees and trims every
- * literal run, keeping what packs smaller - most of what the heuristic
- * forces is better free, and that is where most of the gain is. Then random
- * moves - free a run so the parse may match it, seed a run where a copy or
- * match sits so later copies of the same units can come from nearby, a byte
- * offset instead of a word, extend or trim a run by a few units - are
- * accepted when they pack smaller and now and then when they do not, less
- * and less as time runs out, so the search can leave a local optimum; and
- * when nothing has improved for a while, it returns to the best and sweeps
- * again. It starts where the one-shot heuristic ends, so it is never worse,
- * and reports each improvement as it finds it.
- *
- * <p>The parse is {@link St4FastOptimizer}'s DP with the copies added: per
- * ring offset the state of the reference, and per copy distance the same
- * state, visited only where two units of the dictionary recur - a chain
- * over pairs, since a copy needs two - plus the runs in progress, for their
- * last unit, and the distances whose last copy could still be repped, since
- * a rep may be one unit. A copy's rep after literals continues from just
- * past what it copied, which in output terms is the same distance again, so
- * a copy's rep is a ring rep with one more condition: the literals between
- * must have literal shadows at the source, or the read pointer arithmetic
- * does not work out. The literal channel - the best chain ending in a match
- * or copy, extended by a run - is a range minimum per gamma class of the
- * run length over a min-tree keyed by match end, so copies ending anywhere
- * are candidates without a per-distance sweep. Chains are rebuilt from a
- * pool of nodes materialised only for run ends and position winners. And a
- * parse restarts from the last checkpoint before its dictionary first
- * differs from the last accepted one's, since nothing before a position
- * depends on what comes after: measured on this README at k = 1 and a
- * 64-unit window, a step is some ten milliseconds.
- *
- * <p>Copies are costed with the dictionary's own literal count between
- * source and copy, a lower bound on the count the compressor will see, so
- * every copy the parse writes is valid and a byte offset can only turn out
- * to be a word; the compressor's bits are what the search scores. That is
- * also what makes the search honest about the format: its number is the
- * packed size, not a model of it.
+ * <p>A dictionary is a set of forced literals: they stay literal, a copy may
+ * come only from them, the parse decides the rest. The search starts where
+ * {@link St4LiteralCopyOptimizer} ends, sweeps every literal run - freed whole,
+ * trimmed at either end - keeping what packs smaller, then anneals with random
+ * moves that free, seed, extend or trim runs, returning to the best and
+ * sweeping again when it stalls. The parse is {@link St4FastOptimizer}'s DP
+ * with copies added: sources found through two-unit chains over the
+ * dictionary, the rep of a copy as a ring rep at the same output distance
+ * with literal shadows at the source, the literal channel a min-tree keyed by
+ * match end, chains rebuilt from a node pool, and every parse restarted from
+ * a checkpoint before the first changed unit. Copies are costed with the
+ * dictionary's own literal count, a lower bound, so every copy is valid; the
+ * compressor's bits are the score.
  */
 public final class St4LiteralCopySearch {
 

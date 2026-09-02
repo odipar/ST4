@@ -5,19 +5,13 @@ namespace Nt4;
 
 /// <summary>
 /// Rebuilds an optimal parse chain from what a forward cost pass recorded: the
-/// winning cost per position and a three-int descriptor of the winning
-/// candidate - its kind, its offset, and the one value that cannot be
-/// recomputed later.
+/// winning cost per position and a three-int descriptor of the winner.
 /// </summary>
 /// <remarks>
-/// Everything else is re-derived on demand from those costs and the data
-/// itself: a match run's extent and the previous match at an offset by
-/// scanning the units, the best split of a new-offset match by minimising over
-/// the same recorded costs the forward pass minimised over. Only the blocks
-/// the winning chain actually contains are ever built. Both
-/// <see cref="FastOptimizer"/> and <see cref="EventOptimizer"/> feed this
-/// class; their descriptors may name different winners where candidates tie,
-/// so the chains may differ between them while the packed size cannot.
+/// Everything else is re-derived from those costs and the data, and only the
+/// blocks the winning chain contains are built. <see cref="FastOptimizer"/>
+/// and <see cref="EventOptimizer"/> both feed it; their winners may differ
+/// where candidates tie, their packed size cannot.
 /// </remarks>
 internal sealed class ChainRebuilder
 {

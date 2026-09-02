@@ -6,40 +6,22 @@ namespace Nt4;
 /// <summary>
 /// The ST4 container format: ZX1's three block types at a chosen unit
 /// granularity, split across four streams so a 68000 can read each of them the
-/// fastest way that exists for it.
+/// fastest way it has. The Java <c>St4Format</c> is the reference.
 /// </summary>
 /// <remarks>
-/// <para>Stream A holds nothing but bits - the block-type flags and the
-/// interlaced Elias gamma lengths - so its reservoir refills a word at a time.
-/// Stream B holds the literal payload, stream C the byte offsets and stream D
-/// the word offsets, so each stream is uniform and D is word-aligned by
-/// construction. Lengths and offsets count units of k bytes, where k is 1, 2
-/// or 4; the Java <c>St4Format</c> is the reference and documents the control
-/// codes and the reasoning at length.</para>
-/// <para>The header is twenty-eight bytes and holds only what cannot be worked
-/// out: a signature packing magic, version and k into one long, the padded
-/// output size, where streams B, C and D begin relative to the header, the
-/// rewind point, and the window. Stream A begins where the header ends, and
-/// each stream runs to the next, A, B, C, D as they lie: the bits, the
-/// literal payload, the byte offsets, the word offsets.</para>
-/// <para>An offset of at most the window M is a match; one beyond M copies
-/// from the literal stream, offset minus M units behind the literal read
-/// pointer, leaving the pointer where it was and advancing the offset by what
-/// it copied - so a rep after a copy resumes just past it, and a copy is
-/// strictly shorter than its distance. Streams packed without copies never
-/// exceed M and decode as they always did.</para>
-/// <para>The rewind point is how a stream loops when its loop is longer than
-/// the window: the caller saves the decoder's registers when the output
-/// reaches it and restores them, all but the write pointer, when it reaches O,
-/// every pass. The packer parses the loop on its own so no match in it reaches
-/// before the rewind point, and every pass sees the same history. The field is
-/// $FFFFFFFF when the caller has nothing to do - the stream ends, or loops by
-/// itself.</para>
-/// <para>The end marker carries one extra bit. A 0 ends the stream; a 1 means
-/// it repeats from a loop point R - the container encodes the infinite input
-/// <c>units[0..R) units[R..O)</c> repeated forever. Stream D stores the
-/// distance O-R back to the loop point as its one last word, and the stream
-/// becomes an endless match at it.</para>
+/// <para>Stream A holds nothing but bits, so its reservoir refills a word at a
+/// time; stream B the literal payload, stream C the byte offsets, stream D the
+/// word offsets. Lengths and offsets count units of k bytes, k being 1, 2 or 4.
+/// An offset of at most the window M is a match; one beyond M copies from the
+/// literal stream, offset minus M units behind the literal read pointer, which
+/// stays put, and advances the offset by what it copied. The end marker's extra
+/// bit repeats the stream from a loop point, the distance stored as one last
+/// word in stream D; a loop longer than the window is replayed by the caller
+/// from the rewind point the header names.</para>
+/// <para>The header is twenty-eight bytes: a signature packing magic, version
+/// and k into one long, the padded output size, where streams B, C and D begin
+/// relative to the header, the rewind point, and the window. Stream A begins
+/// where the header ends and each stream runs to the next.</para>
 /// </remarks>
 public static class Format
 {

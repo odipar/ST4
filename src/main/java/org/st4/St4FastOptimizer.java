@@ -2,35 +2,15 @@ package org.st4;
 
 
 /**
- * {@link St4Optimizer}, restructured to not allocate: the same parse, found the
- * same way, producing byte-identical output - measured at a fraction of the
- * time.
- *
- * <p>The original walks the same dynamic program but materialises every
- * candidate as an {@link St4Block}, and nearly all of them lose and become
- * garbage: packing a 300 KB asset was measured allocating 37 GB of blocks.
- * This version runs in two passes:
- *
- * <ol>
- *   <li><b>Forward</b>, the identical DP on primitive arrays: per offset, the
- *       cost and end of the best chain ending in a match and in a literal run;
- *       per position, the winning cost and a three-int descriptor of which
- *       candidate won - its kind, its offset, and the one value that cannot be
- *       recomputed later.</li>
- *   <li><b>Backward</b>, chain reconstruction: only the blocks the winning
- *       parse actually contains are built, by replaying each recorded winner's
- *       local decision from the descriptor, the winning costs, and the data
- *       itself. A match run's extent and the previous match at an offset are
- *       found by scanning the units, which costs what the chain covers; the
- *       best split of a new-offset match is re-derived from the same recorded
- *       costs the forward pass minimised over.</li>
- * </ol>
- *
- * <p>The candidates are evaluated in the same order with the same
- * strictly-better replacement rule, so ties fall exactly as in the original
- * and the output is byte-identical - which the equivalence test asserts, and
- * which is the reason {@link St4Optimizer} stays in the tree: it is the
- * specification this class is checked against.
+ * {@link St4Optimizer} restructured to not allocate: the same parse, the same
+ * bytes out, measured 4-7 times faster. The reference materialises every
+ * candidate as an {@link St4Block} and nearly all of them become garbage. This
+ * runs the identical DP forward on primitive arrays, recording per position
+ * the winning cost and a three-int descriptor of the winner, and rebuilds only
+ * the winning chain backward through {@link St4ChainRebuilder}. Candidates are
+ * evaluated in the same order with the same strictly-better rule, so ties fall
+ * as in the reference and the output is byte-identical, which the equivalence
+ * test asserts.
  */
 public final class St4FastOptimizer {
 

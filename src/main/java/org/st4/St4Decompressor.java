@@ -3,20 +3,13 @@ package org.st4;
 /**
  * The reference ST4 decoder: what the 68000 versions have to agree with.
  *
- * <p>It is the ZX1 state machine with four changes. Literals come from stream
- * B and offsets from stream C or D - by width - rather than from the stream the
- * bits live in; every length and offset is counted in units, so each step
- * moves k bytes; the end marker carries one more bit, which can turn the end
- * into an endless match - the repeat; and an offset beyond the window is a
- * copy from the literal stream rather than a match. The parse is still ZX1's;
- * only where the pieces are written differs, and the two class bits that say
- * which stream an offset came from.
- *
- * <p>The copy is what the 68000 decoders do, exactly: it reads {@code offset
- * - window} units behind the literal read pointer, leaves the pointer where
- * it was, and advances the offset by what it copied - so a rep after a copy
- * resumes just past it. A copy must stay behind the pointer, strictly, or
- * the offset would reach zero; the reference refuses one that does not.
+ * <p>ZX1's state machine with four changes: literals come from stream B and
+ * offsets from stream C or D by width; lengths and offsets count units, so a
+ * step moves k bytes; the end marker's extra bit can turn the end into an
+ * endless match, the repeat; and an offset beyond the window copies from the
+ * literal stream - {@code offset - window} units behind the read pointer,
+ * which stays put, the offset advanced by what was copied - exactly as the
+ * 68000 decoders do. A copy that would not stay behind the pointer is refused.
  */
 public final class St4Decompressor {
 
