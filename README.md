@@ -286,13 +286,15 @@ reach the literals it has already read.
 ```sh
 mvn package
 java -ea -cp target/classes org.st4.St4  [-f] [-c[S]] [-kK] [-mN] [-lN] [-rR] input [output.st4]
-java -ea -cp target/classes org.st4.Dst4 [-f] input.st4 [output]
+java -ea -cp target/classes org.st4.Dst4 [-f] [-rN] input.st4 [output]
 ```
 
 `st4` packs, reporting progress and a time estimate as it works; `dst4`
 unpacks, and is the readable reference the 68000 decoders are checked against.
 Its output is padded to a whole number of units, which is what the format
-stores — for a looping stream, one whole pass, and it says where the loop is.
+stores — for a looping stream, one whole pass, and it says where the loop is;
+`-rN` plays the loop N times, the pass and then N−1 repeats of its loop
+section, as a decoder driven past the end would.
 `-kK` picks the unit size, `-mN` limits how far back matches may reach, `-lN`
 splits long matches — the default already fits the 68000 decoders — and `-rR`
 makes the stream loop from unit R. When the loop is longer than `-m`, `st4`

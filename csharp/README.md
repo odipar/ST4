@@ -24,7 +24,7 @@ optimizers held to the reference parse.
 
 ```sh
 dotnet run --project csharp/src/Nt4.Cli -- [-f] [-c[S]] [-kK] [-mN] [-lN] [-rR] input [output.st4]
-dotnet run --project csharp/src/Dnt4.Cli -- [-f] input.st4 [output]
+dotnet run --project csharp/src/Dnt4.Cli -- [-f] [-rN] input.st4 [output]
 ```
 
 The arguments have the same meaning as the [Java tools](../README.md), and the
