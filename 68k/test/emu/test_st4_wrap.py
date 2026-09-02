@@ -118,9 +118,9 @@ def run(control, literal, byte_offsets, word_offsets, expected, unit, code, ring
         return 'output differs'
     for name, register, base, stream in (
             ('A', UC_M68K_REG_A0, t.SRC, control),
-            ('D', UC_M68K_REG_A2, st4.LITERAL, literal),
-            ('B', UC_M68K_REG_A4, st4.BYTE_OFFSETS, byte_offsets),
-            ('C', UC_M68K_REG_A5, st4.WORD_OFFSETS, word_offsets)):
+            ('B', UC_M68K_REG_A2, st4.LITERAL, literal),
+            ('C', UC_M68K_REG_A4, st4.BYTE_OFFSETS, byte_offsets),
+            ('D', UC_M68K_REG_A5, st4.WORD_OFFSETS, word_offsets)):
         problem = st4.consumed(name, uc.reg_read(register) - base, stream)
         if problem:
             return problem

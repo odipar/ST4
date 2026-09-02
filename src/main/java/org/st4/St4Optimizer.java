@@ -212,7 +212,7 @@ public final class St4Optimizer {
                     }
                 } else {
                     // Literals: the run's length goes in stream A, its payload
-                    // in stream D, and both are paid for here.
+                    // in stream B, and both are paid for here.
                     matchLength[offset] = 0;
                     St4Block match = lastMatch[offset];
                     if (match != null) {

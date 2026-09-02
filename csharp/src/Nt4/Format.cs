@@ -11,8 +11,8 @@ namespace Nt4;
 /// <remarks>
 /// <para>Stream A holds nothing but bits - the block-type flags and the
 /// interlaced Elias gamma lengths - so its reservoir refills a word at a time.
-/// Stream B holds the byte offsets, stream C the word offsets and stream D the
-/// literal payload, so each stream is uniform and C is word-aligned by
+/// Stream B holds the literal payload, stream C the byte offsets and stream D
+/// the word offsets, so each stream is uniform and D is word-aligned by
 /// construction. Lengths and offsets count units of k bytes, where k is 1, 2
 /// or 4; the Java <c>St4Format</c> is the reference and documents the control
 /// codes and the reasoning at length.</para>
@@ -20,9 +20,8 @@ namespace Nt4;
 /// out: a signature packing magic, version and k into one long, the padded
 /// output size, where streams B, C and D begin relative to the header, the
 /// rewind point, and the window. Stream A begins where the header ends, and
-/// each stream runs to the next, A, B, C, D as they lie: the literal payload
-/// comes last, so it runs to the end of the file and borders whatever the
-/// caller loads after the container - a ring buffer, say.</para>
+/// each stream runs to the next, A, B, C, D as they lie: the bits, the
+/// literal payload, the byte offsets, the word offsets.</para>
 /// <para>An offset of at most the window M is a match; one beyond M copies
 /// from the literal stream, offset minus M units behind the literal read
 /// pointer, leaving the pointer where it was and advancing the offset by what
@@ -38,7 +37,7 @@ namespace Nt4;
 /// itself.</para>
 /// <para>The end marker carries one extra bit. A 0 ends the stream; a 1 means
 /// it repeats from a loop point R - the container encodes the infinite input
-/// <c>units[0..R) units[R..O)</c> repeated forever. Stream C stores the
+/// <c>units[0..R) units[R..O)</c> repeated forever. Stream D stores the
 /// distance O-R back to the loop point as its one last word, and the stream
 /// becomes an endless match at it.</para>
 /// </remarks>
@@ -48,13 +47,15 @@ public static class Format
     public const int Magic = 0x53340000;
 
     /// <summary>
-    /// Version 6 let an offset beyond the window copy from the literal stream,
-    /// and recorded the window in the header. Version 5 laid the streams out
-    /// in file order with the literal payload last - A, B, C, D as they lie -
-    /// and gave the end marker its repeat bit and the header its rewind point.
-    /// Version 4 cut the header to what cannot be derived.
+    /// Version 7 put the literal payload back second, as version 4 had it,
+    /// since nothing in the decoders depends on where the ring is - A, B, C,
+    /// D as they lie, B the literals. Version 6 let an offset beyond the
+    /// window copy from the literal stream, and recorded the window in the
+    /// header. Version 5 laid the streams out in file order with the literal
+    /// payload last, and gave the end marker its repeat bit and the header its
+    /// rewind point. Version 4 cut the header to what cannot be derived.
     /// </summary>
-    public const int Version = 6;
+    public const int Version = 7;
 
     /// <summary>Byte offset of the signature long in a container.</summary>
     public const int OffsetSignature = 0;
@@ -62,14 +63,14 @@ public static class Format
     /// <summary>Byte offset of the padded output size.</summary>
     public const int OffsetSize = 4;
 
-    /// <summary>Byte offset of stream B's header-relative position: the byte offsets.</summary>
-    public const int OffsetByteOffsets = 8;
+    /// <summary>Byte offset of stream B's header-relative position: the literals.</summary>
+    public const int OffsetLiteral = 8;
 
-    /// <summary>Byte offset of stream C's header-relative position: the word offsets.</summary>
-    public const int OffsetWordOffsets = 12;
+    /// <summary>Byte offset of stream C's header-relative position: the byte offsets.</summary>
+    public const int OffsetByteOffsets = 12;
 
-    /// <summary>Byte offset of stream D's header-relative position: the literals.</summary>
-    public const int OffsetLiteral = 16;
+    /// <summary>Byte offset of stream D's header-relative position: the word offsets.</summary>
+    public const int OffsetWordOffsets = 16;
 
     /// <summary>Byte offset of the rewind point, in bytes like the size.</summary>
     public const int OffsetRewind = 20;
@@ -116,11 +117,11 @@ public static class Format
     /// <param name="Unit">Bytes per unit: 1, 2 or 4.</param>
     /// <param name="Size">The padded output size in bytes, a multiple of the unit.</param>
     /// <param name="Control">Stream A, the bits.</param>
-    /// <param name="Literal">Stream D, the literal payload.</param>
-    /// <param name="ByteOffsets">Stream B, one byte per offset.</param>
-    /// <param name="WordOffsets">Stream C, one word per offset.</param>
+    /// <param name="Literal">Stream B, the literal payload.</param>
+    /// <param name="ByteOffsets">Stream C, one byte per offset.</param>
+    /// <param name="WordOffsets">Stream D, one word per offset.</param>
     /// <param name="Rewind">The rewind point in bytes, or <see cref="NoRewind"/>.</param>
-    /// <param name="Window">The window in units: matches within it, copies from D beyond.</param>
+    /// <param name="Window">The window in units: matches within it, copies from B beyond.</param>
     public sealed record Container(int Unit, int Size, byte[] Control, byte[] Literal,
         byte[] ByteOffsets, byte[] WordOffsets, int Rewind, int Window);
 
@@ -176,12 +177,12 @@ public static class Format
             throw new InvalidDataException($"window {window} is not 1..{MaxOffsetUnits(unit)} units");
         }
 
-        // The streams lie in the file as A, B, C, D: the literal payload
-        // last, so it runs to the end of the file.
+        // The streams lie in the file as A, B, C, D: the bits, the literal
+        // payload, the byte offsets and the word offsets.
         int[] edge =
         {
-            HeaderSize, LongAt(file, OffsetByteOffsets), LongAt(file, OffsetWordOffsets),
-            LongAt(file, OffsetLiteral), file.Length,
+            HeaderSize, LongAt(file, OffsetLiteral), LongAt(file, OffsetByteOffsets),
+            LongAt(file, OffsetWordOffsets), file.Length,
         };
         for (int i = 1; i < edge.Length - 1; i++)
         {
@@ -196,8 +197,8 @@ public static class Format
             }
         }
         return new Container(unit, size,
-            file[edge[0]..edge[1]], file[edge[3]..edge[4]],
-            file[edge[1]..edge[2]], file[edge[2]..edge[3]], rewind, window);
+            file[edge[0]..edge[1]], file[edge[1]..edge[2]],
+            file[edge[2]..edge[3]], file[edge[3]..edge[4]], rewind, window);
     }
 
     private static int LongAt(byte[] file, int at) =>

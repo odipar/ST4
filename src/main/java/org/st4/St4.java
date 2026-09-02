@@ -18,7 +18,7 @@ public final class St4 {
     private St4() {}
 
     public static void main(String[] args) {
-        System.out.println("ST4: aligned split-stream packer v6.0 by Robbert van Dalen, "
+        System.out.println("ST4: aligned split-stream packer v7.0 by Robbert van Dalen, "
                 + "based on ZX1 v1.5 by Einar Saukas");
 
         int unit = 1;
@@ -137,8 +137,8 @@ public final class St4 {
                 + "%d operations%s%n",
                 input.length, padded == input.length ? "" : " padded to " + padded,
                 result.packedSize(), 100.0 * result.packedSize() / input.length,
-                result.control().length, result.byteOffsets().length,
-                result.wordOffsets().length, result.literal().length,
+                result.control().length, result.literal().length,
+                result.byteOffsets().length, result.wordOffsets().length,
                 result.operations(),
                 (result.copies() == 0 ? "" : ", " + result.copies()
                         + " copies from the literal stream")
@@ -173,19 +173,19 @@ public final class St4 {
     }
 
     /**
-     * Twenty-eight bytes of header, then A, B, C and D in order, each
-     * starting on a long boundary. Nothing says how long a stream is: it runs
-     * to the next - and D, the literal payload, runs to the end of the file,
+     * Twenty-eight bytes of header, then A, B, C and D in order - the bits,
+     * the literals, the byte offsets, the word offsets - each starting on a
+     * long boundary. Nothing says how long a stream is: it runs to the next,
      * so it borders whatever the caller loads after the container.
      */
     // Public because a container is also how other formats embed an ST4
     // stream, many of them at once.
     public static byte[] container(St4Compressor.Result result) {
         int controlAt = St4Format.HEADER_SIZE;                  // already a multiple of 4
-        int byteAt = align(controlAt + result.control().length);
+        int literalAt = align(controlAt + result.control().length);
+        int byteAt = align(literalAt + result.literal().length);
         int wordAt = align(byteAt + result.byteOffsets().length);
-        int literalAt = align(wordAt + result.wordOffsets().length);
-        byte[] file = new byte[literalAt + result.literal().length];
+        byte[] file = new byte[wordAt + result.wordOffsets().length];
 
         putLong(file, St4Format.OFFSET_SIGNATURE, St4Format.signature(result.unit()));
         putLong(file, St4Format.OFFSET_SIZE, result.paddedSize());

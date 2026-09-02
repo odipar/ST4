@@ -34,7 +34,7 @@ from unicorn.m68k_const import (                                    # noqa: E402
 )
 
 QUICK = '--quick' in sys.argv
-LITERAL = 0x100000                  # a region of its own for stream D
+LITERAL = 0x100000                  # a region of its own for stream B
 BYTE_OFFSETS = 0x140000             # and one each for streams B and C
 WORD_OFFSETS = 0x180000
 PRESERVED = {UC_M68K_REG_D6: 0xD6D6D6D6, UC_M68K_REG_D7: 0xD7D7D7D7,
@@ -65,7 +65,7 @@ def pack_file(data: bytes, unit: int, window: int, repeat: int | None = None,
     if not CLASSES.exists():
         raise SystemExit('target/classes is missing; run `mvn compile` first')
     CACHE.mkdir(exist_ok=True)
-    key = CACHE / (f'{hashlib.sha1(data).hexdigest()[:16]}-v6-k{unit}-m{window}'
+    key = CACHE / (f'{hashlib.sha1(data).hexdigest()[:16]}-v7-k{unit}-m{window}'
                    + (f'-at{repeat}' if repeat is not None else '')
                    + ('-c' if copies else '') + '.st4')
     if not key.exists():
@@ -104,16 +104,17 @@ def streams(file: bytes, unit: int) -> tuple:
     # Twenty-eight bytes of header: signature, O, where B, C and D begin, the
     # rewind point and the window. A begins where the header ends, and no
     # length is stored - each stream runs to the next in file order A, B, C,
-    # D, so a slice can carry up to three bytes of padding; D, last, runs to
-    # the end of the file exactly.
-    assert long(0) == 0x53340000 | (6 << 8) | unit, 'not an ST4 v6 file for this unit'
+    # D - the bits, the literals, the byte offsets, the word offsets - so a
+    # slice can carry up to three bytes of padding; D, last, runs to the end
+    # of the file exactly.
+    assert long(0) == 0x53340000 | (7 << 8) | unit, 'not an ST4 v7 file for this unit'
     size = long(4)
-    bytes_at, words_at, literal_at = long(8), long(12), long(16)
-    assert 28 <= bytes_at <= words_at <= literal_at <= len(file), 'streams out of order'
+    literal_at, bytes_at, words_at = long(8), long(12), long(16)
+    assert 28 <= literal_at <= bytes_at <= words_at <= len(file), 'streams out of order'
     rewind = long(20)
     rewind = -1 if rewind == 0xFFFFFFFF else rewind
-    return (file[28:bytes_at], file[literal_at:],
-            file[bytes_at:words_at], file[words_at:literal_at], size, rewind, long(24))
+    return (file[28:literal_at], file[literal_at:bytes_at],
+            file[bytes_at:words_at], file[words_at:], size, rewind, long(24))
 
 
 def pack(data: bytes, unit: int, window: int, repeat: int | None = None) -> tuple:
@@ -136,7 +137,7 @@ def consumed(name: str, count: int, stream: bytes) -> str:
 def run(control: bytes, literal: bytes, byte_offsets: bytes, word_offsets: bytes,
         expected: bytes, unit: int, code: bytes, chunk: int | None) -> str:
     uc = t.make_emu(control)
-    uc.mem_map(LITERAL, 0x20000)        # stream D is as large as the literals
+    uc.mem_map(LITERAL, 0x20000)        # stream B is as large as the literals
     uc.mem_map(BYTE_OFFSETS, 0x20000)
     uc.mem_map(WORD_OFFSETS, 0x20000)
     uc.mem_write(t.CODE, code)
@@ -175,9 +176,9 @@ def run(control: bytes, literal: bytes, byte_offsets: bytes, word_offsets: bytes
         return 'output differs'
     for name, register, base, stream in (
             ('A', UC_M68K_REG_A0, t.SRC, control),
-            ('D', UC_M68K_REG_A2, LITERAL, literal),
-            ('B', UC_M68K_REG_A4, BYTE_OFFSETS, byte_offsets),
-            ('C', UC_M68K_REG_A5, WORD_OFFSETS, word_offsets)):
+            ('B', UC_M68K_REG_A2, LITERAL, literal),
+            ('C', UC_M68K_REG_A4, BYTE_OFFSETS, byte_offsets),
+            ('D', UC_M68K_REG_A5, WORD_OFFSETS, word_offsets)):
         problem = consumed(name, uc.reg_read(register) - base, stream)
         if problem:
             return problem

@@ -8,8 +8,8 @@ namespace Nt4;
 /// C#.
 /// </summary>
 /// <remarks>
-/// It is the ZX1 state machine with four changes. Literals come from stream D
-/// and offsets from stream B or C - by width - rather than from the stream the
+/// It is the ZX1 state machine with four changes. Literals come from stream B
+/// and offsets from stream C or D - by width - rather than from the stream the
 /// bits live in; every length and offset is counted in units, so each step
 /// moves k bytes; the end marker carries one more bit, which can turn the end
 /// into an endless match - the repeat; and an offset beyond the window is a
@@ -63,9 +63,9 @@ public sealed class Decompressor
 
     /// <summary>Decodes the streams into <paramref name="size"/> bytes.</summary>
     /// <param name="control">Stream A, the bits.</param>
-    /// <param name="literal">Stream D, the literal payload.</param>
-    /// <param name="byteOffsets">Stream B, one byte per offset.</param>
-    /// <param name="wordOffsets">Stream C, one word per offset.</param>
+    /// <param name="literal">Stream B, the literal payload.</param>
+    /// <param name="byteOffsets">Stream C, one byte per offset.</param>
+    /// <param name="wordOffsets">Stream D, one word per offset.</param>
     /// <param name="unit">Bytes per unit: 1, 2 or 4.</param>
     /// <param name="size">The output size in bytes, a multiple of the unit.</param>
     /// <returns>The decoded bytes, padding included.</returns>
@@ -93,9 +93,9 @@ public sealed class Decompressor
     /// copies from the literal stream.
     /// </summary>
     /// <param name="control">Stream A, the bits.</param>
-    /// <param name="literal">Stream D, the literal payload.</param>
-    /// <param name="byteOffsets">Stream B, one byte per offset.</param>
-    /// <param name="wordOffsets">Stream C, one word per offset.</param>
+    /// <param name="literal">Stream B, the literal payload.</param>
+    /// <param name="byteOffsets">Stream C, one byte per offset.</param>
+    /// <param name="wordOffsets">Stream D, one word per offset.</param>
     /// <param name="unit">Bytes per unit: 1, 2 or 4.</param>
     /// <param name="size">The output size in bytes, a multiple of the unit.</param>
     /// <param name="window">The window in units: matches within it, copies from D beyond.</param>
@@ -114,9 +114,9 @@ public sealed class Decompressor
     /// <summary>As <see cref="Decompress(byte[], byte[], byte[], byte[], int, int, int)"/>,
     /// also reporting whether the stream repeats.</summary>
     /// <param name="control">Stream A, the bits.</param>
-    /// <param name="literal">Stream D, the literal payload.</param>
-    /// <param name="byteOffsets">Stream B, one byte per offset.</param>
-    /// <param name="wordOffsets">Stream C, one word per offset.</param>
+    /// <param name="literal">Stream B, the literal payload.</param>
+    /// <param name="byteOffsets">Stream C, one byte per offset.</param>
+    /// <param name="wordOffsets">Stream D, one word per offset.</param>
     /// <param name="unit">Bytes per unit: 1, 2 or 4.</param>
     /// <param name="size">The output size in bytes, a multiple of the unit.</param>
     /// <param name="window">The window in units: matches within it, copies from D beyond.</param>
@@ -141,9 +141,9 @@ public sealed class Decompressor
     /// wrongly on the 68000, so the reference refuses it instead.
     /// </summary>
     /// <param name="control">Stream A, the bits.</param>
-    /// <param name="literal">Stream D, the literal payload.</param>
-    /// <param name="byteOffsets">Stream B, one byte per offset.</param>
-    /// <param name="wordOffsets">Stream C, one word per offset.</param>
+    /// <param name="literal">Stream B, the literal payload.</param>
+    /// <param name="byteOffsets">Stream C, one byte per offset.</param>
+    /// <param name="wordOffsets">Stream D, one word per offset.</param>
     /// <param name="unit">Bytes per unit: 1, 2 or 4.</param>
     /// <param name="size">The output size in bytes, a multiple of the unit.</param>
     /// <param name="window">The window in units: matches within it, copies from D beyond.</param>
@@ -313,7 +313,7 @@ public sealed class Decompressor
 
     /// <summary>
     /// The end code's extra bit: a plain end, or the repeat - one last word
-    /// offset from stream C, matched until the output the caller asked for is
+    /// offset from stream D, matched until the output the caller asked for is
     /// full. The 68000 decoders run the same match 65535 units at a time,
     /// re-armed forever.
     /// </summary>
@@ -321,7 +321,7 @@ public sealed class Decompressor
     {
         if (ReadBit())
         {
-            // Stream C holds the distance back to the loop point; the loop
+            // Stream D holds the distance back to the loop point; the loop
             // point itself is where the pass so far ends, minus that.
             int distance = ReadWordOffset();
             if (distance <= 0)

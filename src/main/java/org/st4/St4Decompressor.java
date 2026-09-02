@@ -4,7 +4,7 @@ package org.st4;
  * The reference ST4 decoder: what the 68000 versions have to agree with.
  *
  * <p>It is the ZX1 state machine with four changes. Literals come from stream
- * D and offsets from stream B or C - by width - rather than from the stream the
+ * B and offsets from stream C or D - by width - rather than from the stream the
  * bits live in; every length and offset is counted in units, so each step
  * moves k bytes; the end marker carries one more bit, which can turn the end
  * into an endless match - the repeat; and an offset beyond the window is a
@@ -208,13 +208,13 @@ public final class St4Decompressor {
 
     /**
      * The end code's extra bit: a plain end, or the repeat - one last word
-     * offset from stream C, matched until the output the caller asked for is
+     * offset from stream D, matched until the output the caller asked for is
      * full. The 68000 decoders run the same match 65535 units at a time,
      * re-armed forever.
      */
     private void endOrRepeat() {
         if (readBit()) {
-            // Stream C holds the distance back to the loop point; the loop
+            // Stream D holds the distance back to the loop point; the loop
             // point itself is where the pass so far ends, minus that.
             int distance = readWordOffset();
             assert distance > 0 : "a repeat must reach back at least one unit";

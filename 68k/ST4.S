@@ -12,8 +12,8 @@
 ;
 ;   1. the literal payload lives in a stream of its own, so its alignment is a
 ;      property of the file rather than of wherever the control bytes left it;
-;   2. the offsets live in streams of their own, split by width: bytes in B,
-;      words in C. That leaves stream A holding nothing but bits, so its queue
+;   2. the offsets live in streams of their own, split by width: bytes in C,
+;      words in D. That leaves stream A holding nothing but bits, so its queue
 ;      refills a WORD at a time - impossible while an offset byte can move the
 ;      same pointer by one - and it leaves a word offset stored exactly as the
 ;      decoder wants it, so installing one is a single move;
@@ -23,7 +23,7 @@
 ;      installs a last offset that the decoder matches forever - or the
 ;      header names a rewind point, and the caller replays the streams from
 ;      the state it saved there. See THE STATE below;
-;   5. an offset beyond the window M is a copy from stream D: every literal
+;   5. an offset beyond the window M is a copy from stream B: every literal
 ;      is still there, in order, and a copy reads them from behind the read
 ;      pointer without moving it. See ST4_WINDOW below.
 ;
@@ -41,7 +41,7 @@
 ; ST4_WINDOW, the window M in units, is the second build-time constant, and
 ; optional. A stream packed with st4 -c writes a copy from the literal stream
 ; as an offset beyond M: it copies offset-M literal units from behind the
-; stream D read pointer, without moving it. A decoder built with ST4_WINDOW = M
+; stream B read pointer, without moving it. A decoder built with ST4_WINDOW = M
 ; tells such a copy from a match by magnitude - one compare per match segment.
 ; A build without ST4_WINDOW, or with 0, has no copy code and is byte for byte
 ; the decoder there was before:
@@ -54,12 +54,12 @@
 ; records at offset 24 - one cmp.l proves it; a stream without copies decodes
 ; on any build whose window is at least its own.
 ;
-; 68000 ALIGNMENT. Streams A and C are read a word at a time, so both must
+; 68000 ALIGNMENT. Streams A and D are read a word at a time, so both must
 ; start on an even address; the packer pads A to an even length so the last
-; refill finds a whole word, and C holds whole words by construction. At
-; ST4_UNIT 2 or 4 the destination, stream D and every offset are
+; refill finds a whole word, and D holds whole words by construction. At
+; ST4_UNIT 2 or 4 the destination, stream B and every offset are
 ; whole units, so a wide move can never land on an odd address - provided the
-; caller starts the destination and stream D on a unit boundary. A real 68000
+; caller starts the destination and stream B on a unit boundary. A real 68000
 ; raises an address error if they do not.
 ;
 ; -----------------------------------------------------------------------------
@@ -68,15 +68,13 @@
 ;
 ;    0  4  signature: 'S', '4', format version, ST4_UNIT
 ;    4  4  O, the output size in bytes
-;    8  4  stream B, the byte offsets, as a byte offset from the header
-;   12  4  stream C, the word offsets
-;   16  4  stream D, the literals
+;    8  4  stream B, the literals, as a byte offset from the header
+;   12  4  stream C, the byte offsets
+;   16  4  stream D, the word offsets
 ;   20  4  the rewind point in bytes, or $FFFFFFFF when there is none
-;   24  4  M, the window in units: an offset past it copies from stream D
+;   24  4  M, the window in units: an offset past it copies from stream B
 ;   28 ..  streams A, B, C and D, in that order
 ;
-; Stream D, the literals, comes last, so it runs to the end of the file and
-; borders whatever the caller loads after the container - a ring, say.
 ; Nothing else is stored, because nothing else has to be. Stream A begins where
 ; the header ends. No length is kept: a stream runs to the next one, and this
 ; decoder reads no length anyway - it stops on the end marker. The signature
@@ -89,11 +87,11 @@
 ;       bne.s   wrong_asset
 ;       lea     28(a3),a0               ; stream A, where the header ends
 ;       movea.l a3,a2
-;       adda.l  16(a3),a2               ; stream D, the literals
+;       adda.l  8(a3),a2                ; stream B, the literals
 ;       movea.l a3,a4
-;       adda.l  8(a3),a4                ; stream B, the byte offsets
+;       adda.l  12(a3),a4               ; stream C, the byte offsets
 ;       movea.l a3,a5
-;       adda.l  12(a3),a5               ; stream C, the word offsets
+;       adda.l  16(a3),a5               ; stream D, the word offsets
 ;
 ; -----------------------------------------------------------------------------
 ; THE STATE IS YOUR REGISTERS. ST4_init seeds it; preserve all seven between
@@ -101,9 +99,9 @@
 ;
 ;   a0.l  position in stream A, the bit stream
 ;   a1.l  write pointer - where the output ends, after every call
-;   a2.l  position in stream D, the literal stream
-;   a4.l  position in stream B, the byte offsets
-;   a5.l  position in stream C, the word offsets
+;   a2.l  position in stream B, the literal stream
+;   a4.l  position in stream C, the byte offsets
+;   a5.l  position in stream D, the word offsets
 ;   d0.w  bit queue ($8000 is the empty sentinel; zero once a repeat is armed)
 ;   d1.w  units remaining in the current operation
 ;   d2.w  signed byte offset: +lastOffset*UNIT during LITERALS,
@@ -143,8 +141,8 @@
 ;   2. no back-reference offset exceeds 32512 BYTES, which is 32512/ST4_UNIT
 ;      units - the st4 packer clamps -m to that. A word offset is stored as
 ;      -offset*UNIT, so the window is what fits the word it is kept in
-;   3. at ST4_UNIT 2 or 4 the destination and stream D start on a unit boundary
-;   4. streams A and C start on even addresses; A holds an even number of bytes
+;   3. at ST4_UNIT 2 or 4 the destination and stream B start on a unit boundary
+;   4. streams A and D start on even addresses; A holds an even number of bytes
 ;   5. the budget in d3.w is 1..65535 units; zero makes no progress
 ;   6. a stream with copies was packed with -m equal to ST4_WINDOW, and every
 ;      copy is shorter than its distance, so the offset never reaches zero -
@@ -154,10 +152,10 @@
 ; validated. A wrong value can read or write arbitrary memory.
 ; -----------------------------------------------------------------------------
 
-; The asset's signature for this build: 'S4', format version 6, and the unit
+; The asset's signature for this build: 'S4', format version 7, and the unit
 ; size this decoder was assembled for. One cmp.l against a file's first long
 ; proves all three at once.
-ST4_SIGNATURE   equ     $53340600+ST4_UNIT
+ST4_SIGNATURE   equ     $53340700+ST4_UNIT
 
 ; ST4_WINDOW, the window in units, is optional: a build without it has no
 ; copies from the literal stream and is the decoder there was before.
@@ -186,15 +184,15 @@ ST4_WINDOW      equ     0
                 bra.w   ST4_decompress
                 bra.w   ST4_resume
 
-; ST4_init: a0 = stream A, a1 = destination, a2 = stream D, a4 = stream B,
-; a5 = stream C; seeds d0/d1/d2.
+; ST4_init: a0 = stream A, a1 = destination, a2 = stream B, a4 = stream C,
+; a5 = stream D; seeds d0/d1/d2.
 ST4_init:
         moveq   #-ST4_UNIT,d2           ; -lastOffset*UNIT, INITIAL_OFFSET = 1
         moveq   #0,d1                   ; remaining = 0
         move.w  #$8000,d0               ; an empty bit queue: $8000 is the sentinel
         rts
 
-; ST4_decompress: a0/a1/a2/a4/a5 = streams A, destination, D, B and C.
+; ST4_decompress: a0/a1/a2/a4/a5 = streams A, destination, B, C and D.
 ; One-shot convenience; returns with a1 = end of output. Not for a repeating
 ; stream: those have no DONE state, so this loop would never leave.
 ST4_decompress:
@@ -218,12 +216,12 @@ suspend:                                ; DONE or a suspended operation
 
         .if ST4_WINDOW
 copy_source:                            ; the offset is beyond the window, so
-; the source is stream D, offset-M units behind the read pointer, which stays
+; the source is stream B, offset-M units behind the read pointer, which stays
 ; where it is. The offset moves on by what this segment copies: a copy the
 ; budget cuts continues where it stopped, and a rep after it starts just past
 ; it. It stays beyond the window, since a copy is shorter than its distance.
         .if ST4_WINDOW*ST4_UNIT<128
-        lea     ST4_WINDOW*ST4_UNIT(a2,d2.w),a3 ; D + M*UNIT + -offset*UNIT
+        lea     ST4_WINDOW*ST4_UNIT(a2,d2.w),a3 ; B + M*UNIT + -offset*UNIT
         .else
         lea     ST4_WINDOW*ST4_UNIT(a2),a3 ; the same in two, past a byte
         adda.w  d2,a3                   ; displacement
@@ -355,7 +353,7 @@ resume_return:
         rts                             ; a1 remains the output end
 
 literal_source:
-        movea.l a2,a3                   ; literals copy from stream D
+        movea.l a2,a3                   ; literals copy from stream B
         sub.w   d4,d1
         sub.w   d4,d3
 copy_slow:                              ; any n; the subs are already done
@@ -375,7 +373,7 @@ ladder_end:
         bcc.s   ladder                  ; costs 12 where dbf paid 14, and still
         tst.w   d2                      ; leaves d4.w = $ffff for byte_offset
         bmi.s   match_copied            ; an n>=17 match rejoins its epilogue
-        movea.l a3,a2                   ; literals do: stream D advanced
+        movea.l a3,a2                   ; literals do: stream B advanced
         tst.w   d1
         bne.s   resume_return           ; budget spent mid-op
 

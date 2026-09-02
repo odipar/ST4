@@ -19,13 +19,12 @@ package org.st4;
  *       interlaced Elias gamma lengths. Because no byte-sized read ever comes
  *       out of it, the reservoir refills a word at a time, halving the
  *       refills.</li>
- *   <li><b>stream B</b> - the byte offsets, one byte each.</li>
- *   <li><b>stream C</b> - the word offsets, one word each, so it is
+ *   <li><b>stream B</b> - the literal payload, nothing else. Its alignment is
+ *       therefore a property of the format rather than luck.</li>
+ *   <li><b>stream C</b> - the byte offsets, one byte each.</li>
+ *   <li><b>stream D</b> - the word offsets, one word each, so it is
  *       word-aligned by construction and a match source is one
  *       {@code move.w} away.</li>
- *   <li><b>stream D</b> - the literal payload, nothing else. Its alignment is
- *       therefore a property of the format rather than luck, and it comes
- *       last, so it runs to the end of the file.</li>
  * </ul>
  *
  * <p>Which of the two an offset came from used to be encoded in the low bit of
@@ -41,9 +40,9 @@ package org.st4;
  * which is what keeps the split from costing ratio.
  *
  * <pre>
- *   1 0   byte offset from stream B, 1..256 units
- *   1 1   byte offset from stream B, 257..512 units
- *   0 0   word offset from stream C
+ *   1 0   byte offset from stream C, 1..256 units
+ *   1 1   byte offset from stream C, 257..512 units
+ *   0 0   word offset from stream D
  *   0 1   end of stream: one more bit says whether it truly ends
  * </pre>
  *
@@ -51,7 +50,7 @@ package org.st4;
  * for, which the header records. An offset of at most M is a match: it
  * copies output from that many units back, out of the ring. An offset beyond
  * M is a <em>copy from the literal stream</em>: it copies literal units from
- * {@code offset - M} units behind the literal read pointer, in stream D, and
+ * {@code offset - M} units behind the literal read pointer, in stream B, and
  * leaves the pointer where it was. That is how a small ring reaches what it
  * has long forgotten - every literal the stream ever had is in D, in order,
  * for as long as the container is in memory. A copy advances its offset by
@@ -65,7 +64,7 @@ package org.st4;
  * always did. A 1 means the stream <em>repeats</em> from a loop point R: the
  * container encodes the infinite input {@code units[0..R) units[R..O)}
  * repeated forever, so after the last unit the output continues from unit R
- * and never stops. What stream C stores as its one last word is the distance
+ * and never stops. What stream D stores as its one last word is the distance
  * O-R back to the loop point - an offset like any other - and the decoder
  * becomes an endless match at it. A decoder driven by budgets simply never
  * runs dry; the reference decoder fills whatever output it was asked for. The
@@ -91,11 +90,11 @@ package org.st4;
  * <pre>
  *   0   4  signature: 'S', '4', format version, k
  *   4   4  O, the output size in bytes; always a multiple of k
- *   8   4  stream B, the byte offsets, as a byte offset from the header
- *  12   4  stream C, the word offsets
- *  16   4  stream D, the literals
+ *   8   4  stream B, the literals, as a byte offset from the header
+ *  12   4  stream C, the byte offsets
+ *  16   4  stream D, the word offsets
  *  20   4  the rewind point in bytes, or $FFFFFFFF when there is none
- *  24   4  M, the window in units: matches within it, copies from D beyond
+ *  24   4  M, the window in units: matches within it, copies from B beyond
  *  28  ..  streams A, B, C and D, in that order
  * </pre>
  *
@@ -116,12 +115,12 @@ package org.st4;
  * of the four decoders reads a length anyway - it stops on the end marker and
  * the other streams run out with it.
  *
- * <p>Stream D, the literal payload, comes last - version 4 had it second - so
- * it runs to the end of the file. A ring buffer placed directly after the
- * container therefore sits flush against the literal data, and since the
- * stream holds whole units it also ends on a unit boundary: the not yet
- * consumed literals occupy a known stretch of memory just below the ring,
- * which a packer that knows the caller's layout can let matches reach into.
+ * <p>Stream B, the literal payload, comes second, right after the bits, as
+ * version 4 had it. Versions 5 and 6 put it last, so that a ring placed
+ * directly after the container would border the literal data; but a copy
+ * from the literal stream is measured from the literal read pointer, not
+ * from the ring, so nothing in the decoders depends on where the ring is,
+ * and version 7 put the stream back.
  *
  * <p>The shape is chosen for the 68000 that has to load it. The signature packs
  * the magic, the version AND the unit size into one long, so a decoder built
@@ -137,11 +136,11 @@ package org.st4;
  *         bne.s   wrong_asset
  *         lea     28(a3),a0               ; stream A, where the header ends
  *         movea.l a3,a2
- *         adda.l  16(a3),a2               ; stream D, the literals
+ *         adda.l  8(a3),a2                ; stream B, the literals
  *         movea.l a3,a4
- *         adda.l  8(a3),a4                ; stream B, the byte offsets
+ *         adda.l  12(a3),a4               ; stream C, the byte offsets
  *         movea.l a3,a5
- *         adda.l  12(a3),a5               ; stream C, the word offsets
+ *         adda.l  16(a3),a5               ; stream D, the word offsets
  * </pre>
  *
  * <p>A derived length can be up to three bytes longer than what the packer
@@ -154,19 +153,21 @@ public final class St4Format {
     public static final int MAGIC = 0x53340000;
 
     /**
-     * Version 6 let an offset beyond the window copy from the literal stream,
-     * and recorded the window in the header. Version 5 laid the streams out
-     * in file order with the literal payload last - A, B, C, D as they lie -
-     * and gave the end marker its repeat bit and the header its rewind point.
-     * Version 4 cut the header to what cannot be derived.
+     * Version 7 put the literal payload back second, as version 4 had it,
+     * since nothing in the decoders depends on where the ring is - A, B, C,
+     * D as they lie, B the literals. Version 6 let an offset beyond the
+     * window copy from the literal stream, and recorded the window in the
+     * header. Version 5 laid the streams out in file order with the literal
+     * payload last, and gave the end marker its repeat bit and the header its
+     * rewind point. Version 4 cut the header to what cannot be derived.
      */
-    public static final int VERSION = 6;
+    public static final int VERSION = 7;
 
     public static final int OFFSET_SIGNATURE = 0;
     public static final int OFFSET_SIZE = 4;
-    public static final int OFFSET_BYTE_OFFSETS = 8;
-    public static final int OFFSET_WORD_OFFSETS = 12;
-    public static final int OFFSET_LITERAL = 16;
+    public static final int OFFSET_LITERAL = 8;
+    public static final int OFFSET_BYTE_OFFSETS = 12;
+    public static final int OFFSET_WORD_OFFSETS = 16;
     public static final int OFFSET_REWIND = 20;
     public static final int OFFSET_WINDOW = 24;
     public static final int HEADER_SIZE = 28;
@@ -263,10 +264,10 @@ public final class St4Format {
                     "window " + window + " is not 1.." + maxOffsetUnits(unit) + " units");
         }
 
-        // The streams lie in the file as A, B, C, D: the literal payload
-        // last, so it runs to the end of the file.
-        int[] edge = {HEADER_SIZE, longAt(file, OFFSET_BYTE_OFFSETS),
-                      longAt(file, OFFSET_WORD_OFFSETS), longAt(file, OFFSET_LITERAL),
+        // The streams lie in the file as A, B, C, D: the bits, the literal
+        // payload, the byte offsets and the word offsets.
+        int[] edge = {HEADER_SIZE, longAt(file, OFFSET_LITERAL),
+                      longAt(file, OFFSET_BYTE_OFFSETS), longAt(file, OFFSET_WORD_OFFSETS),
                       file.length};
         for (int i = 1; i < edge.length - 1; i++) {
             if (edge[i] % 4 != 0) {
@@ -280,9 +281,9 @@ public final class St4Format {
         }
         return new Container(unit, size,
                 java.util.Arrays.copyOfRange(file, edge[0], edge[1]),
-                java.util.Arrays.copyOfRange(file, edge[3], edge[4]),
                 java.util.Arrays.copyOfRange(file, edge[1], edge[2]),
-                java.util.Arrays.copyOfRange(file, edge[2], edge[3]), rewind, window);
+                java.util.Arrays.copyOfRange(file, edge[2], edge[3]),
+                java.util.Arrays.copyOfRange(file, edge[3], edge[4]), rewind, window);
     }
 
     private static int longAt(byte[] file, int at) {

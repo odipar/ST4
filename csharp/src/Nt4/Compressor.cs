@@ -6,7 +6,7 @@ namespace Nt4;
 /// <summary>Writes an ST4 parse out as four streams.</summary>
 /// <remarks>
 /// <para>Stream A carries nothing but bits - the block-type flags and the
-/// gamma lengths. Stream D carries nothing but literal units. Streams B and C
+/// gamma lengths. Stream B carries nothing but literal units. Streams B and C
 /// carry the offsets, split by width: bytes in B, words in C. A word offset is
 /// written as <c>-offset * unit</c>, which is exactly what the 68000 decoders
 /// keep in a register; a byte offset is written as
@@ -39,9 +39,9 @@ public sealed class Compressor
 {
     /// <summary>The four streams, and what the caller needs to know about them.</summary>
     /// <param name="Control">Stream A, the bits, padded to an even length.</param>
-    /// <param name="Literal">Stream D, the literal payload, whole units.</param>
-    /// <param name="ByteOffsets">Stream B, one byte per offset.</param>
-    /// <param name="WordOffsets">Stream C, one word per offset.</param>
+    /// <param name="Literal">Stream B, the literal payload, whole units.</param>
+    /// <param name="ByteOffsets">Stream C, one byte per offset.</param>
+    /// <param name="WordOffsets">Stream D, one word per offset.</param>
     /// <param name="Unit">Bytes per unit: 1, 2 or 4.</param>
     /// <param name="PaddedSize">The output size in bytes, a multiple of the unit.</param>
     /// <param name="LongestOp">Longest literal run or match emitted, in units.</param>
@@ -50,7 +50,7 @@ public sealed class Compressor
     /// <param name="Window">The window the parse kept to, in units: what the header records.</param>
     /// <param name="Copies">How many blocks copied from the literal stream.</param>
     /// <param name="ControlBits">Bits written to stream A before padding.</param>
-    /// <param name="RepeatWord">Whether stream C ends with the repeat's word.</param>
+    /// <param name="RepeatWord">Whether stream D ends with the repeat's word.</param>
     public sealed record Result(byte[] Control, byte[] Literal, byte[] ByteOffsets,
         byte[] WordOffsets, int Unit, int PaddedSize, int LongestOp, int Operations,
         int RewindIndex, int Window, int Copies, int ControlBits, bool RepeatWord)
@@ -120,7 +120,7 @@ public sealed class Compressor
     /// container encodes the infinite input <c>units[0..R) units[R..O)</c>
     /// repeated forever, so after its last unit the output continues from
     /// unit <paramref name="repeatIndex"/> and never stops. -1 means a plain
-    /// end. What stream C stores is the distance O-R back to the loop point,
+    /// end. What stream D stores is the distance O-R back to the loop point,
     /// an offset like any other, so the caller holds it to the window the
     /// stream was packed for.
     /// </summary>
@@ -274,7 +274,7 @@ public sealed class Compressor
         }
 
         // End marker, then the repeat bit: end for good, or install one last
-        // word offset from stream C - the distance back to the loop point -
+        // word offset from stream D - the distance back to the loop point -
         // and match it forever.
         WriteBit(true);
         WriteBit(false);
@@ -380,7 +380,7 @@ public sealed class Compressor
 
     /// <summary>
     /// Writes the literal run gathered so far, if there is one: its flag -
-    /// unless it opens the stream - its length, and its units into stream D.
+    /// unless it opens the stream - its length, and its units into stream B.
     /// </summary>
     private void FlushLiterals()
     {

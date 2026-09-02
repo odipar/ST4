@@ -196,8 +196,8 @@ public static class Nt4
         Console.WriteLine(string.Create(CultureInfo.InvariantCulture,
             $"Packed {input.Length} bytes{(padded == input.Length ? "" : $" padded to {padded}")} "
             + $"into {result.PackedSize} ({100.0 * result.PackedSize / input.Length:F1}%): "
-            + $"A {result.Control.Length}, B {result.ByteOffsets.Length}, "
-            + $"C {result.WordOffsets.Length}, D {result.Literal.Length}, "
+            + $"A {result.Control.Length}, B {result.Literal.Length}, "
+            + $"C {result.ByteOffsets.Length}, D {result.WordOffsets.Length}, "
             + $"{result.Operations} operations"
             + $"{(result.Copies == 0 ? "" : $", {result.Copies} copies from the literal stream")}"
             + $"{(repeatIndex < 0 ? "" : $", loops from unit {repeatIndex}")}"
@@ -237,10 +237,10 @@ public static class Nt4
     }
 
     /// <summary>
-    /// Twenty-eight bytes of header, then A, B, C and D in order, each
-    /// starting on a long boundary. Nothing says how long a stream is: it runs
-    /// to the next - and D, the literal payload, runs to the end of the file,
-    /// so it borders whatever the caller loads after the container.
+    /// Twenty-eight bytes of header, then A, B, C and D in order - the bits,
+    /// the literals, the byte offsets, the word offsets - each starting on a
+    /// long boundary. Nothing says how long a stream is: it runs to the next,
+    /// and the last runs to the end of the file.
     /// </summary>
     /// <remarks>
     /// Public because a container is also how other formats embed an ST4
@@ -253,10 +253,10 @@ public static class Nt4
     {
         ArgumentNullException.ThrowIfNull(result);
         int controlAt = Format.HeaderSize;                  // already a multiple of 4
-        int byteAt = Align(controlAt + result.Control.Length);
+        int literalAt = Align(controlAt + result.Control.Length);
+        int byteAt = Align(literalAt + result.Literal.Length);
         int wordAt = Align(byteAt + result.ByteOffsets.Length);
-        int literalAt = Align(wordAt + result.WordOffsets.Length);
-        byte[] file = new byte[literalAt + result.Literal.Length];
+        byte[] file = new byte[wordAt + result.WordOffsets.Length];
 
         PutLong(file, Format.OffsetSignature, Format.Signature(result.Unit));
         PutLong(file, Format.OffsetSize, result.PaddedSize);
