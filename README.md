@@ -59,10 +59,23 @@ The data is a sequence of three block types:
 One flag bit says which block comes next. After literals, `0` starts a match
 at the last offset and `1` a match at a new offset, so two literal runs in a
 row cannot occur. After a match, `0` starts literals and `1` a match at a
-new offset. The first block is literals and has no flag bit.
+new offset. The first block is literals and has no flag bit. Stream A, read
+left to right:
 
-The two class bits of a new offset select its stream and reach, or end the
-data:
+```
+open:            gamma(n)                   n literal units from stream B
+
+after literals:  0 gamma(n)                 n units from the last offset
+                 1 cc <offset> gamma(n-1)   a new offset, then n units
+
+after a match:   0 gamma(n)                 n literal units from stream B
+                 1 cc <offset> gamma(n-1)   a new offset, then n units
+```
+
+The offset itself is not in stream A: the two class bits `cc` say where it
+comes from.
+
+The class bits select the offset's stream and reach, or end the data:
 
 | class | meaning |
 |---|---|
@@ -92,6 +105,28 @@ cut short continues where it stopped and a match at the last offset after
 a copy resumes just past it, shifted by the literals in between. And a copy
 is strictly shorter than its distance, so the offset never reaches zero. A
 stream packed without copies never exceeds M.
+
+At k = 1 and M = 4, an input that repeats its first three units eight units
+back cannot match them, since 8 is beyond M, but can copy them:
+
+```
+input       a b c d e f g h a b c
+position    0 1 2 3 4 5 6 7 8 9 10
+
+parse       8 literals, then a copy of 3 units, 8 units back
+
+stream B    a b c d e f g h |            the read pointer is past 8 literals
+            ^               ^
+            source: 8 literals behind    the pointer stays here
+
+wire        offset = M + 8 = 12          beyond M, so a copy
+            length 3 < 8                 the copy stays behind the pointer
+```
+
+After the copy the offset is 12 - 3 = 9, still beyond M. Were one literal
+`q` to follow and then a match at the last offset, the read pointer would
+be past 9 literals and the source 9 - M = 5 literals behind it, at `e`: one
+past where the copy stopped, shifted by the literal between.
 
 Together with its flag, a block is an even number of bits: a gamma is an
 odd count, and the flag or class bits make it even. That is why a new
@@ -172,12 +207,44 @@ small-budget streaming loop and 3 to 5% fewer in bulk, with no case slower.
 
 ### The state
 
-The state is held in registers: `a0`, `a2`, `a4` and `a5` walk the four
-streams, `a1` writes, `d0.w` holds the bit queue, `d1.w` the units left in
-the operation and `d2.w` the offset, signed, so its sign is also the state.
-The two ring decoders hold those two as longs and keep the ring's bounds in
-the upper halves, which is how a match that reaches back past the ring start
-finds its source at the other end. Only `a6`, `d6` and `d7` survive a call.
+The state is held in registers:
+
+```
+container                registers
++-----------------+
+| header, 28 bytes|
++-----------------+
+| A  bits         |  a0   flags, class bits and lengths; d0.w is the bit queue
++-----------------+
+| B  literals     |  a2   the next literal, and the source of a copy
++-----------------+
+| C  byte offsets |  a4
++-----------------+
+| D  word offsets |  a5   each word is -offset*k, installed with one move
++-----------------+
+output               a1   the write pointer
+                     d1.w the units left in the operation
+                     d2.w the offset: +offset*k during literals,
+                          -offset*k during a match, zero when done
+```
+
+The sign of `d2` is the state. The two ring decoders hold `d1` and `d2` as
+longs and keep the ring's bounds in the upper halves, which is how a match
+that reaches back past the ring start finds its source at the other end.
+Only `a6`, `d6` and `d7` survive a call.
+
+The bit queue is read with `add.w d0,d0`, which moves the top bit into the
+carry. A sentinel `1` below the bits marks the end of the queue:
+
+```
+after a refill   b14 b13 .. b0 1      fifteen bits, the sentinel below
+add.w d0,d0      carry <- b14         the rest move up one
+d0 = 0           the sentinel left    move.w (a0)+,d0 then addx.w d0,d0
+```
+
+A block and its flag are an even number of bits and a refill is sixteen, so
+the queue can run out only on a gamma continuation bit, the class bit right
+after a flag, and the repeat bit; every other read skips the test.
 The destination, stream B and the ring start on a unit boundary, and the
 ring size is a whole number of units, so a wide move never lands on an odd
 address. Each file states its contract and its numbered assumptions.
@@ -205,7 +272,14 @@ A stream with copies from the literal stream needs a decoder built for its
 window: `ST4_WINDOW equ M`, the header's field at byte 24, which one `cmp.l`
 checks. Such a build tells a copy from a match by magnitude, a `cmp.w` and
 a short branch per match segment, and takes a copy's source from the stream
-B read pointer with one `lea` in place of the ring arithmetic a match needs.
+B read pointer with one `lea` in place of the ring arithmetic a match needs:
+
+```
+d2 >= -M*k    a match     a3 = a1 + d2            the output, M units back at most
+d2 <  -M*k    a copy      a3 = a2 + M*k + d2      stream B, offset-M units behind a2
+                          d2 += n*k               the offset advances by the segment
+```
+
 No state and no install-time work: the window is a constant. A window build
 is 14 to 22 bytes larger, and a build without `ST4_WINDOW` is byte for byte
 the decoder above. Measured on the test corpora, streams without copies pay
