@@ -318,8 +318,9 @@ selects the unit size, `-mN` limits how far back matches reach, `-lN` splits
 long matches - the default already fits the 68000 decoders - and `-rR` loops
 the stream from unit R, `-r0` from its start. When the loop is longer than
 `-m`, `st4` says at which unit to save the decoder's state and at which to
-restore it. `-c` lets a match beyond `-m` copy from the literal stream, and
-`-cS` searches for S seconds for a better parse, printing each improvement.
+restore it. `-c` lets a match beyond `-m` copy from the literal stream,
+reporting each opening pass as it runs, and `-cS` then searches for S
+seconds for a better parse, printing each improvement.
 
 ### Unpacking
 
