@@ -9,7 +9,7 @@ namespace Nt4.Tests;
 /// <summary>
 /// The Java <c>St4RoundTripTest</c>, corpus for corpus: pack with the
 /// reference optimizer, unpack with the reference decoder, and check the
-/// container against the format's promises.
+/// container against the format.
 /// </summary>
 public sealed class RoundTripTests
 {
@@ -402,7 +402,7 @@ public sealed class RoundTripTests
 
     /// <summary>
     /// ZX1's packed size for each of <see cref="Inputs"/>, recorded from jx1
-    /// in odipar/ST1 at commit 132aef0, exactly as the Java suite holds them.
+    /// in odipar/ST1 at commit 132aef0, as the Java suite holds them.
     /// </summary>
     private static readonly int[] Zx1Sizes = [4, 6, 1006, 6, 19, 383, 26];
 

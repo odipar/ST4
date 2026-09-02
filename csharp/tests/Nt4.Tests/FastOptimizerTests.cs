@@ -7,11 +7,10 @@ using Xunit;
 namespace Nt4.Tests;
 
 /// <summary>
-/// <see cref="FastOptimizer"/> against <see cref="Optimizer"/>: the whole point
-/// of the fast one is that it finds the SAME parse, so all four streams must
-/// match byte for byte on every input shape, unit size and window - including
-/// the shapes that once broke the Java original: lone matches before an
-/// offset's first state, degenerate runs, and inputs of a byte or two.
+/// <see cref="FastOptimizer"/> against <see cref="Optimizer"/>: the fast one
+/// finds the same parse, so all four streams match byte for byte on every
+/// input shape, unit size and window, lone matches before an offset's first
+/// state, degenerate runs and inputs of a byte or two included.
 /// </summary>
 public sealed class FastOptimizerTests
 {

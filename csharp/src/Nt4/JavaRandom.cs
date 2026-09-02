@@ -4,9 +4,9 @@
 namespace Nt4;
 
 /// <summary>
-/// java.util.Random, the 48-bit LCG, so that the search steps as the Java
-/// one does from the same seed and the test fixtures in the Java suite are
-/// byte-identical here. System.Random produces a different sequence.
+/// java.util.Random, the 48-bit LCG, so the search steps as the Java one does
+/// from the same seed and the test fixtures are byte-identical to the Java
+/// suite's. System.Random produces a different sequence.
 /// </summary>
 internal sealed class JavaRandom
 {

@@ -1,70 +1,59 @@
 ; -----------------------------------------------------------------------------
-; ST4_wrap.S - ST4: counted-wrap ring decompressor for the Atari ST (68000)
+; ST4_wrap.S - the ST4 ring decoder for a caller that counts its calls
 ;
 ; By Robbert van Dalen, based on ZX1 v1.5 by Einar Saukas and on ST1_wrap.S,
-; which this follows instruction for instruction wherever the format allows.
+; which this follows instruction for instruction where the format allows.
 ; Written by Claude (Anthropic's Claude Code) under Robbert's direction. Use it
 ; freely, including commercially, as long as your documentation says you used
 ; ZX1 through ST4 (see LICENSE).
 ;
-; ST4_wrap is ST1_wrap with ST4's four streams and units: the literal payload
-; comes from stream B in a2 and the offsets from stream C in a4 (bytes) or D in
-; a5 (words), lengths and budgets count units of ST4_UNIT bytes, and the copy
-; moves a unit at a time. With the offsets gone, stream A holds nothing but
-; bits, so the queue refills a word at a time. Set the unit size before
-; including:
+; ST4_wrap decodes through a ring of N bytes in calls of C units: the caller
+; resets a1 to the ring start after every F = N/(C*UNIT) calls. Literals come
+; from stream B in a2 and offsets from stream C in a4 (bytes) or D in a5
+; (words); stream A holds the bits, so the queue refills a word at a time.
+; Set the unit size before including:
 ;
 ;       ST4_UNIT    equ     4
 ;               include "ST4_wrap.S"
 ;
-; ST4_WINDOW, the ring size in units, is the second build-time constant, and
-; optional. A stream packed with st4 -c writes a copy from the literal stream
-; as an offset beyond the window: it copies offset-M literal units from behind
-; the stream B read pointer, without moving it. A decoder built with
-; ST4_WINDOW = M tells such a copy from a match by magnitude - one compare per
-; match segment - and reads its source straight out of stream B, skipping the
+; ST4_WINDOW, the ring size in units, is optional. A stream packed with st4 -c
+; writes a copy from the literal stream as an offset beyond the window: it
+; copies offset-M literal units from behind the stream B read pointer, without
+; moving it. A build with ST4_WINDOW = M tells a copy from a match with one
+; compare per match segment, and reads its source out of stream B without the
 ; ring's wrap arithmetic. A build without ST4_WINDOW, or with 0, has no copy
-; code and is byte for byte the decoder there was before:
+; code.
 ;
 ;       ST4_UNIT    equ     4
 ;       ST4_WINDOW  equ     16          ; the ring is 64 bytes
 ;               include "ST4_wrap.S"
 ;
 ; A stream with copies needs the build made for its window, which the header
-; records at offset 24 - one cmp.l proves it; a stream without copies decodes
-; on any build whose window is at least its own.
+; records at byte 24; a stream without copies decodes on any build whose
+; window is at least its own.
 ;
-; !!! LIKE ST1_wrap, THIS HAS NO DONE STATE !!!
-; The caller must know the exact output size O in units, make exactly
-; T = ceil(O/C) decode calls, and never call again. A stream packed with
-; st4 -r is the exception: its end marker installs one last offset and the
-; decoder matches it forever, so there is no T - call for as long as output
-; is wanted, and every call emits its full budget.
+; THERE IS NO DONE STATE. For an output of O units the caller makes
+; T = ceil(O/C) calls and never calls again. A stream packed with st4 -r is
+; the exception: its end marker installs one last offset and the decoder
+; matches it forever, so call for as long as output is wanted; every call
+; emits its full budget.
 ;
-; The ring is N BYTES and must be a whole number of units; the caller resets a1
-; to the ring start after every F = N/(C*UNIT) calls. Budgets and remaining
-; counts are units; offsets, positions and N are bytes - which is what keeps
-; the wrap arithmetic identical to ST1_wrap's.
+; Budgets and remaining counts are units; offsets, positions and N are bytes,
+; which keeps the wrap arithmetic ST1_wrap's.
 ;
-; The copy engine runs two ladders. Match segments of at most sixteen units -
-; measured to be four of every five segments a small-budget streamer makes,
-; with the whole-chunk segment the most common of all - take a counter-free
-; ladder that falls straight into the match epilogue: no full-pass shift, no
-; loop counter, no post-copy kind test. Literals and longer segments take the
-; classic counted ladder. And there is no first-call test: ST4_init seeds the
-; bit queue with one virtual 0 flag ($4000), so a fresh state decodes itself
-; through a zero-unit match segment and reads that flag as "begin literals"
-; exactly where the old entry branch went.
+; Two copy ladders: match segments of at most sixteen units, measured at four
+; of every five segments a small-budget streamer makes, take a counter-free
+; ladder that falls into the match epilogue; literals and longer segments take
+; the counted ladder. There is no first-call test: ST4_init seeds the bit
+; queue with one virtual 0 flag ($4000), so the first call runs a zero-unit
+; match segment and reads that flag as "begin literals".
 ;
-; The container is ST4.S's: twenty-eight bytes of header - signature, O, where
-; streams B, C and D begin, the rewind point and the window - then A, B, C and D in
-; order: the bits, the literals, the byte offsets and the word offsets. See
-; ST4.S for the eight instructions that open one, and
-; for the rewind: a loop longer than the window is replayed by saving the
-; state registers - all but a1 - at the rewind point and restoring them at O,
-; every pass, which this decoder needs no code for.
+; The container is ST4.S's, and opening one is shown there. So is the rewind:
+; a loop longer than the window is replayed by saving the state registers but
+; a1 at the rewind point and restoring them at O, every pass, which this
+; decoder needs no code for.
 ;
-; THE STATE IS YOUR REGISTERS:
+; THE STATE, seeded by ST4_init and kept between calls:
 ;
 ;   a0.l  position in stream A          a1.l  write pointer
 ;   a2.l  position in stream B          a4.l  stream C, the byte offsets
@@ -73,43 +62,42 @@
 ;   d1.l  -ring_start.low : units remaining
 ;   d2.l  N : signed byte offset (+lastOffset*UNIT literals, - during a match)
 ;
-;   resume in    d3.w   this call's budget in UNITS
-;   CLOBBERED    d3.w d4.l d5.l a3.l
+;   resume in    d3.w   this call's budget in units
+;   clobbered    d3.w d4.l d5.l a3.l
 ;   untouched    d6 d7 a6
 ;
-; ASSUMPTIONS (unchecked; violating them is undefined behaviour):
+; ASSUMPTIONS, unchecked:
 ;
-;   1. THE RING SIZE N IS A MULTIPLE OF ST4_UNIT, and the ring starts on a unit
-;      boundary - as does the destination. A wide move would fault on an odd
-;      address, and the caller's wrap has to land on a unit
+;   1. the ring size N is a multiple of ST4_UNIT, and the ring starts on a
+;      unit boundary, as does the destination: a wide move faults on an odd
+;      address, and the caller's wrap lands on a unit
 ;   2. N mod (C * ST4_UNIT) = 0, so F = N/(C*UNIT) calls fill the ring exactly
-;   3. no offset exceeds 32512 BYTES - the packer clamps -m to that
-;   4. no operation is longer than 65535 units - compress with -l65535
-;   5. the caller knows O and makes exactly T = ceil(O/C) calls, as ST1_wrap -
-;      unless the stream repeats: then any number of calls is fine
+;   3. no offset exceeds 32512 bytes: the packer clamps -m to that
+;   4. no operation is longer than 65535 units: pack with -l65535
+;   5. the caller makes T = ceil(O/C) calls, as for ST1_wrap, unless the
+;      stream repeats: then any number of calls is fine
 ;   6. streams A and D start on even addresses, and A holds an even number of
 ;      bytes: the bit queue is refilled with a move.w, and so is a word offset
-;   6. a stream with copies was packed with -m equal to ST4_WINDOW, and every
-;      copy is shorter than its distance, so the offset never reaches zero -
-;      the st4 packer keeps both
+;   7. a stream with copies was packed with -m equal to ST4_WINDOW, and every
+;      copy is shorter than its distance, so the offset never reaches zero:
+;      the packer keeps both
 ;
-; Compress with st4 -k<UNIT> -m<ring/UNIT> -l65535, and -c for copies from the
+; Pack with st4 -k<UNIT> -m<ring/UNIT> -l65535, and -c for copies from the
 ; literal stream on a build with ST4_WINDOW = ring/UNIT.
 ; -----------------------------------------------------------------------------
 
-; The asset's signature for this build: 'S4', format version 7, and the unit
-; size this decoder was assembled for. One cmp.l against a file's first long
-; proves all three at once.
+; 'S4', format version 7 and this build's unit size in one long: one cmp.l
+; against a file's first long checks all three.
 ST4_SIGNATURE   equ     $53340700+ST4_UNIT
 
 ; ST4_WINDOW, the window in units, is optional: a build without it has no
-; copies from the literal stream and is the decoder there was before.
+; copy code.
         .if ^^defined ST4_WINDOW
         .else
 ST4_WINDOW      equ     0
         .endif
 
-; One unit copied, at the width this build was made for.
+; One unit copied at this build's width.
         .macro ST4_MOVE
         .if ST4_UNIT=4
         move.l  (a3)+,(a1)+
@@ -128,26 +116,24 @@ ST4_WINDOW      equ     0
                 bra.w   ST4_resume
 
 ; ST4_init: a0 = A, a1 = first ring byte, a2 = B, a4 = C, a5 = D,
-; d3.w = N.
-; Packs -ring_start.low/N above the common state; writes no memory.
-; Java: the Decompressor constructor / reset().
+; d3.w = N. Packs -ring_start.low and N above the common state; writes no
+; memory.
 ST4_init:
         moveq   #0,d1
         sub.w   a1,d1                   ; -ring_start.low, exact modulo 65536
         swap    d1                      ; pack it high; remaining = 0
-; The initial offset has to land in the low word after the swap, so it starts
-; in the high half. moveq would put -1 there whatever the unit size, which is
-; a byte short at k=2 and three at k=4 - and only shows up on a stream whose
-; first match reuses INITIAL_OFFSET.
+; The initial offset lands in the low word after the swap, so it starts in the
+; high half: moveq would put -1 there whatever the unit size, a byte short at
+; k=2 and three at k=4, which shows on a stream whose first match reuses the
+; initial offset.
         move.l  #(-ST4_UNIT)<<16,d2
         move.w  d3,d2                   ; N lives below it for now
         swap    d2                      ; N above, -INITIAL_OFFSET*UNIT below
 ; One virtual 0 flag, then the empty sentinel. The first resume call runs a
-; zero-unit match segment through the normal path - remaining is zero, so
-; n = 0 and the ladder is entered at its end - and lands in match_transition,
-; which shifts $4000 into $8000: the flag reads as "begin literals" and the
-; queue is the empty sentinel the old first call started from. That is what
-; lets ST4_resume skip a first-call test on every call.
+; zero-unit match segment through the normal path, remaining being zero, and
+; lands in match_transition, which shifts $4000 into $8000: the flag reads as
+; "begin literals" and the queue is the empty sentinel. So ST4_resume has no
+; first-call test.
         move.w  #$4000,d0
         rts
 
@@ -162,10 +148,9 @@ source_wrapped:
 copy_source:                            ; the offset is beyond the window, so
 ; the source is stream B, offset-M units behind the read pointer, which stays
 ; where it is. Stream B never wraps, so none of the ring arithmetic applies.
-; The offset moves on by what this segment copies: a copy the budget or the
-; ring end cuts continues where it stopped, and a rep after it starts just
-; past it. It stays beyond the window, since a copy is shorter than its
-; distance.
+; The offset advances by what this segment copies: a copy the budget or the
+; ring end cuts continues where it stopped, and a rep after it starts past
+; it. It stays beyond the window, since a copy is shorter than its distance.
         .if ST4_WINDOW*ST4_UNIT<128
         lea     ST4_WINDOW*ST4_UNIT(a2,d2.w),a3 ; B + M*UNIT + -offset*UNIT
         .else
@@ -178,9 +163,8 @@ copy_source:                            ; the offset is beyond the window, so
         bra.s   copy
         .endif
 
-; ST4_resume: a0/a1/d0/d1/d2 = state and d3.w = this call's budget.
-; Continuing calls emit d3 bytes; the final call may be shorter. The caller
-; knows the final span from O; [old a1 .. new a1) is fresh output.
+; ST4_resume: the state and d3.w = this call's budget in units. A call emits
+; d3 units, the final call fewer, as O says; [old a1 .. new a1) is new output.
 ST4_resume:
         move.w  d3,d4                   ; seed n from the budget; a fresh state
 segment:                                ; runs one 0-unit match segment and
@@ -191,12 +175,12 @@ budget_fits:
         tst.w   d2                      ; positive lastOffset means LITERALS
         bpl.s   literal_source
         .if ST4_WINDOW
-        cmp.w   #-ST4_WINDOW*ST4_UNIT,d2 ; beyond the window: a copy from D
+        cmp.w   #-ST4_WINDOW*ST4_UNIT,d2 ; beyond the window: a copy from B
         blt.s   copy_source
         .endif
 ; MATCH: derive the source and split a segment that crosses the ring end.
         movea.l a1,a3                   ; raw source = dst + -lastOffset*UNIT
-        adda.w  d2,a3                   ; which is why the offset is kept scaled
+        adda.w  d2,a3                   ; the offset is kept scaled for this
         move.l  d1,d5
         swap    d5                      ; d5.w = -ring_start.low
         add.w   a1,d5                   ; d5.w = destination position
@@ -204,7 +188,7 @@ budget_fits:
         bcs.s   copy                    ; unwrapped source cannot cross before dst
         neg.w   d5                      ; wrapped: room = offset - position
 ; The room is bytes and the segment is units, so bring them to the same scale.
-; Both are whole units - offsets and positions are - so the shift is exact.
+; Offsets and positions are whole units, so the shift is exact.
         .if ST4_UNIT=2
         lsr.w   #1,d5
         .endif
@@ -260,31 +244,30 @@ ladder_end:
         bcc.s   ladder                  ; costs 12 where dbf paid 14, and still
         tst.w   d2                      ; leaves d4.w = $ffff for byte_offset
         bmi.s   match_copied            ; an n>=17 match rejoins its epilogue
-        movea.l a3,a2                   ; literals do consume input: D advanced
+        movea.l a3,a2                   ; literals advance stream B
         tst.w   d1
         bne.s   resume_return           ; literals stop only on the budget
 
 literals_transition:
-        add.w   d0,d0                   ; Java: next(), case LITERALS (bare read)
+        add.w   d0,d0                   ; the flag after literals, no refill
         bcs.s   new_offset              ; 1: new offset
-        neg.w   d2                      ; from-last reuses the negated offset
-        bra.s   gamma_seed0             ; Java: beginMatchFromLastOffset()
+        neg.w   d2                      ; a rep reuses the negated offset
+        bra.s   gamma_seed0
 
 match_next:                             ; a 0 flag after a match means literals
         bne.s   begin_literals          ; - unless the queue reads zero, which
         subq.w  #1,d1                   ; only a pinned one does: the repeat
         bra.s   resume_fresh            ; re-arms 65535 units, budget willing
 
-begin_literals:                         ; Java: beginLiterals()
-        neg.w   d2                      ; positive lastOffset = State.LITERALS
+begin_literals:
+        neg.w   d2                      ; positive lastOffset = literals
 gamma_seed0:
         moveq   #0,d4                   ; remaining = gamma + 0; fall through
 
 ; get_gamma: interlaced Elias gamma in d1.w; d4.w is the 0/1 length seed.
-; Gammas are odd-length and each is followed by one flag bit, so a gamma always
-; starts at an even position and the queue - which empties every 16 bits, also
-; even - can only run out on a continuation bit. Data and transition reads need
-; no refill check; 16 is even like 8, so the word queue inherits the argument.
+; A gamma has an odd number of bits and one flag bit follows it, so a gamma
+; starts at an even position and the queue, which empties every 16 bits, runs
+; out only on a continuation bit. Data and flag reads need no refill check.
 get_gamma:
         addq.w  #1,d1
         add.w   d0,d0                   ; first continuation bit
@@ -309,16 +292,15 @@ gamma_refill:
         bra.s   gamma_done
 
 match_transition:                       ; remaining == 0: parse after a match
-        add.w   d0,d0
-        bcc.s   match_next              ; 0: literals - or the repeat's re-arm
+        add.w   d0,d0                   ; the flag after a match, no refill
+        bcc.s   match_next              ; 0: literals, or the repeat's re-arm
 
-new_offset:                             ; Java: beginMatchFromNewOffset/readOffset
-; Two class bits: the first says byte or word, the second picks a byte offset's
-; 256-unit bank or, for a word, marks the end of the stream. That first bit is
-; the only read here that can need a refill. Every operation is an even number
-; of bits, so flags and gamma data bits all land on odd positions and the queue
-; - which empties every 16 bits - can never run out on one; the bit immediately
-; after a flag is the one exception, and it is checked.
+new_offset:
+; Two class bits: byte or word, then a byte offset's 256-unit bank or, for a
+; word, the end of the stream. The first is the one read here that can need a
+; refill: every operation is an even number of bits, so flags and gamma data
+; bits land on odd positions, where the queue cannot run out; the bit after a
+; flag is the exception, and it is checked.
         add.w   d0,d0                   ; class bit 1: set means a byte offset
         beq.s   class_refill
 class_read:
@@ -336,9 +318,9 @@ class_refill:
         bra.s   class_read
 
 byte_offset:
-; The copy paths leave d4.w = $ffxx - the fast ladder's -2n dispatch index, or
-; the counted terminator's $ffff - so one move.b makes $ff00 + (256-offset),
-; which already IS -offset as a word. The bank bit moves it 256 units further.
+; The copy paths leave d4.w = $ffxx, the fast ladder's -2n dispatch index or
+; the counted terminator's $ffff, so one move.b makes $ff00 + (256-offset),
+; which is -offset as a word. The bank bit moves it 256 units further.
         move.b  (a4)+,d4
         add.w   d0,d0                   ; class bit 2: the 256-unit bank
         bcc.s   scale_offset
@@ -358,14 +340,14 @@ scale_offset:
 
 end_marker:
 ; One more bit: 0 ends the stream, 1 repeats it. It sits at an even position,
-; where the queue can run dry, so this is the one other checked read.
+; where the queue can run out, so this is the other checked read.
         add.w   d0,d0
         beq.s   end_refill
 end_read:
         bcc.s   parse_done              ; a counted caller never calls again
-; The repeat: install one last word offset and match it forever. Pinning the
-; queue to zero - a value no real read leaves it at - makes every transition
-; that would parse the next block re-arm the match instead.
+; The repeat: install one last word offset and match it forever. The queue
+; pinned to zero, a value no read leaves it at, makes every transition that
+; would parse the next block re-arm the match instead.
         move.w  (a5)+,d2                ; -(O-R)*UNIT; N stays packed above
         moveq   #0,d0
         subq.w  #1,d1                   ; remaining = 65535, from zero

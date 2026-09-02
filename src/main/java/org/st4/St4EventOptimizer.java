@@ -5,22 +5,22 @@ import java.util.PriorityQueue;
 import java.util.TreeSet;
 
 /**
- * The event-driven ST4 optimizer: the same costs as {@link St4FastOptimizer},
- * without visiting every (position, offset) pair.
+ * The event-driven optimizer: the costs of {@link St4FastOptimizer} without
+ * visiting every (position, offset) pair.
  *
  * <p>Between the start and end of a match run, and along a literal stretch,
  * every candidate's cost is a closed form of the position; only a run
- * starting or ending changes anything, and on real data those are orders of
- * magnitude fewer than DP steps. So this class walks positions emitting three
- * channel minima from range structures - the literal channel keyed by state
- * end, the rep channel keyed by run start, the new-offset channel a range
- * minimum over recorded costs per gamma class - and does per-offset work only
- * at run boundaries, found through occurrence chains keyed by (value,
- * predecessor) and (value, successor). It reproduces the fast optimizer's
- * cost array exactly, which the equivalence test asserts; where candidates
- * tie the chain may differ, the packed size cannot. Per-event overhead loses
+ * starting or ending changes anything, and on repetitive data those are
+ * orders of magnitude fewer than DP steps. So this class walks positions
+ * taking three channel minima from range structures, the literal channel
+ * keyed by state end, the rep channel by run start, the new-offset channel a
+ * range minimum over recorded costs per gamma class, and does per-offset
+ * work only at run boundaries, found through occurrence chains keyed by
+ * (value, predecessor) and (value, successor). It reproduces the fast
+ * optimizer's cost array exactly, which a test asserts; where candidates tie
+ * the chain may differ, the packed size cannot. Per-event overhead loses
  * where runs are a step or two long, so {@link #optimize} counts the events
- * first and falls back to {@link St4FastOptimizer} on run-churny data.
+ * first and falls back to {@link St4FastOptimizer} on such data.
  */
 public final class St4EventOptimizer {
 
@@ -83,10 +83,9 @@ public final class St4EventOptimizer {
     }
 
     /**
-     * Returns the last block of an optimal parse of {@code units} - the same
-     * cost as {@link St4FastOptimizer}, not necessarily the same chain. Falls
-     * back to the fast optimizer when a cheap event count says the data is
-     * run-churny and the DP would be faster.
+     * The last block of an optimal parse of {@code units}: the cost of
+     * {@link St4FastOptimizer}, not always its chain. Falls back to the fast
+     * optimizer when an event count says the DP would be faster.
      */
     public static St4Block optimize(int[] units, int unit, int offsetLimit,
                                     boolean progress) {
@@ -120,9 +119,9 @@ public final class St4EventOptimizer {
     /**
      * Run starts at j: offsets whose unit matches at j but not at j-1. Those
      * are the in-window occurrences p of units[j] whose predecessor differs
-     * from units[j-1] - or that have no predecessor at all - so the chains
-     * keyed by (value, predecessor) enumerate exactly them, newest first,
-     * stopping at the window's edge.
+     * from units[j-1], or that have none, so the chains keyed by (value,
+     * predecessor) enumerate exactly them, newest first, stopping at the
+     * window's edge.
      */
     private interface RunEvent {
         void accept(int offset);
@@ -176,7 +175,7 @@ public final class St4EventOptimizer {
         }
     }
 
-    /** One cheap pass counting run events, to decide engine or plain DP. */
+    /** One pass counting run events, to choose events or the plain DP. */
     private long countEvents() {
         long[] events = {0};
         for (int j = 0; j < units.length; j++) {
@@ -186,7 +185,7 @@ public final class St4EventOptimizer {
             }
             chain(j);
         }
-        // The pass consumed the chains; rebuild them empty for the real run.
+        // The pass filled the chains; the real run fills them again.
         byPred.clear();
         bySucc.clear();
         return events[0];
@@ -199,8 +198,8 @@ public final class St4EventOptimizer {
         var meter = new ProgressMeter(
                 ProgressMeter.totalSteps(count, 0, offsetLimit), progress);
 
-        // The fake state every chain hangs from: offset one, just before the
-        // stream, as the reference DP seeds it.
+        // The fake state every chain hangs from: offset one, before the
+        // stream, as the reference seeds it.
         stateS[1] = -1;
         stateE[1] = -1;
         literalTree.insert(0, encode(-1 - (-1) * literalBits, 1));
@@ -338,8 +337,8 @@ public final class St4EventOptimizer {
         }
         if (state != Integer.MAX_VALUE) {
             if (stateE[offset] != NONE) {
-                // The reference DP overwrites an offset's state at its next
-                // match run regardless of cost; replicate that exactly.
+                // The reference overwrites an offset's state at its next match
+                // run whatever the cost; this does the same.
                 literalTree.remove(stateE[offset] + 1,
                         encode(stateS[offset] - stateE[offset] * literalBits, offset));
             }
@@ -437,7 +436,7 @@ public final class St4EventOptimizer {
         }
     }
 
-    /** A min tree whose slots hold sets, so entries can retire exactly. */
+    /** A min tree whose slots hold sets, so an entry can be removed. */
     private static final class SlotTree extends MinTree {
         private final HashMap<Integer, TreeSet<Long>> slots = new HashMap<>();
 

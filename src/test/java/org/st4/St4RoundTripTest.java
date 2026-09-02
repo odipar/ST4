@@ -385,8 +385,7 @@ final class St4RoundTripTest {
 
     /**
      * ZX1's packed size for each of {@link #inputs()}, recorded from jx1 in
-     * odipar/ST1 at commit 132aef0. The inputs are deterministic, so these can
-     * only drift if the ZX1 reference itself would - which it does not.
+     * odipar/ST1 at commit 132aef0. The inputs are deterministic.
      */
     @Test
     void theSearchStartsWhereTheHeuristicEndsAndIsMeasuredAgainstTheOracle() {

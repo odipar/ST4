@@ -2,15 +2,15 @@
 """Differential test for the rewind: loops longer than the ring, all three decoders.
 
 A stream packed with -rR whose loop [R,O) is longer than the window cannot
-loop by itself - no match reaches that far back - so the header names a
-rewind point and the caller replays the encoded stream: it saves the decoder's
+loop by itself, since no match reaches that far back, so the header gives a
+rewind point and the caller replays the stream: it saves the decoder's
 registers when the output reaches R and restores them, all but the write
 pointer, when it reaches O, every pass. This packs corpora that way with the
-real packer at unit sizes 1, 2 and 4, drives ST4.S, ST4_wrap.S and ST4_ring.S
-through rings smaller than the loop with exactly that protocol under Unicorn
-as a plain 68000, and checks every byte of more than two passes against
-[0,R)[R,O)*, that the pass itself consumed every stream exactly, and that the
-decoder had finished when the caller first rewound it.
+packer at unit sizes 1, 2 and 4, drives ST4.S, ST4_wrap.S and ST4_ring.S
+through rings smaller than the loop with that protocol under Unicorn as a
+plain 68000, and checks every byte of more than two passes against
+[0,R)[R,O)*, that the pass consumed every stream exactly, and that the
+decoder was done when the caller first rewound it.
 
     python3 68k/test/emu/test_st4_rewind.py [--quick]
 """

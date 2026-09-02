@@ -2,11 +2,11 @@ package org.st4;
 
 /**
  * The progress report the optimal parsers print: an exact percentage of the
- * parse's inner-loop steps - position {@code index} tries offsets 1 to
- * {@code clamp(index, 1, offsetLimit)}, a closed form known before the first
- * step - and a time estimate, elapsed time fitted as {@code a*x + b*x^2} in
- * the percentage through the warm-up point, the midpoint and now. The square
- * tracks a parse that finds more matches, and so slows down, as it goes.
+ * parse's inner-loop steps, position {@code index} trying offsets 1 to
+ * {@code clamp(index, 1, offsetLimit)}, and a time estimate, the elapsed
+ * time fitted as {@code a*x + b*x^2} in the percentage through the warm-up
+ * point, the midpoint and now. The square term follows a parse that slows
+ * as it finds more matches.
  */
 public final class ProgressMeter {
 
@@ -44,7 +44,7 @@ public final class ProgressMeter {
         return 1 + ramp * (ramp + 1) / 2 + flat * offsetLimit;
     }
 
-    /** Advances by one position's worth of steps and reports when the percent moves. */
+    /** Adds a position's steps and reports when the percent moves. */
     public void advance(long delta) {
         steps += delta;
         if (!enabled) {
@@ -95,7 +95,7 @@ public final class ProgressMeter {
         return duration((long) left) + " left";
     }
 
-    /** Seconds, in the shortest form that stays readable, rounded not floored. */
+    /** Seconds, rounded, as 42s or 3m 05s. */
     private static String duration(long nanos) {
         long seconds = (Math.max(0, nanos) + 500_000_000L) / 1_000_000_000L;
         return seconds < 60 ? seconds + "s"

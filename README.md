@@ -232,6 +232,8 @@ java -ea -cp target/classes org.st4.St4  [-f] [-c[S]] [-kK] [-mN] [-lN] [-rR] in
 java -ea -cp target/classes org.st4.Dst4 [-f] [-rN] input.st4 [output]
 ```
 
+### Packing
+
 `st4` packs, reporting progress and a time estimate as it works. `-kK`
 selects the unit size, `-mN` limits how far back matches reach, `-lN` splits
 long matches - the default already fits the 68000 decoders - and `-rR` loops
@@ -240,11 +242,15 @@ the stream from unit R, `-r0` from its start. When the loop is longer than
 restore it. `-c` lets a match beyond `-m` copy from the literal stream, and
 `-cS` searches for S seconds for a better parse, printing each improvement.
 
+### Unpacking
+
 `dst4` unpacks, and is the readable reference the 68000 decoders are checked
 against. Its output is padded to a whole number of units, as the format
 stores it: for a looping stream one whole pass, and it says where the loop
 is. `-rN` writes the pass and then N - 1 repeats of the loop section, as a
 decoder driven past the end would.
+
+### The optimizers
 
 Three optimizers select the blocks of a stream without copies, all held to
 each other by tests:
@@ -266,6 +272,8 @@ Measured on the optimizer alone:
 | 880 KB disk image, `-m1024`, k = 4 | 163 s | 37 s | 0.4 s |
 | 300 KB slice, full window, k = 4 | 24 s | 5.7 s | 0.12 s |
 | 32 KB of 68000 code, k = 1 | 9.8 s | 1.5 s | falls back to fast |
+
+### The search
 
 Copies need a different parse, since a copy is valid only where its source
 is literal and its distance counts the literals between: the best chain so

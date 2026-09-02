@@ -4,15 +4,15 @@
 namespace Nt4;
 
 /// <summary>
-/// The true optimum of a parse with copies from the literal stream, by trying
-/// every parse the format allows - possible on a dozen units or so, and there
-/// to measure the search against. The twin of the Java
+/// The optimum of a parse with copies from the literal stream, by trying every
+/// parse the format allows: feasible on a dozen units, and there to measure
+/// <see cref="LiteralCopySearch"/> against. The port of the Java
 /// <c>St4LiteralCopyOracle</c>.
 /// </summary>
 /// <remarks>
-/// It costs exactly what the compressor writes: literal runs, matches new or
-/// repeated, copies at the window plus the literals between, strictly shorter
-/// than that count, and reps of a copy, which resume just past it.
+/// It costs what the compressor writes: literal runs, matches new or
+/// repeated, copies at the window plus the literals between and shorter than
+/// that count, and reps of a copy, which resume past it.
 /// </remarks>
 public sealed class LiteralCopyOracle
 {
@@ -45,10 +45,10 @@ public sealed class LiteralCopyOracle
 
     /// <summary>
     /// The cheapest parse of <paramref name="units"/> at <paramref name="window"/>,
-    /// as a chain of blocks the compressor can write - copies as negative
-    /// offsets - whose bits are exactly the compressor's.
+    /// as a chain of blocks the compressor writes, copies as negative offsets,
+    /// whose bits are the compressor's.
     /// </summary>
-    /// <param name="units">The input as k-byte units, a dozen or so at most.</param>
+    /// <param name="units">The input as k-byte units, a dozen at most.</param>
     /// <param name="unit">Bytes per unit: 1, 2 or 4.</param>
     /// <param name="window">The window in units.</param>
     /// <returns>The final block of the cheapest parse.</returns>
@@ -173,8 +173,8 @@ public sealed class LiteralCopyOracle
                 {
                     break;
                 }
-                // The copied units must be one run in the output: the compressor
-                // names the source by output position and reads it as such.
+                // The copied units are one run in the output: the compressor
+                // gives the source as an output position.
                 if (literalPositions[source + length - 1] != literalPositions[source] + length - 1)
                 {
                     break;

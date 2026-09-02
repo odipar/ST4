@@ -3,22 +3,24 @@
 
 namespace Nt4;
 
-/// <summary>Writes an ST4 parse out as four streams.</summary>
+/// <summary>Writes a parse as the four streams.</summary>
 /// <remarks>
 /// Bits and gamma lengths go in A, literal units in B, byte offsets in C and
-/// word offsets in D, offsets pre-negated as the 68000 decoders keep them and
-/// stream A padded to an even length for their word-wide refill. Matches
-/// longer than the operation limit are split; a literal run cannot be, and
-/// <see cref="Result.LongestOp"/> reports what came out. A copy from the
-/// literal stream is written as an offset beyond the window: the window plus
-/// the literal units between its source and itself, strictly shorter than
-/// that count - the one copy that would not be gives up its last unit. Two
-/// parses written back to back, the intro and the loop of a rewind stream,
-/// merge literal runs that meet at the seam.
+/// word offsets in D. A word offset is written as <c>-offset * unit</c> and
+/// a byte offset as <c>bank * 256 + 256 - offset</c>, the values the 68000
+/// decoders keep in a register; stream A is padded to an even length for
+/// their word-wide refill. A match longer than the operation limit is split;
+/// a literal run cannot be, and <see cref="Result.LongestOp"/> reports it. A
+/// copy from the literal stream is written as the window plus the literal
+/// units between its source and itself, and is shorter than that count: the
+/// one copy that would not be gives its last unit to a literal. The intro
+/// and the loop of a rewind stream are two parses written back to back; two
+/// literal runs that meet at the seam merge, and a one-unit rep the intro
+/// left no offset for is written as a literal.
 /// </remarks>
 public sealed class Compressor
 {
-    /// <summary>The four streams, and what the caller needs to know about them.</summary>
+    /// <summary>The four streams and their figures.</summary>
     /// <param name="Control">Stream A, the bits, padded to an even length.</param>
     /// <param name="Literal">Stream B, the literal payload, whole units.</param>
     /// <param name="ByteOffsets">Stream C, one byte per offset.</param>
@@ -29,20 +31,21 @@ public sealed class Compressor
     /// <param name="Operations">How many operations the streams hold.</param>
     /// <param name="RewindIndex">The loop point of a stream the caller loops by rewind, in units, or -1.</param>
     /// <param name="Window">The window the parse kept to, in units: what the header records.</param>
-    /// <param name="Copies">How many blocks copied from the literal stream.</param>
+    /// <param name="Copies">The blocks copied from the literal stream.</param>
     /// <param name="ControlBits">Bits written to stream A before padding.</param>
     /// <param name="RepeatWord">Whether stream D ends with the repeat's word.</param>
     public sealed record Result(byte[] Control, byte[] Literal, byte[] ByteOffsets,
         byte[] WordOffsets, int Unit, int PaddedSize, int LongestOp, int Operations,
         int RewindIndex, int Window, int Copies, int ControlBits, bool RepeatWord)
     {
-        /// <summary>Bytes all four streams take together, which is what a comparison wants.</summary>
+        /// <summary>Bytes all four streams take together.</summary>
         public int PackedSize =>
             Control.Length + Literal.Length + ByteOffsets.Length + WordOffsets.Length;
 
         /// <summary>
-        /// Bits the parse itself cost: everything written but the end code and
-        /// its repeat bit, and stream A's padding - what a parse's chain counts.
+        /// Bits the parse cost, what a chain counts: everything written but
+        /// the end code, its repeat bit, the repeat's word and stream A's
+        /// padding.
         /// </summary>
         public int Bits =>
             ControlBits - 4 + 8 * (Literal.Length + ByteOffsets.Length + WordOffsets.Length)
@@ -68,9 +71,9 @@ public sealed class Compressor
     private int copies;
 
     // The walk: where the next unit comes from, the literal run gathered but
-    // not yet written, the offset the stream currently holds, whether the
-    // first block - which has no flag - is still to come, and how many
-    // literal units precede each position written so far.
+    // not yet written, the offset the stream holds, whether the first block,
+    // which has no flag, is still to come, and how many literal units precede
+    // each position written so far.
     private int readIndex;
     private int pendingLiterals;
     private int lastOffset = Optimizer.InitialOffset;
@@ -86,7 +89,7 @@ public sealed class Compressor
         this.literalsBefore = new int[units.Length + 1];
     }
 
-    /// <summary>Compresses an optimal parse into the four streams.</summary>
+    /// <summary>Writes a parse as the four streams.</summary>
     /// <param name="optimal">Final block of a parse of <paramref name="units"/>.</param>
     /// <param name="units">The input as k-byte units.</param>
     /// <param name="unit">Bytes per unit: 1, 2 or 4.</param>
@@ -97,13 +100,9 @@ public sealed class Compressor
         Compress(optimal, units, unit, maxOpLength, -1);
 
     /// <summary>
-    /// As above, but the stream ends by repeating instead of stopping: the
-    /// container encodes the infinite input <c>units[0..R) units[R..O)</c>
-    /// repeated forever, so after its last unit the output continues from
-    /// unit <paramref name="repeatIndex"/> and never stops. -1 means a plain
-    /// end. What stream D stores is the distance O-R back to the loop point,
-    /// an offset like any other, so the caller holds it to the window the
-    /// stream was packed for.
+    /// As above, repeating from unit <paramref name="repeatIndex"/>: the
+    /// stream decodes as <c>units[0..R) units[R..O)</c> forever, the distance
+    /// O-R written as one last word offset. -1 ends the stream.
     /// </summary>
     /// <param name="optimal">Final block of a parse of <paramref name="units"/>.</param>
     /// <param name="units">The input as k-byte units.</param>
@@ -116,9 +115,9 @@ public sealed class Compressor
         Compress(optimal, units, unit, maxOpLength, repeatIndex, Format.MaxOffsetUnits(unit));
 
     /// <summary>
-    /// As above, for a parse made at <paramref name="window"/> units: an offset
-    /// beyond it is a copy from the literal stream, so the parse's matches
-    /// must keep within it and its copies are written past it.
+    /// As above, for a parse made at <paramref name="window"/> units: the
+    /// parse's matches keep within it, and its copies are written as offsets
+    /// beyond it.
     /// </summary>
     /// <param name="optimal">Final block of a parse of <paramref name="units"/>.</param>
     /// <param name="units">The input as k-byte units.</param>
@@ -145,13 +144,10 @@ public sealed class Compressor
     }
 
     /// <summary>
-    /// A stream that loops by rewind, for a loop longer than the window: the
-    /// intro <c>units[0..R)</c> and the loop <c>units[R..O)</c> come from
-    /// separate parses - <paramref name="intro"/> is null when R is 0 - so no
-    /// match in the loop reaches before it, and the caller can replay the
-    /// stream from the state it saved at unit <paramref name="rewindIndex"/>
-    /// every time the output reaches O. The stream ends plainly; the rewind
-    /// point goes in the header.
+    /// A stream that loops by rewind: the intro <c>units[0..R)</c>, null when
+    /// R is 0, and the loop <c>units[R..O)</c> come from separate parses, so
+    /// no match in the loop reaches before unit <paramref name="rewindIndex"/>,
+    /// where the caller saves the decoder's state. The stream ends plainly.
     /// </summary>
     /// <param name="intro">Final block of a parse of the units before the loop, or null when there are none.</param>
     /// <param name="loop">Final block of a parse of the loop's units on their own.</param>
@@ -254,9 +250,8 @@ public sealed class Compressor
             throw new InvalidOperationException("the parses did not cover the input");
         }
 
-        // End marker, then the repeat bit: end for good, or install one last
-        // word offset from stream D - the distance back to the loop point -
-        // and match it forever.
+        // The end marker, then the repeat bit: end, or one last word offset
+        // in stream D, the distance back to the loop point, matched forever.
         WriteBit(true);
         WriteBit(false);
         WriteBit(true);
@@ -282,11 +277,10 @@ public sealed class Compressor
     /// <summary>
     /// A copy from the literal stream, <paramref name="distance"/> units back
     /// in the output for <paramref name="length"/> units, in pieces the
-    /// counters can hold. Each piece is written as a match at the window plus
-    /// the literals between its source and itself; a piece that would be
-    /// exactly as long as that count gives up its last unit to a literal, so
-    /// the decoder's offset - which it advances by what it copies - never
-    /// reaches zero.
+    /// counters hold. A piece is written as a match at the window plus the
+    /// literals between its source and itself; a piece as long as that count
+    /// gives its last unit to a literal, so the decoder's offset, advanced by
+    /// what it copies, never reaches zero.
     /// </summary>
     private void Copy(int distance, int length, int maxOpLength)
     {
@@ -360,8 +354,8 @@ public sealed class Compressor
     }
 
     /// <summary>
-    /// Writes the literal run gathered so far, if there is one: its flag -
-    /// unless it opens the stream - its length, and its units into stream B.
+    /// Writes the literal run gathered so far, if any: its flag, unless it
+    /// opens the stream, its length, and its units into stream B.
     /// </summary>
     private void FlushLiterals()
     {
@@ -391,9 +385,9 @@ public sealed class Compressor
     }
 
     /// <summary>
-    /// The two class bits, then the offset itself into whichever stream it
-    /// belongs to. The class bits are also what keeps the operation an even
-    /// number of bits long, which is what lets the decoder skip refill checks.
+    /// The two class bits, then the offset into its stream. Two class bits
+    /// keep every operation an even number of bits, so a decoder checks its
+    /// refill on gamma continuation bits alone.
     /// </summary>
     private void WriteOffsetOf(int offset)
     {
@@ -431,10 +425,7 @@ public sealed class Compressor
         control[controlIndex++] = unchecked((byte)value);
     }
 
-    /// <summary>
-    /// Bits live in stream A, in the byte reserved when the reservoir ran dry -
-    /// so a set bit patches that byte where it already sits.
-    /// </summary>
+    /// <summary>A bit goes into the byte reserved when the last one filled; a set bit patches it in place.</summary>
     private void WriteBit(bool value)
     {
         bitsWritten++;

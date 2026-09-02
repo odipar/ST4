@@ -6,12 +6,9 @@ import java.nio.file.Path;
 import java.util.Arrays;
 
 /**
- * Command-line ST4 packer: ZX1's blocks at a chosen unit granularity, with the
- * literal payload in a stream of its own.
- *
- * <p>{@code -k1} is ZX1's granularity and should pack to within a byte or two
- * of jx1; {@code -k2} and {@code -k4} trade ratio for a decoder that runs half
- * or a quarter as many operations and copies two or four bytes at a time.
+ * Command-line ST4 packer. {@code -k1} is ZX1's unit size and packs to within
+ * a few percent of jx1, which a test holds; {@code -k2} and {@code -k4} trade
+ * ratio for a decoder that runs half or a quarter as many operations.
  */
 public final class St4 {
 
@@ -78,8 +75,8 @@ public final class St4 {
         if (!problem.isEmpty()) {
             throw error(problem);
         }
-        // A word offset is stored pre-scaled, so the window is a byte figure:
-        // reaching 32512 units at k=4 would not fit the word it is kept in.
+        // A word offset is stored scaled to bytes, so the window is a byte
+        // figure: 32512 units at k=4 would not fit the word.
         if (offsetLimit > St4Format.maxOffsetUnits(unit)) {
             offsetLimit = St4Format.maxOffsetUnits(unit);
         }
@@ -107,10 +104,10 @@ public final class St4 {
         St4Compressor.Result result;
         int window = offsetLimit;
         if (repeatIndex >= 0 && units.length - repeatIndex > offsetLimit) {
-            // The loop is longer than the window, so no match can reach across
-            // it and the decoder cannot loop it alone: the caller will replay
-            // the stream from the state it saved at the loop point. For every
-            // pass to see the same history, the loop is parsed on its own.
+            // The loop is longer than the window, so no match reaches across
+            // it and the caller replays the stream from the state it saved at
+            // the loop point. The loop is parsed on its own, so every pass
+            // sees the same history.
             int[] intro = Arrays.copyOfRange(units, 0, repeatIndex);
             int[] loop = Arrays.copyOfRange(units, repeatIndex, units.length);
             result = St4Compressor.compressRewinding(
@@ -119,8 +116,8 @@ public final class St4 {
                     parse(loop, unit, offsetLimit, maxOpLength, copies, search),
                     units, unit, maxOpLength, repeatIndex, window);
         } else {
-            // The loop fits the window, so the stream loops by itself: its end
-            // becomes an endless match back to the loop point.
+            // The loop fits the window: the end is an endless match back to
+            // the loop point.
             result = St4Compressor.compress(
                     parse(units, unit, offsetLimit, maxOpLength, copies, search), units,
                     unit, maxOpLength, repeatIndex, window);
@@ -157,10 +154,9 @@ public final class St4 {
     }
 
     /**
-     * The parse: the event-driven optimizer, or with {@code -c} the search
-     * that lets a match beyond the window copy from the literal stream - with
-     * no seconds, just its opening passes, which are the one-shot heuristic
-     * on the search's parser; with seconds, the search from there.
+     * The parse: the event-driven optimizer, or with {@code -c} the opening
+     * passes of the search that copies from the literal stream, and with
+     * seconds the search from there.
      */
     private static St4Block parse(int[] units, int unit, int window, int maxOpLength,
                                   boolean copies, double seconds) {
@@ -172,13 +168,11 @@ public final class St4 {
     }
 
     /**
-     * Twenty-eight bytes of header, then A, B, C and D in order - the bits,
-     * the literals, the byte offsets, the word offsets - each starting on a
-     * long boundary. Nothing says how long a stream is: it runs to the next,
-     * so it borders whatever the caller loads after the container.
+     * Twenty-eight bytes of header, then A, B, C and D, each on a long
+     * boundary. No length is stored: a stream runs to the next, and the last
+     * to whatever the caller loads after the container. Public because other
+     * formats embed containers, many at once.
      */
-    // Public because a container is also how other formats embed an ST4
-    // stream, many of them at once.
     public static byte[] container(St4Compressor.Result result) {
         int controlAt = St4Format.HEADER_SIZE;                  // already a multiple of 4
         int literalAt = align(controlAt + result.control().length);

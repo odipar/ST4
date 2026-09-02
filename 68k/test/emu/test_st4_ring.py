@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """Differential test for ST4_ring.S at every unit size.
 
-The general ring minds the destination itself, so this drives it the way a
-caller would: ask for a budget, drain whatever came back, repeat until d1.w
-reports done - in both the mode where the caller wraps the write pointer at
-the ring end and the mode where it leaves that to the decoder. Checks every
-output byte, exact consumption of both streams, that nothing is written outside
-the ring, and that the packed metadata survives.
+The general ring clamps each call to the ring end, so this drives it as a
+caller would: ask for a budget, drain what came back, repeat until d1.w
+reports done, both where the caller wraps the write pointer at the ring end
+and where it leaves that to the decoder. Checks every output byte, that all
+four streams are consumed exactly, that nothing is written outside the ring,
+and that the state's high words survive.
 
     python3 68k/test/emu/test_st4_ring.py [--quick]
 """

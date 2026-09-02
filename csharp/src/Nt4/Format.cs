@@ -4,22 +4,22 @@
 namespace Nt4;
 
 /// <summary>
-/// The ST4 container format: ZX1's three block types at a chosen unit
-/// granularity, split across four streams so a 68000 can read each of them the
-/// fastest way it has. The Java <c>St4Format</c> is the reference.
+/// ST4: ZX1's three block types at a unit size of 1, 2 or 4 bytes, in four
+/// streams that a 68000 reads each at its own width. The Java
+/// <c>St4Format</c> is the reference.
 /// </summary>
 /// <remarks>
-/// <para>Stream A holds nothing but bits, so its reservoir refills a word at a
-/// time; stream B the literal payload, stream C the byte offsets, stream D the
-/// word offsets. Lengths and offsets count units of k bytes, k being 1, 2 or 4.
-/// An offset of at most the window M is a match; one beyond M copies from the
-/// literal stream, offset minus M units behind the literal read pointer, which
-/// stays put, and advances the offset by what it copied. The end marker's extra
-/// bit repeats the stream from a loop point, the distance stored as one last
-/// word in stream D; a loop longer than the window is replayed by the caller
-/// from the rewind point the header names.</para>
-/// <para>The header is twenty-eight bytes: a signature packing magic, version
-/// and k into one long, the padded output size, where streams B, C and D begin
+/// <para>Stream A holds the bits, read a word at a time; stream B the literal
+/// units, stream C the byte offsets, stream D the word offsets. Lengths and
+/// offsets count units of k bytes. An offset of at most the window M is a
+/// match; an offset beyond M copies offset minus M units from behind the
+/// literal read pointer, which stays where it is, and advances the offset by
+/// what it copied. The end marker's extra bit repeats the stream from a loop
+/// point, the distance written as one last word in stream D; a loop longer
+/// than the window is replayed by the caller from the rewind point the
+/// header gives.</para>
+/// <para>The header is twenty-eight bytes: a signature holding magic, version
+/// and k in one long, the padded output size, where streams B, C and D begin
 /// relative to the header, the rewind point, and the window. Stream A begins
 /// where the header ends and each stream runs to the next.</para>
 /// </remarks>
@@ -28,15 +28,7 @@ public static class Format
     /// <summary><c>'S4'</c>, the top half of every signature.</summary>
     public const int Magic = 0x53340000;
 
-    /// <summary>
-    /// Version 7 put the literal payload back second, as version 4 had it,
-    /// since nothing in the decoders depends on where the ring is - A, B, C,
-    /// D as they lie, B the literals. Version 6 let an offset beyond the
-    /// window copy from the literal stream, and recorded the window in the
-    /// header. Version 5 laid the streams out in file order with the literal
-    /// payload last, and gave the end marker its repeat bit and the header its
-    /// rewind point. Version 4 cut the header to what cannot be derived.
-    /// </summary>
+    /// <summary>The format version, the third byte of the signature.</summary>
     public const int Version = 7;
 
     /// <summary>Byte offset of the signature long in a container.</summary>
@@ -67,9 +59,9 @@ public static class Format
     public const int NoRewind = -1;
 
     /// <summary>
-    /// The furthest any offset reaches, in BYTES. A word offset is stored as
-    /// <c>-offset * k</c>, which the decoder installs unchanged, so the limit
-    /// is what fits a signed word rather than anything about the format.
+    /// The furthest any offset reaches, in bytes. A word offset is stored as
+    /// <c>-offset * k</c> and the decoder installs it unchanged, so the limit
+    /// is what fits a signed word.
     /// </summary>
     public const int MaxOffset = 32_512;
 
@@ -79,10 +71,7 @@ public static class Format
     /// <summary>The longest operation the 68000 decoders can count, in units.</summary>
     public const int MaxOp = 65_535;
 
-    /// <summary>
-    /// Magic, version and unit size in one long, so a decoder built for one k
-    /// checks an asset against itself with a single <c>cmp.l</c>.
-    /// </summary>
+    /// <summary>Magic, version and unit size in one long: a decoder checks all three with one <c>cmp.l</c>.</summary>
     public static int Signature(int unit) => Magic | (Version << 8) | unit;
 
     /// <summary>Whether <paramref name="unit"/> is a unit size the format has.</summary>
@@ -95,7 +84,7 @@ public static class Format
     /// <summary>How far back a match may reach at this unit size, in units.</summary>
     public static int MaxOffsetUnits(int unit) => MaxOffset / unit;
 
-    /// <summary>What a container holds: the four streams, the unit size and the output size.</summary>
+    /// <summary>What a container holds.</summary>
     /// <param name="Unit">Bytes per unit: 1, 2 or 4.</param>
     /// <param name="Size">The padded output size in bytes, a multiple of the unit.</param>
     /// <param name="Control">Stream A, the bits.</param>
@@ -103,21 +92,21 @@ public static class Format
     /// <param name="ByteOffsets">Stream C, one byte per offset.</param>
     /// <param name="WordOffsets">Stream D, one word per offset.</param>
     /// <param name="Rewind">The rewind point in bytes, or <see cref="NoRewind"/>.</param>
-    /// <param name="Window">The window in units: matches within it, copies from B beyond.</param>
+    /// <param name="Window">The window in units: matches within it, copies from stream B beyond.</param>
     public sealed record Container(int Unit, int Size, byte[] Control, byte[] Literal,
         byte[] ByteOffsets, byte[] WordOffsets, int Rewind, int Window);
 
     /// <summary>
-    /// Reads a container, checking everything a decoder would otherwise trust.
-    /// The streams it returns may carry up to three bytes of alignment padding,
-    /// since no length is stored and each stream simply runs to the next.
+    /// Reads a container, checking what a decoder trusts. The streams returned
+    /// may carry up to three bytes of alignment padding, since each runs to
+    /// the next.
     /// </summary>
     /// <param name="file">The complete container, header first.</param>
-    /// <returns>The unit size, output size and the four streams.</returns>
+    /// <returns>What the container holds.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="file"/> is null.</exception>
     /// <exception cref="InvalidDataException">
-    /// It is not an ST4 file this build understands, or the offsets do not
-    /// describe four streams laid out in order inside it.
+    /// The file is not an ST4 file of this version, or its streams do not lie
+    /// in order inside it.
     /// </exception>
     public static Container Read(byte[] file)
     {
@@ -159,8 +148,7 @@ public static class Format
             throw new InvalidDataException($"window {window} is not 1..{MaxOffsetUnits(unit)} units");
         }
 
-        // The streams lie in the file as A, B, C, D: the bits, the literal
-        // payload, the byte offsets and the word offsets.
+        // The streams lie in the file as A, B, C, D.
         int[] edge =
         {
             HeaderSize, LongAt(file, OffsetLiteral), LongAt(file, OffsetByteOffsets),

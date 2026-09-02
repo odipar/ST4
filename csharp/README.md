@@ -1,9 +1,7 @@
 # nt4 for C#
 
-`nt4` is the .NET 10 workbench for the ST4 project and a port of the Java
-`st4` tools. It packs and unpacks ST4 containers and independently mirrors the
-compressor, the optimizers and the reference decoder the 68000 code is
-verified against.
+`nt4` is a .NET 10 port of the Java `st4` tools: the same library classes,
+the same optimizers, the same options, and the same tests, corpus for corpus.
 
 This port is not necessary. The Java tools are the reference and complete on
 their own; the port follows them when that is worth the work, and may lag
@@ -18,11 +16,8 @@ dotnet build csharp/Nt4.slnx -c Release
 dotnet test csharp/Nt4.slnx -c Release
 ```
 
-The tests are the Java suite, corpus for corpus - `java.util.Random` is
-replicated so the fixtures are byte-identical - covering round trips at every
-unit size, the container format's guarantees, offset windows and the limit-
-checking decoder, operation splitting, the ZX1 golden sizes, and both fast
-optimizers held to the reference parse.
+The tests are the Java suite: `java.util.Random` is replicated, so the
+fixtures are byte-identical.
 
 ## Command-line tools
 
@@ -31,9 +26,9 @@ dotnet run --project csharp/src/Nt4.Cli -- [-f] [-c[S]] [-kK] [-mN] [-lN] [-rR] 
 dotnet run --project csharp/src/Dnt4.Cli -- [-f] [-rN] input.st4 [output]
 ```
 
-The arguments have the same meaning as the [Java tools](../README.md), and the
-containers are interchangeable: what `st4` packs, `dnt4` unpacks, and the other
-way round. To produce app-host executables named `nt4` and `dnt4`:
+The arguments are the [Java tools'](../README.md), and the containers are
+interchangeable: what `st4` packs, `dnt4` unpacks, and the other way round.
+To build executables named `nt4` and `dnt4`:
 
 ```sh
 dotnet publish csharp/src/Nt4.Cli -c Release
@@ -42,7 +37,7 @@ dotnet publish csharp/src/Dnt4.Cli -c Release
 
 ## API
 
-The `Nt4` library exposes the same core types as the Java implementation:
+The `Nt4` library has the Java classes under C# names:
 
 ```csharp
 using Nt4;
@@ -57,29 +52,29 @@ byte[] restored = Decompressor.Decompress(read.Control, read.Literal,
     read.ByteOffsets, read.WordOffsets, read.Unit, read.Size);
 ```
 
-`Nt4.Nt4.Container` needs both names because the class and the namespace share
-one: inside a `using Nt4;` file the bare `Nt4` binds to the namespace, and the
-compiler goes looking for a type that is not there.
+`Nt4.Nt4.Container` carries both names because the class and the namespace
+share one: in a `using Nt4;` file the bare `Nt4` binds to the namespace.
 
-`EventOptimizer` is the CLI's default engine and falls back to
-`FastOptimizer` on run-churny data; `Optimizer` is the readable reference both
-are checked against. Malformed containers and streams throw
-`InvalidDataException`; argument errors use the standard argument exceptions.
+`EventOptimizer` is the CLI's default and falls back to `FastOptimizer`
+where runs are a step or two long; `Optimizer` is the readable reference
+both are checked against. A malformed container or stream throws
+`InvalidDataException`; an argument error throws the standard argument
+exceptions.
 
 ## Projects
 
 | Project | Purpose |
 |---|---|
-| `csharp/src/Nt4` | Reusable packer and unpacker library |
-| `csharp/src/Nt4.Cli` | `nt4` packer executable |
-| `csharp/src/Dnt4.Cli` | `dnt4` unpacker executable |
-| `csharp/tests/Nt4.Tests` | Compatibility and behavior tests |
+| `csharp/src/Nt4` | The packer and unpacker library |
+| `csharp/src/Nt4.Cli` | The `nt4` packer |
+| `csharp/src/Dnt4.Cli` | The `dnt4` unpacker |
+| `csharp/tests/Nt4.Tests` | The tests |
 
 ## Origin and attribution
 
-The ZX1 format and original C implementation were designed and implemented by
-Einar Saukas (Copyright © 2021), with thanks to introspec/spke. The ST4 format
-and project additions are Copyright © 2026 Robbert van Dalen. The Java
-implementation and this C# port were written by Claude (Anthropic's Claude
-Code) under Robbert's direction. The port uses the repository's
+The ZX1 format and its C implementation are by Einar Saukas (Copyright ©
+2021), with thanks to introspec/spke. The ST4 format and the project's
+additions are Copyright © 2026 Robbert van Dalen. The Java implementation
+and this C# port were written by Claude (Anthropic's Claude Code) under
+Robbert's direction. The port uses the repository's
 [ST4/ZX1 dual license](../LICENSE).

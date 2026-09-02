@@ -5,9 +5,9 @@ namespace Nt4;
 
 /// <summary>
 /// The progress report the optimal parsers print: an exact percentage of the
-/// parse's inner-loop steps, and a time estimate fitted as <c>a*x + b*x^2</c>
-/// in the percentage, the square tracking a parse that finds more matches,
-/// and so slows down, as it goes.
+/// parse's inner-loop steps, and a time estimate, the elapsed time fitted as
+/// <c>a*x + b*x^2</c> in the percentage. The square term follows a parse that
+/// slows as it finds more matches.
 /// </summary>
 public sealed class ProgressMeter
 {
@@ -24,8 +24,7 @@ public sealed class ProgressMeter
     private long _steps;
     private int _shown = -1;
 
-    /// <summary>A meter over <paramref name="total"/> steps; disabled, it
-    /// counts silently for callers that are not a person at a terminal.</summary>
+    /// <summary>A meter over <paramref name="total"/> steps; disabled, it counts without printing.</summary>
     public ProgressMeter(long total, bool enabled)
     {
         _total = total;
@@ -50,8 +49,7 @@ public sealed class ProgressMeter
         return 1 + ramp * (ramp + 1) / 2 + flat * offsetLimit;
     }
 
-    /// <summary>Advances by one position's worth of steps and reports when the
-    /// percent moves.</summary>
+    /// <summary>Adds a position's steps and reports when the percent moves.</summary>
     public void Advance(long delta)
     {
         _steps += delta;
@@ -111,8 +109,7 @@ public sealed class ProgressMeter
         return Duration((long)left) + " left";
     }
 
-    /// <summary>Seconds, in the shortest form that stays readable, rounded not
-    /// floored.</summary>
+    /// <summary>Seconds, rounded, as 42s or 3m 05s.</summary>
     private static string Duration(long timestampDelta)
     {
         double frequency = TimeProvider.System.TimestampFrequency;

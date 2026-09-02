@@ -8,11 +8,10 @@ namespace Nt4.Tests;
 
 /// <summary>
 /// <see cref="EventOptimizer"/> against <see cref="FastOptimizer"/>: the
-/// optimum is unique, so the engine's cost array must equal the DP's element
-/// for element - that is the strongest check an optimizer that breaks ties
-/// differently can be held to. On top of it, the chain the engine's
-/// descriptors rebuild must decompress back to the input, and pack to the same
-/// size give or take stream padding.
+/// optimum is unique, so the cost arrays are equal element for element, the
+/// strongest check on an optimizer that breaks ties differently. The rebuilt
+/// chain decompresses back to the input and packs to the same size, give or
+/// take stream padding.
 /// </summary>
 public sealed class EventOptimizerTests
 {

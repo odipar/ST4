@@ -4,16 +4,16 @@
 namespace Nt4;
 
 /// <summary>
-/// <see cref="Optimizer"/> restructured to not allocate: the same parse, the
-/// same bytes out, at a fraction of the time.
+/// <see cref="Optimizer"/> without allocation: the same parse, the same bytes
+/// out, in a fraction of the time.
 /// </summary>
 /// <remarks>
-/// The identical DP runs forward on primitive arrays, recording per position
-/// the winning cost and a three-int descriptor of the winner, and
+/// The same DP runs forward on primitive arrays, recording per position the
+/// winning cost and a three-int descriptor of the winner, and
 /// <see cref="ChainRebuilder"/> builds only the winning chain. Candidates are
 /// evaluated in the same order with the same strictly-better rule, so ties
-/// fall as in the reference and the output is byte-identical, which the
-/// equivalence test asserts.
+/// fall as in the reference and the output is byte-identical, which a test
+/// asserts.
 /// </remarks>
 public sealed class FastOptimizer
 {
@@ -45,8 +45,8 @@ public sealed class FastOptimizer
     }
 
     /// <summary>
-    /// Returns the last block of the optimal parse of <paramref name="units"/>,
-    /// reporting progress on stdout while it works.
+    /// The last block of the optimal parse of <paramref name="units"/>,
+    /// reporting progress on stdout.
     /// </summary>
     /// <param name="units">The input as k-byte units.</param>
     /// <param name="unit">Bytes per unit, which sets what a literal costs.</param>
@@ -56,9 +56,9 @@ public sealed class FastOptimizer
         Optimize(units, unit, offsetLimit, true);
 
     /// <summary>
-    /// Returns the last block of the optimal parse of <paramref name="units"/>
-    /// - the same chain <see cref="Optimizer.Optimize(int[], int, int, bool)"/>
-    /// returns, byte for byte.
+    /// The last block of the optimal parse of <paramref name="units"/>: the
+    /// chain <see cref="Optimizer.Optimize(int[], int, int, bool)"/> returns,
+    /// byte for byte.
     /// </summary>
     /// <param name="units">The input as k-byte units.</param>
     /// <param name="unit">Bytes per unit, which sets what a literal costs.</param>
@@ -77,8 +77,8 @@ public sealed class FastOptimizer
 
     /// <summary>
     /// The winning cost per position, for the tests that hold other optimizers
-    /// to this one: the optimum is unique, so any exact optimizer must produce
-    /// this exact array.
+    /// to this one: the optimum is unique, so an exact optimizer produces this
+    /// array.
     /// </summary>
     internal static int[] Costs(int[] units, int unit, int offsetLimit)
     {
@@ -92,11 +92,11 @@ public sealed class FastOptimizer
 
     /// <summary>
     /// The DP of <see cref="Optimizer"/>, candidate for candidate, on
-    /// primitives. State per offset: the best chain ending in a match at
+    /// primitives. Per offset: the best chain ending in a match at
     /// <c>stateEnd</c> costing <c>stateBits</c>, and the best chain ending in
     /// a literal run at <c>litEnd</c> costing <c>litBits</c>. A position's
-    /// winner is recorded the moment it takes the lead; replacement is strictly
-    /// better, so ties keep the earlier candidate.
+    /// winner is recorded when it takes the lead, and replaced only by a
+    /// strictly better one, so ties keep the earlier candidate.
     /// </summary>
     private void Forward(bool progress)
     {

@@ -1,15 +1,14 @@
 package org.st4;
 
 /**
- * The reference ST4 decoder: what the 68000 versions have to agree with.
- *
- * <p>ZX1's state machine with four changes: literals come from stream B and
- * offsets from stream C or D by width; lengths and offsets count units, so a
- * step moves k bytes; the end marker's extra bit can turn the end into an
- * endless match, the repeat; and an offset beyond the window copies from the
- * literal stream - {@code offset - window} units behind the read pointer,
- * which stays put, the offset advanced by what was copied - exactly as the
- * 68000 decoders do. A copy that would not stay behind the pointer is refused.
+ * The reference decoder, which the 68000 decoders have to agree with. ZX1's
+ * state machine with four changes: literals come from stream B and offsets
+ * from stream C or D by width; lengths and offsets count units; the end
+ * marker's extra bit turns the end into an endless match, the repeat; and an
+ * offset beyond the window copies {@code offset - window} units from behind
+ * the literal read pointer, which stays where it is, and advances the offset
+ * by what was copied. A copy that would not stay behind the pointer is
+ * rejected.
  */
 public final class St4Decompressor {
 
@@ -55,21 +54,17 @@ public final class St4Decompressor {
     }
 
     /**
-     * What a decode produced: the output, and how the stream ended. A stream
-     * that repeats reports its loop point - the unit the output continues
-     * from after the last one, so the stream decodes as
-     * {@code units[0..R) units[R..O)} forever; a stream that simply ends
-     * reports -1. For a repeating stream any {@code size} from one whole pass
-     * up is decodable - the repeat fills whatever the pass itself did not.
+     * The output and how the stream ended: the loop point R of a repeating
+     * stream, which decodes as {@code units[0..R) units[R..O)} forever, or
+     * -1. A repeating stream decodes to any {@code size} from one pass up.
      */
     public record Decoded(byte[] output, int repeatIndex) {}
 
     /**
      * As above, at the window the stream was packed for: a match reaches at
-     * most {@code window} units back, which is what makes a stream safe for a
+     * most {@code window} units back, so a stream that decodes is safe for a
      * ring of that many units, and an offset beyond it copies from the
-     * literal stream. This is how tests hold a {@code -mN} stream to its ring
-     * without a ring in sight.
+     * literal stream. Tests hold a {@code -mN} stream to its ring this way.
      *
      * @throws IllegalStateException when a copy does not stay behind the
      *     literal read pointer, or a loop reaches past the window
@@ -91,10 +86,10 @@ public final class St4Decompressor {
 
     /**
      * As above, holding a stream to its rewind point: from {@code rewindAt}
-     * bytes on, no match may reach before it. That is what makes the loop
-     * replayable from the state saved there - every pass then sees the same
-     * history - and a stream that breaks it would loop wrongly on the 68000,
-     * so the reference refuses it instead.
+     * bytes on, no match reaches before it, so the loop replays from the
+     * state saved there and every pass sees the same history. A stream that
+     * reaches before it would loop wrongly on the 68000, and is rejected
+     * here.
      *
      * @throws IllegalStateException when the loop reaches before its rewind
      *     point, a copy does not stay behind the literal read pointer, or a
@@ -155,8 +150,8 @@ public final class St4Decompressor {
     }
 
     private void beginMatchFromNewOffset() {
-        // Two class bits: byte or word, then which bank - or, for a word, the
-        // one code that means the stream is over.
+        // Two class bits: byte or word, then the bank, or for a word the end
+        // of the stream.
         if (readBit()) {
             int bank = readBit() ? 1 : 0;
             assert byteOffsetIndex < byteOffsets.length : "truncated byte offsets";
@@ -180,8 +175,8 @@ public final class St4Decompressor {
 
     /**
      * Copies {@code length} units from the literal stream, {@code lastOffset -
-     * window} units behind the read pointer, without moving the pointer, and
-     * advances the offset by what it copied - as the 68000 decoders do.
+     * window} units behind the read pointer, which stays where it is, and
+     * advances the offset by what it copied.
      */
     private void copyFromLiterals(int length) {
         int back = lastOffset - window;
@@ -200,15 +195,13 @@ public final class St4Decompressor {
     }
 
     /**
-     * The end code's extra bit: a plain end, or the repeat - one last word
-     * offset from stream D, matched until the output the caller asked for is
-     * full. The 68000 decoders run the same match 65535 units at a time,
-     * re-armed forever.
+     * The end code's extra bit: a plain end, or the repeat, one last word
+     * offset from stream D matched until the output is full. The 68000
+     * decoders run the same match 65535 units at a time, re-armed forever.
      */
     private void endOrRepeat() {
         if (readBit()) {
-            // Stream D holds the distance back to the loop point; the loop
-            // point itself is where the pass so far ends, minus that.
+            // Stream D holds the distance back to the loop point.
             int distance = readWordOffset();
             assert distance > 0 : "a repeat must reach back at least one unit";
             if (distance > window) {

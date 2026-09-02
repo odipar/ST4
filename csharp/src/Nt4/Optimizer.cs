@@ -4,14 +4,16 @@
 namespace Nt4;
 
 /// <summary>
-/// Optimal LZ parser for ST4: ZX1's optimal parser, moved from bytes to k-byte
-/// units - the readable reference the fast implementations are checked against.
+/// The optimal parser: ZX1's, moved from bytes to k-byte units, and the
+/// readable reference the fast optimizers are held to.
 /// </summary>
 /// <remarks>
 /// For every position it keeps, per offset, the cheapest chain ending in a
-/// literal run and the cheapest ending in a match, and picks the best; only
-/// the costs differ from ZX1's. The result is a chain of <see cref="Block"/>s,
-/// last block first, which <see cref="Compressor"/> walks in reverse.
+/// literal run and the cheapest ending in a match, and takes the best. Only
+/// the costs differ from ZX1's: a literal unit costs <c>8 * k</c> bits, an
+/// offset counts units, a new-offset match pays three control bits and a
+/// byte or a word. The result is a chain of <see cref="Block"/>s, last block
+/// first, which <see cref="Compressor"/> walks in reverse.
 /// </remarks>
 public static class Optimizer
 {
@@ -19,8 +21,8 @@ public static class Optimizer
     public const int InitialOffset = 1;
 
     /// <summary>
-    /// Returns the last block of the optimal parse of <paramref name="units"/>,
-    /// drawing a progress bar on stdout while it works.
+    /// The last block of the optimal parse of <paramref name="units"/>,
+    /// reporting progress on stdout.
     /// </summary>
     /// <param name="units">The input as k-byte units.</param>
     /// <param name="unit">Bytes per unit, which sets what a literal costs.</param>
@@ -29,7 +31,7 @@ public static class Optimizer
     public static Block Optimize(int[] units, int unit, int offsetLimit) =>
         Optimize(units, unit, offsetLimit, true);
 
-    /// <summary>Returns the last block of the optimal parse of <paramref name="units"/>.</summary>
+    /// <summary>The last block of the optimal parse of <paramref name="units"/>: every position against every offset.</summary>
     /// <param name="units">The input as k-byte units.</param>
     /// <param name="unit">Bytes per unit, which sets what a literal costs.</param>
     /// <param name="offsetLimit">The furthest a match may reach back, in units.</param>
@@ -62,8 +64,8 @@ public static class Optimizer
             {
                 if (index != 0 && index >= offset && units[index] == units[index - offset])
                 {
-                    // Match reusing the last offset: its length may be one unit,
-                    // which at k = 4 replaces four bytes with a couple of bits.
+                    // A match reusing the last offset: one unit at least, which
+                    // at k = 4 replaces four bytes with a few bits.
                     Block? literal = lastLiteral[offset];
                     if (literal != null)
                     {
@@ -73,8 +75,7 @@ public static class Optimizer
                         lastMatch[offset] = match;
                         optimal[index] = Better(optimal[index], match);
                     }
-                    // Match with a new offset, which the format cannot express
-                    // shorter than two units.
+                    // A match with a new offset: two units at least.
                     if (++matchLength[offset] > 1)
                     {
                         if (bestLengthSize < matchLength[offset])

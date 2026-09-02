@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """Differential test for the repeat: st4 -r streams through all three decoders.
 
-A stream packed with -rR encodes the infinite input [0,R)[R,O)* - after one
-whole pass the output continues from unit R and never stops, an endless match
-O-R units back. This packs every corpus with the real packer at unit sizes 1,
-2 and 4, decodes beyond two passes under Unicorn as a plain 68000 - linearly
-resumed with ST4.S, through a counted ring with ST4_wrap.S, and through the
-general ring with ST4_ring.S in both wrap modes - and checks every output byte
-against the recurrence, that all four streams are consumed exactly (the loop
-word in C included), and that no decoder ever claims to be done.
+A stream packed with -rR decodes as [0,R)[R,O)* : after one pass the output
+continues from unit R and never stops, an endless match O-R units back. This
+packs every corpus with the packer at unit sizes 1, 2 and 4, decodes beyond
+two passes under Unicorn as a plain 68000, resumed into one buffer with
+ST4.S, through a counted ring with ST4_wrap.S, and through the general ring
+with ST4_ring.S in both wrap modes, and checks every output byte against the
+recurrence, that all four streams are consumed exactly, the loop word in D
+included, and that no decoder reports done.
 
     python3 68k/test/emu/test_st4_repeat.py [--quick]
 """

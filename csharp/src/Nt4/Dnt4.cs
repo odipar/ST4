@@ -3,17 +3,12 @@
 
 namespace Nt4;
 
-/// <summary>
-/// Command-line ST4 unpacker: the counterpart to <see cref="Nt4"/>, and the C#
-/// twin of the Java <c>Dst4</c> reference.
-/// </summary>
+/// <summary>Command-line ST4 unpacker, the port of the Java <c>Dst4</c>.</summary>
 /// <remarks>
-/// What comes out is the <em>padded</em> data - a whole number of k-byte units
-/// - because that is what the format stores and what the 68000 decoders write.
-/// At <c>-k1</c> that is the input exactly; at <c>-k2</c> or <c>-k4</c> it can
-/// be up to k-1 bytes longer, and this tool says so. For a stream that loops,
-/// <c>-rN</c> plays the loop N times: the whole pass, and then N-1 repeats of
-/// its loop section.
+/// The output is the padded data, a whole number of k-byte units, as the
+/// format stores it: at <c>-k1</c> the input, at <c>-k2</c> or <c>-k4</c> up
+/// to k-1 bytes longer. For a stream that loops, <c>-rN</c> writes the pass
+/// and then N-1 repeats of its loop section.
 /// </remarks>
 public static class Dnt4
 {
@@ -27,7 +22,7 @@ public static class Dnt4
     public static int Run(string[] args)
     {
         ArgumentNullException.ThrowIfNull(args);
-        Console.WriteLine("DNT4: aligned split-stream unpacker v4.0 by Robbert van Dalen, "
+        Console.WriteLine("DNT4: aligned split-stream unpacker v7.0 by Robbert van Dalen, "
             + "based on ZX1 v1.5 by Einar Saukas");
 
         bool forcedMode = false;
@@ -104,8 +99,7 @@ public static class Dnt4
         try
         {
             container = Format.Read(file);
-            // One whole pass: a repeating stream would fill any size, but what
-            // the container stores is the pass - and -r asks for more of it.
+            // One whole pass; -r asks for more of it.
             decoded = Decompressor.Decode(container.Control, container.Literal,
                 container.ByteOffsets, container.WordOffsets, container.Unit,
                 container.Size, container.Window, container.Rewind);
@@ -139,12 +133,11 @@ public static class Dnt4
     }
 
     /// <summary>
-    /// The pass, and then <paramref name="times"/> - 1 repeats of its loop
-    /// section: what a decoder driven past the end of a looping stream
-    /// produces. A stream that loops by itself is decoded again to that
-    /// length, since its repeat fills whatever the pass did not; a stream that
-    /// loops by rewind is replayed as its caller would, and every pass sees
-    /// the same history, so the replay is the pass's loop section again.
+    /// The pass and then <paramref name="times"/> - 1 repeats of its loop
+    /// section, as a decoder driven past the end produces. A stream that
+    /// loops by itself is decoded again to that length; a stream that loops
+    /// by rewind repeats the pass's loop section, since every pass sees the
+    /// same history.
     /// </summary>
     /// <exception cref="ArgumentException">The stream does not loop and more than one pass is asked for.</exception>
     internal static byte[] Played(Format.Container container, Decompressor.Decoded pass, int times)
