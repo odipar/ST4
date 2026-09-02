@@ -552,6 +552,34 @@ final class St4RoundTripTest {
         }
     }
 
+    @Test
+    void theSearchsOpeningPassesAreTheReferenceHeuristic() {
+        // -c is the search with no time: its opening passes, which choose
+        // and shrink the dictionary as the readable optimizer does, on the
+        // search's parser. Over the corpora and windows the two must pack to
+        // the same size, give or take the eight bits a copy's class can
+        // differ by between the two ways of counting the literals between.
+        int reference = 0;
+        int passes = 0;
+        int cases = 0;
+        for (int unit : new int[] {1, 2, 4}) {
+            for (byte[] input : inputs()) {
+                int[] units = Units.split(input, unit);
+                for (int window : new int[] {4, 16, 64}) {
+                    reference += St4Compressor.compress(St4LiteralCopyOptimizer.optimize(units,
+                            unit, window, false), units, unit, St4Format.MAX_OP, -1, window)
+                            .bits();
+                    passes += St4Compressor.compress(St4LiteralCopySearch.optimize(units, unit,
+                            window, St4Format.MAX_OP, 0, 1), units, unit, St4Format.MAX_OP,
+                            -1, window).bits();
+                    cases++;
+                }
+            }
+        }
+        assertTrue(passes <= reference + 8 * cases, passes + " bits from the search's passes, "
+                + reference + " from the reference, over " + cases + " cases");
+    }
+
     private static final int[] ZX1_SIZES = {4, 6, 1006, 6, 19, 383, 26};
 
     @Test

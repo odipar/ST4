@@ -147,11 +147,14 @@ the offset would reach zero; the packer keeps it so.
 `st4 -c` turns copies on. The parse behind them cannot be exactly optimal —
 the parse decides which units are literal, a copy is only valid if its source
 is, and its offset counts the literals between, so the best chain so far no
-longer decides the best parse and the optimum is NP-hard — so
-`St4LiteralCopyOptimizer` chooses the dictionary first, the literals of a
-full-window parse, and is exact for it; `St4LiteralCopyOracle` tries every
-parse on inputs small enough for that, and puts the heuristic within about a
-percent of the true optimum on those.
+longer decides the best parse and the optimum is NP-hard — so the dictionary
+is chosen first, the literals of a full-window parse, and the parse is exact
+for it. `St4LiteralCopyOptimizer` is the readable form of that, one block
+per candidate and slow on large inputs; `-c` runs the same passes on the
+search's parser, in tens of milliseconds where the reference takes seconds,
+to the same size. `St4LiteralCopyOracle` tries every parse on inputs small
+enough for that, and puts the heuristic within about a percent of the true
+optimum on those.
 
 `st4 -cS` keeps going for S seconds. `St4LiteralCopySearch` descends and
 anneals over which units are literal — a greedy sweep that frees and trims
@@ -299,10 +302,9 @@ section, as a decoder driven past the end would.
 splits long matches — the default already fits the 68000 decoders — and `-rR`
 makes the stream loop from unit R. When the loop is longer than `-m`, `st4`
 says at which unit to save the decoder's state and at which to restore it.
-`-c` lets a match beyond `-m` copy from the literal stream, parsed once by
-the readable optimizer, which is slow on large inputs; `-cS` searches for S
-seconds for a better parse from there, printing each improvement as it finds
-it.
+`-c` lets a match beyond `-m` copy from the literal stream, parsed in one
+pass of the search's parser; `-cS` searches for S seconds for a better parse
+from there, printing each improvement as it finds it.
 
 Three optimizers select the blocks, all held to each other by tests:
 

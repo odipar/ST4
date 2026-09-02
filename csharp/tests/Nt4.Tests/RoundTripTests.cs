@@ -585,6 +585,36 @@ public sealed class RoundTripTests
     }
 
     [Fact]
+    public void TheSearchsOpeningPassesAreTheReferenceHeuristic()
+    {
+        // -c is the search with no time: its opening passes, which choose
+        // and shrink the dictionary as the readable optimizer does, on the
+        // search's parser. Over the corpora and windows the two must pack to
+        // the same size, give or take the eight bits a copy's class can
+        // differ by between the two ways of counting the literals between.
+        int reference = 0;
+        int passes = 0;
+        int cases = 0;
+        foreach (int unit in new[] { 1, 2, 4 })
+        {
+            foreach (byte[] input in Inputs())
+            {
+                int[] units = Units.Split(input, unit);
+                foreach (int window in new[] { 4, 16, 64 })
+                {
+                    reference += Compressor.Compress(LiteralCopyOptimizer.Optimize(units, unit,
+                        window, false), units, unit, Format.MaxOp, -1, window).Bits;
+                    passes += Compressor.Compress(LiteralCopySearch.Optimize(units, unit, window,
+                        Format.MaxOp, 0, 1), units, unit, Format.MaxOp, -1, window).Bits;
+                    cases++;
+                }
+            }
+        }
+        Assert.True(passes <= reference + 8 * cases,
+            $"{passes} bits from the search's passes, {reference} from the reference, over {cases} cases");
+    }
+
+    [Fact]
     public void UnitOneStaysWithinAFewPercentOfZx1()
     {
         // k=1 is ZX1's parse with everything moved into its own stream. Splitting
