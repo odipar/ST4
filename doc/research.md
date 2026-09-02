@@ -227,31 +227,72 @@ The test corpora are synthetic; the assets this is for are register dumps.
 YMX, the streaming YM player this format was split from, packs a tune as
 twenty-five streams - fourteen sound registers, one value per frame, and
 eleven of a compiled effect script - each decoded through its own ring of
-960 bytes by default, at k = 2. The four example tunes of that repository,
-their stream vectors built as its encoder builds them and packed here one
-section per stream, plain and with thirty seconds of search per stream, at
-its ring and at three smaller ones. Sizes are the four ST4 streams in
-bytes, summed over the twenty-five, without headers or padding; the plain
-sizes at 960 are YMX's own sections up to alignment padding.
+960 bytes by default. The four example tunes of that repository, their
+stream vectors built as its encoder builds them, packed here one section
+per stream: the previous ST4, which is what YMX packs with today, against
+this one with thirty seconds of search per stream, at the player's ring and
+at two smaller ones. Sizes are the four ST4 streams in bytes, summed over
+the twenty-five streams, without headers or padding.
 
-| tune | frames | ring 960: plain, with copies | ring 256 | ring 128 | ring 64 |
+At k = 1:
+
+| tune | frames | ring, bytes | previous ST4 | with copies | smaller by |
 |---|---:|---:|---:|---:|---:|
-| Dark Side of the Spoon 1 | 6144 | 3737, 3593 | 4198, 3797 | 8096, 5829 | 11507, 7494 |
-| Amiga Demo, Overscan screen | 6912 | 2853, 2780 | 6545, 4837 | 7074, 5185 | 9110, 5959 |
-| Mad Max 1 | 3838 | 954, 918 | 1940, 1494 | 2342, 1609 | 4200, 1918 |
-| Cuddly, main menu | 6650 | 1123, 1111 | 4885, 3149 | 7197, 4973 | 10280, 5532 |
+| Dark Side of the Spoon 1 | 6144 | 960 | 3519 | 3428 | 3% |
+|  |  | 256 | 3895 | 3645 | 6% |
+|  |  | 128 | 7762 | 6384 | 18% |
+| Amiga Demo, Overscan screen | 6912 | 960 | 2447 | 2420 | 1% |
+|  |  | 256 | 5379 | 4696 | 13% |
+|  |  | 128 | 5881 | 5082 | 14% |
+| Mad Max 1 | 3838 | 960 | 856 | 847 | 1% |
+|  |  | 256 | 1601 | 1447 | 10% |
+|  |  | 128 | 1861 | 1677 | 10% |
+| Cuddly, main menu | 6650 | 960 | 1063 | 1051 | 1% |
+|  |  | 256 | 4646 | 3766 | 19% |
+|  |  | 128 | 7083 | 5941 | 16% |
 
-The rings cost 25 × N bytes of RAM: 24000 at 960, 6400 at 256, 3200 at 128,
-1600 at 64. At the player's own ring the gain is one to four percent - the
-ring already holds what these tunes repeat. The gain is in shrinking it:
-copies take a quarter to a third off at 128 and 64 bytes on every tune, and
-half off Mad Max at 64. Dark Side of the Spoon at a 256-byte ring with
-copies is 3797 bytes against 3737 at 960 without them, the same file for a
-quarter of the ring RAM; the other tunes do not get that far, since a period
-stream that repeats at long range is match-shaped rather than
-literal-shaped, and shrinking the ring costs a tune that packed to almost
-nothing the most. The tune data needs nothing for this: copies read the
-literal stream out of the file the player already keeps in memory.
+At k = 2:
+
+| tune | frames | ring, bytes | previous ST4 | with copies | smaller by |
+|---|---:|---:|---:|---:|---:|
+| Dark Side of the Spoon 1 | 6144 | 960 | 3737 | 3593 | 4% |
+|  |  | 256 | 4198 | 3797 | 10% |
+|  |  | 128 | 8096 | 5829 | 28% |
+| Amiga Demo, Overscan screen | 6912 | 960 | 2853 | 2780 | 3% |
+|  |  | 256 | 6545 | 4837 | 26% |
+|  |  | 128 | 7074 | 5185 | 27% |
+| Mad Max 1 | 3838 | 960 | 954 | 918 | 4% |
+|  |  | 256 | 1940 | 1494 | 23% |
+|  |  | 128 | 2342 | 1609 | 31% |
+| Cuddly, main menu | 6650 | 960 | 1123 | 1111 | 1% |
+|  |  | 256 | 4885 | 3149 | 36% |
+|  |  | 128 | 7197 | 4973 | 31% |
+
+At the player's own ring the copies gain one to four percent - the ring
+already holds what these tunes repeat. The gain is in shrinking it: six to
+nineteen percent at 256 and 128 bytes at k = 1, and ten to thirty-six at
+k = 2, where a byte offset reaches twice as far. What that buys is RAM: the
+rings cost 25 × N bytes, 24000 at 960, 6400 at 256, 3200 at 128. Read that
+way, a tune packed with copies for a smaller ring against the same tune
+packed as YMX packs it today, for its 960-byte ring:
+
+| tune | k | previous ST4, ring 960 | with copies, ring 256 | against it | with copies, ring 128 | against it |
+|---|---:|---:|---:|---:|---:|---:|
+| Dark Side of the Spoon 1 | 1 | 3519 | 3645 | +4% | 6384 | +81% |
+|  | 2 | 3737 | 3797 | +2% | 5829 | +56% |
+| Amiga Demo, Overscan screen | 1 | 2447 | 4696 | +92% | 5082 | +108% |
+|  | 2 | 2853 | 4837 | +70% | 5185 | +82% |
+| Mad Max 1 | 1 | 856 | 1447 | +69% | 1677 | +96% |
+|  | 2 | 954 | 1494 | +57% | 1609 | +69% |
+| Cuddly, main menu | 1 | 1063 | 3766 | +254% | 5941 | +459% |
+|  | 2 | 1123 | 3149 | +180% | 4973 | +343% |
+
+Dark Side of the Spoon costs two to four percent more at a quarter of the
+ring RAM. The other tunes do not get that far, since a period stream that
+repeats at long range is match-shaped rather than literal-shaped, and
+shrinking the ring costs a tune that packed to almost nothing the most. The
+tune data needs nothing for this: copies read the literal stream out of the
+file the player already keeps in memory.
 
 ### What decides it
 
