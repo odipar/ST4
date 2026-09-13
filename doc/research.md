@@ -422,6 +422,57 @@ fifteen percent comes from: it frees and seeds literal runs where making one
 unit literal lets many later units copy. The floor is the right place to
 start from, and a dictionary chosen by the window starts above it.
 
+## Folding the class bits into the offset byte
+
+A reference costs 1 flag bit, 2 class bits and a byte of stream C, or a word
+of stream D beyond 512 units. Where the window M is small the offset byte has
+spare values: a match uses 1..M and a near copy M+1..255, which leaves 0 free
+to escape to a word. The byte then says what it is and both class bits go,
+11 bits down to 9.
+
+Packed through a 120-byte ring at k = 2, where M is 60 units, 98.6 percent of
+a tune's references are in the near bank and none reach a word, so almost
+every reference takes the shorter form:
+
+| tune | references | near bank | far bank | word |
+|---|---:|---:|---:|---:|
+| Deeper at a ring of 120 | 4428 | 4364 | 64 | 0 |
+| Deeper at a ring of 960 | 2397 | 2096 | 256 | 45 |
+
+### What it saves
+
+In bytes, summed over the thirty columns:
+
+| tune | packed at a ring of 120 | folded | smaller by |
+|---|---:|---:|---:|
+| Deeper | 18384 | 17409 | 5.3% |
+| DitherDance | 16680 | 16442 | 1.4% |
+| low | 17620 | 16899 | 4.1% |
+
+In cycles, by `68k/test/emu/bench_offset.py`, which assembles both paths out
+of ST4_wrap.S and counts them over the references a real stream packs to: the
+offset path falls from about 59 cycles to about 38, and with the refills the
+two bits no longer cost stream A it is about 24 cycles a reference. References
+are 4428 of 6609 operations at that ring, so an operation of 225 to 240 cycles
+loses about 16 of them, seven percent.
+
+### Why it was left alone
+
+Seven percent of a decode that is itself small. One column refills a row, and
+at a ring of 120 a refill parses 0.66 operations on average, so a 50 Hz frame
+of 160000 cycles spends about 153 of them in ST4 and would save about 11. The
+costliest frame parses eight operations and would save 128.
+
+In bytes the change lands against a resident total the ring change has already
+cut. A tune and its rings together go from 43528 bytes at a ring of 960 to
+24456 at 120, and the folded byte takes that to 23481: the ring is worth 44
+percent and the format change a further 4.0, 1.1 and 3.0 percent on the three
+tunes.
+
+Against that stand a version bump, three decoders at three unit sizes, the
+Java, Go and C# packers, and every packed asset. The measurement is recorded
+here so the question does not have to be opened again without one.
+
 ## Sources
 
 - J. A. Storer, T. G. Szymanski, *The macro model for data compression
