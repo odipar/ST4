@@ -337,6 +337,91 @@ ten minutes, still improving. What is left is one-unit copies in the cost
 model, and the same candidates in the fast optimizer, the event-driven one
 falling back.
 
+## Choosing the dictionary by the window
+
+The opening dictionary is the literal set of a parse at the format's full
+reach, so it does not depend on the window the stream packs for. A second
+question follows from that: where the window is small, would a dictionary
+built for that window pack smaller? A repeat the window reaches is served by
+a match and needs no dictionary entry, and a repeat beyond it needs the entry
+its source lies in, so a dictionary built at the window looks like the one
+the data calls for. It packs larger, on every corpus here but one.
+
+### Why a larger dictionary cannot win
+
+A dictionary is a set of forced literals, so it is a constraint and not a
+resource: every unit in it is written to stream B at 8k bits, whatever the
+parse would otherwise have done with it. The best dictionary is the smallest
+one the rest of the input can be built from.
+
+That smallest one has a floor. A unit whose value has never appeared earlier
+cannot be copied and cannot be matched, so it is literal in every parse of
+the input. The first occurrence of each distinct value is therefore a lower
+bound on any dictionary, and the opening dictionary already sits near it:
+
+| input | k | units | floor | opening dictionary | at the window |
+|---|---:|---:|---:|---:|---:|
+| Deeper's thirty columns | 2 | 149760 | 1793 (1.2%) | 2220 (1.5%) | 5465 (3.6%) |
+| prose | 1 | 20842 | 86 (0.4%) | 1707 (8.2%) | 10974 (52.7%) |
+
+On register columns the opening dictionary is within a quarter of the floor,
+so there is no room beneath it. A dictionary built at the window is two and a
+half times the floor, and one built by marking the source of every repeat
+beyond the window reaches 50 to 82 percent of the input.
+
+### What it packed
+
+The thirty columns of Deeper, 9984 rows each, at k = 2 and a window of 60
+units, summed over the columns:
+
+| dictionary | packed bytes | against the opening one |
+|---|---:|---:|
+| the opening one, a full-reach parse's literals | 17796 | |
+| a parse at the window | 21304 | +20% |
+| the source of every repeat beyond the window | 36966 | +108% |
+
+The corpora, at k = 1, one-shot parses:
+
+| corpus | M | opening dictionary | at the window | difference |
+|---|---:|---:|---:|---:|
+| far-match | 16 | 448 | 840 | +392 |
+| period-129 | 16 | 204 | 1064 | +860 |
+| word-soup | 16 | 1188 | 2398 | +1210 |
+| word-soup | 64 | 1032 | 1630 | +598 |
+| class file | 16 | 5948 | 7148 | +1200 |
+| class file | 64 | 5576 | 6146 | +570 |
+| prose | 16 | 17610 | 20002 | +2392 |
+| prose | 64 | 15832 | 15506 | -326 |
+
+One cell of ten packs smaller, prose at 64 units by 2 percent, and prose is
+where the floor lies furthest below the opening dictionary. Everywhere else
+the larger dictionary costs what its extra literals cost.
+
+### Where the ring stands on periodic input
+
+The premise of a window-built dictionary is that a small ring is consulted
+rarely. On register columns it is consulted most of the time. The same tune
+packed through a 120-byte ring, counting every reference:
+
+| tune | matches | copies | reps | matches, as a share of references |
+|---|---:|---:|---:|---:|
+| Deeper | 3744 | 684 | 790 | 84.5% |
+| DitherDance | 860 | 93 | 200 | 90.2% |
+| low | 3614 | 425 | 763 | 89.5% |
+
+A match and a copy cost the same eleven bits, so the parse selects whichever
+reaches further, and on a column that repeats every few rows that is the
+match. Shrinking the ring further to force the dictionary's hand packs
+larger, not smaller: Deeper goes from 18384 bytes at a ring of 120 to 27712
+at 60.
+
+### What decides it here
+
+The search already moves above the floor, and that is where its one to
+fifteen percent comes from: it frees and seeds literal runs where making one
+unit literal lets many later units copy. The floor is the right place to
+start from, and a dictionary chosen by the window starts above it.
+
 ## Sources
 
 - J. A. Storer, T. G. Szymanski, *The macro model for data compression
