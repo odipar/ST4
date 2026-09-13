@@ -339,40 +339,43 @@ falling back.
 
 ## Choosing the dictionary by the window
 
-The opening dictionary is the literal set of a parse at the format's full
-reach, so it does not depend on the window the stream packs for. A second
-question follows from that: where the window is small, would a dictionary
-built for that window pack smaller? A repeat the window reaches is served by
-a match and needs no dictionary entry, and a repeat beyond it needs the entry
-its source lies in, so a dictionary built at the window looks like the one
-the data calls for. It packs larger, on every corpus here but one.
+The search opens from the literals of a full-reach parse, so its starting
+dictionary is the same at every window. The question this section answers:
+when the window is small, would a dictionary built for that window pack
+smaller? The case for yes is simple. A repeat within the window is served by
+a match and needs no dictionary entry; a repeat beyond the window needs its
+source kept as literals. A dictionary built at the window should therefore
+contain exactly what the copies need and no more. Measured, it packs larger
+on every corpus here but one.
 
 ### Why a larger dictionary cannot win
 
-A dictionary is a set of forced literals, so it is a constraint and not a
-resource: every unit in it is written to stream B at 8k bits, whatever the
-parse would otherwise have done with it. The best dictionary is the smallest
-one the rest of the input can be built from.
+A dictionary is a set of units forced to be literal. That makes it a
+constraint, not a resource: every unit in it costs 8k bits in stream B
+regardless of what the parse could have done with it. The best dictionary is
+therefore the smallest one from which the rest of the input can still be
+built.
 
-That smallest one has a floor. A unit whose value has never appeared earlier
-cannot be copied and cannot be matched, so it is literal in every parse of
-the input. The first occurrence of each distinct value is therefore a lower
-bound on any dictionary, and the opening dictionary already sits near it:
+There is a hard floor on how small. A unit whose value has not appeared
+earlier in the stream cannot be copied and cannot be matched, so it is a
+literal in every possible parse. The first occurrence of each distinct value
+is a lower bound on any dictionary, and the opening dictionary is already
+close to it:
 
 | input | k | units | floor | opening dictionary | at the window |
 |---|---:|---:|---:|---:|---:|
 | Deeper's thirty columns | 2 | 149760 | 1793 (1.2%) | 2220 (1.5%) | 5465 (3.6%) |
 | prose | 1 | 20842 | 86 (0.4%) | 1707 (8.2%) | 10974 (52.7%) |
 
-On register columns the opening dictionary is within a quarter of the floor,
-so there is no room beneath it. A dictionary built at the window is two and a
+On register columns the opening dictionary is within a quarter of the floor:
+there is no room below it. A dictionary built at the window is two and a
 half times the floor, and one built by marking the source of every repeat
 beyond the window reaches 50 to 82 percent of the input.
 
 ### What it packed
 
-The thirty columns of Deeper, 9984 rows each, at k = 2 and a window of 60
-units, summed over the columns:
+Deeper's thirty columns, 9,984 rows each, at k = 2 and a window of 60 units,
+summed over the columns:
 
 | dictionary | packed bytes | against the opening one |
 |---|---:|---:|
@@ -380,7 +383,7 @@ units, summed over the columns:
 | a parse at the window | 21304 | +20% |
 | the source of every repeat beyond the window | 36966 | +108% |
 
-The corpora, at k = 1, one-shot parses:
+The corpora at k = 1, one-shot parses:
 
 | corpus | M | opening dictionary | at the window | difference |
 |---|---:|---:|---:|---:|
@@ -393,15 +396,16 @@ The corpora, at k = 1, one-shot parses:
 | prose | 16 | 17610 | 20002 | +2392 |
 | prose | 64 | 15832 | 15506 | -326 |
 
-One cell of ten packs smaller, prose at 64 units by 2 percent, and prose is
-where the floor lies furthest below the opening dictionary. Everywhere else
-the larger dictionary costs what its extra literals cost.
+Only one cell of ten packs smaller: prose at 64 units, by 2 percent. Prose
+is also where the floor lies furthest below the opening dictionary, so it is
+the one corpus with room to find. Everywhere else the larger dictionary pays
+for its extra literals and the extra copies do not pay them back.
 
-### Where the ring stands on periodic input
+### How often the ring is used on periodic input
 
-The premise of a window-built dictionary is that a small ring is consulted
-rarely. On register columns it is consulted most of the time. The same tune
-packed through a 120-byte ring, counting every reference:
+A window-built dictionary assumes the ring is consulted rarely. On register
+columns it is consulted most of the time. The same tune packed through a
+120-byte ring, counting every reference:
 
 | tune | matches | copies | reps | matches, as a share of references |
 |---|---:|---:|---:|---:|
@@ -409,30 +413,32 @@ packed through a 120-byte ring, counting every reference:
 | DitherDance | 860 | 93 | 200 | 90.2% |
 | low | 3614 | 425 | 763 | 89.5% |
 
-A match and a copy cost the same eleven bits, so the parse selects whichever
+A match and a copy cost the same eleven bits, so the parse picks whichever
 reaches further, and on a column that repeats every few rows that is the
-match. Shrinking the ring further to force the dictionary's hand packs
-larger, not smaller: Deeper goes from 18384 bytes at a ring of 120 to 27712
-at 60.
+match. Shrinking the ring further, to push more references onto the
+dictionary, packs larger rather than smaller: Deeper goes from 18,384 bytes
+at a ring of 120 to 27,712 at 60.
 
-### What decides it here
+### Where the search's gain comes from
 
-The search already moves above the floor, and that is where its one to
-fifteen percent comes from: it frees and seeds literal runs where making one
-unit literal lets many later units copy. The floor is the right place to
-start from, and a dictionary chosen by the window starts above it.
+The search does improve on the opening dictionary, by one to fifteen
+percent, and it does so by moving above the floor: freeing or seeding a
+literal run where making one unit literal lets many later units copy from
+it. The floor is the right place to start. A dictionary chosen by the window
+starts above it and has to come back down.
 
 ## Folding the class bits into the offset byte
 
-A reference costs 1 flag bit, 2 class bits and a byte of stream C, or a word
-of stream D beyond 512 units. Where the window M is small the offset byte has
-spare values: a match uses 1..M and a near copy M+1..255, which leaves 0 free
-to escape to a word. The byte then says what it is and both class bits go,
-11 bits down to 9.
+A reference is written as 1 flag bit, 2 class bits and one byte of stream C,
+or a word of stream D for an offset beyond 512 units. With a small window M
+the offset byte has spare values: a match needs only 1..M, so M+1..255 can
+encode a near copy directly, and 0 can mark an escape to a word. The byte
+then identifies itself and the two class bits are not needed: 11 bits down
+to 9 per reference.
 
-Packed through a 120-byte ring at k = 2, where M is 60 units, 98.6 percent of
-a tune's references are in the near bank and none reach a word, so almost
-every reference takes the shorter form:
+Through a 120-byte ring at k = 2, where M is 60 units, 98.6 percent of a
+tune's references fit the near bank and none needs a word, so nearly every
+reference would use the short form:
 
 | tune | references | near bank | far bank | word |
 |---|---:|---:|---:|---:|
@@ -449,42 +455,46 @@ In bytes, summed over the thirty columns:
 | DitherDance | 16680 | 16442 | 1.4% |
 | low | 17620 | 16899 | 4.1% |
 
-In cycles, by `68k/test/emu/bench_offset.py`, which assembles both paths out
-of ST4_wrap.S and counts them over the references a real stream packs to: the
-offset path falls from about 59 cycles to about 38, and with the refills the
-two bits no longer cost stream A it is about 24 cycles a reference. References
-are 4428 of 6609 operations at that ring, so an operation of 225 to 240 cycles
-loses about 16 of them, seven percent.
+In cycles, measured by `68k/test/emu/bench_offset.py`, which assembles both
+decode paths out of ST4_wrap.S and counts them over the references of a real
+stream: the offset path drops from about 59 cycles to about 38. Counting
+also the stream A refills that the two removed bits no longer cause, the
+saving is about 24 cycles per reference. References make up 4,428 of the
+6,609 operations at that ring, so an operation of 225 to 240 cycles loses
+about 16 of them: seven percent.
 
 ### Why it was left alone
 
-Seven percent of a decode that is itself small. One column refills a row, and
-at a ring of 120 a refill parses 0.66 operations on average, so a 50 Hz frame
-of 160000 cycles spends about 153 of them in ST4 and would save about 11. The
-costliest frame parses eight operations and would save 128.
+Seven percent of a decode that is itself a small part of a frame. One column
+is refilled per row, and at a ring of 120 a refill parses 0.66 operations on
+average, so a 50 Hz frame of 160,000 cycles spends about 153 of them in ST4.
+The change would save about 11. The costliest frame parses eight operations
+and would save 128.
 
-In bytes the change lands against a resident total the ring change has already
-cut. A tune and its rings together go from 43528 bytes at a ring of 960 to
-24456 at 120, and the folded byte takes that to 23481: the ring is worth 44
-percent and the format change a further 4.0, 1.1 and 3.0 percent on the three
+In bytes, the change lands on a resident total the ring change has already
+cut. A tune with its rings goes from 43,528 bytes at a ring of 960 to 24,456
+at 120; the folded byte would bring that to 23,481. The ring is worth 44
+percent, the format change a further 4.0, 1.1 and 3.0 percent on the three
 tunes.
 
-Against that stand a version bump, three decoders at three unit sizes, the
-Java, Go and C# packers, and every packed asset. The measurement is recorded
-here so the question does not have to be opened again without one.
+The cost of the change is a format version bump, three decoders at three
+unit sizes, the Java, Go and C# packers, and every packed asset in
+existence. That is not worth one to four percent. The measurement is
+recorded so the question need not be reopened without one.
 
 ## A penalty a block, against the costliest frame
 
-A decoder parses one block at a time, and a DTX2 refill parses the blocks
-that begin in its window, so what a frame pays is the blocks it meets and
-not the bytes the column packs to. The parse can be asked for fewer of
-them: `st4 -pN` charges N bits on every block besides what it writes, so
-a chain of fewer, longer blocks wins where the bits are close. At a
-penalty of zero the reference parser writes the byte the event-driven one
-writes, which is how the rows below are read against each other.
+A decoder parses one block at a time, and a DTX2 refill parses whichever
+blocks begin inside its window. So what a frame pays for is the number of
+blocks it meets, not the bytes the column packs to. The parser can be asked
+for fewer blocks: `st4 -pN` charges N extra bits on every block beyond what
+the block writes, so a chain of fewer, longer blocks wins wherever the bit
+costs are close. At a penalty of zero the reference parser produces exactly
+the bytes the event-driven parser does, which is what makes the rows below
+comparable.
 
-Deeper's thirty columns at k = 2, a window of 15 units, and low's thirty
-at k = 1, a window of 30:
+Deeper's thirty columns at k = 2 (a window of 15 units) and low's thirty at
+k = 1 (a window of 30):
 
 | tune | penalty | bytes | against 0 | blocks a window | worst | 8 or more |
 |---|---:|---:|---:|---:|---:|---:|
@@ -501,27 +511,26 @@ at k = 1, a window of 30:
 
 ### What it is worth
 
-The worst window is what a demo budgets for. At k = 1 it stood at 15
-blocks, the most a window of 30 units can hold at one block a unit, and a
-penalty of 8 bits takes it to 12 for under two percent of the file. At
-k = 2 a penalty of 16 takes 9 to 7 for 2.8 percent, and 32 and 64 buy no
-further: the worst window is 7 from there down, and the bytes go on
-rising.
+The worst window is what a demo has to budget for. At k = 1 it was 15
+blocks, the most a 30-unit window can hold at one block per unit; a penalty
+of 8 bits brings it to 12 for under two percent more file. At k = 2 a
+penalty of 16 brings 9 down to 7 for 2.8 percent, and 32 and 64 buy no
+further reduction: the worst window stays at 7 while the bytes keep rising.
 
-At 225 to 240 cycles a block, and 6656 cycles in the thirteen scanlines
-YMXR's R4.5 allows the worst frame, the refill at k = 1 was 52 percent of
-that budget and a penalty of 8 makes it 42.
+At 225 to 240 cycles a block, against the 6,656 cycles in the thirteen
+scanlines YMXR's R4.5 allows the worst frame, the refill at k = 1 was 52
+percent of that budget; a penalty of 8 makes it 42.
 
 ### Neither parser is exact at a penalty
 
-The event-driven optimizer carries the penalty now, so `-pN` no longer
-costs the reference parser's quadratic time. Holding the two to each
-other found that they disagree above a penalty of zero, and an exact
-parse of the same input found that neither is right.
+The event-driven optimizer now applies the penalty too, so `-pN` no longer
+needs the reference parser's quadratic time. Comparing the two found that
+they disagree at any penalty above zero, and an exact parse of the same
+inputs showed that neither is right.
 
 The exact parse is a dynamic program over position and last offset that
-tries every literal run, every rep and every new offset at every length.
-It is far too slow for a column, and it settles small cases:
+tries every literal run, every rep and every new offset at every length. It
+is far too slow for a real column, but it settles small cases:
 
 | input | penalty | exact | reference | event-driven |
 |---|---:|---:|---:|---:|
@@ -532,26 +541,25 @@ It is far too slow for a column, and it settles small cases:
 | the same | 16 | 533 | 569 | 569 |
 | the same | 32 | 677 | 777 | 777 |
 
-Both are exact at a penalty of zero, which their tests hold them to, and
-the gap opens as the penalty grows: nothing at 4, 0.9 percent at 8, 6.8
-at 16, 14.8 at 32 on the column above. Another column reads exact at
-every penalty tried.
+Both parsers are exact at a penalty of zero, which their tests confirm. The
+gap opens as the penalty grows: none at 4, 0.9 percent at 8, 6.8 at 16, 14.8
+at 32 on the column above. Another column is exact at every penalty tried.
 
-ZX1's structure is why. A literal run is extended only where no offset
-matches, and a state a position keeps is the cheapest chain ending in a
-literal run or in a match at that offset. That is enough for bits alone,
-and a charge a block makes the count of blocks matter beyond the bits,
-which those states do not record.
+The cause is ZX1's parse structure. A literal run is only ever extended at a
+position where no offset matches, and the state kept per offset is the
+cheapest chain ending in a literal run or in a match at that offset. That is
+sufficient when only bits count. A charge per block makes the number of
+blocks matter as well, and those states do not record it.
 
-So the bytes in the table above are what these parsers reach and not what
-the parse costs: the real price of a shorter worst window is lower than
-they report. The window counts stand, since they were read off files that
-were really written.
+So the byte figures in the table above are what these parsers reach, not
+what an exact penalised parse would cost: the true price of a shorter worst
+window is lower than they show. The window counts stand, since they were
+read from files that were really written.
 
 ### Where the event-driven parser is exact
 
-The gap closes at the penalties worth using. Seven columns of a tune,
-their first 300 bytes, against the exact parse at k = 2 and a window of
+The gap closes at the penalties that matter. Seven columns of a tune, the
+first 300 bytes of each, against the exact parse at k = 2 with a window of
 64 units:
 
 | penalty | columns exact | the widest gap |
@@ -560,15 +568,15 @@ their first 300 bytes, against the exact parse at k = 2 and a window of
 | 4 | 7 of 7 | none |
 | 8 | 5 of 7 | 0.65% |
 
-A penalty of 2 or 4 is exact on every column tried and 8 is within a
-percent, so a sweep over that range measures the parse and not the
+A penalty of 2 or 4 is exact on every column tried, and 8 is within a
+percent, so a sweep over that range measures the parse rather than the
 parser.
 
 ### The sweep
 
-Fourteen tunes of the corpus, every column packed at each penalty, the
-windows counted off the files: a refill is 15 units at k = 2 and 30 at
-k = 1.
+Fourteen corpus tunes, every column packed at each penalty, the windows
+counted from the resulting files. A refill is 15 units at k = 2 and 30 at k
+= 1.
 
 | unit | tunes | penalty | bytes | against 0 | the widest window | a tune's worst, mean |
 |---:|---:|---:|---:|---:|---:|---:|
@@ -581,16 +589,16 @@ k = 1.
 | | | 4 | 51992 | +0.22% | 11 | 8.8 |
 | | | 8 | 52280 | +0.77% | 11 | 8.7 |
 
-**A penalty is for unit 1.** There a refill is 30 units, twice the span
-of a unit 2 refill, and twice as many blocks can land in it: a penalty of
-8 takes the widest window from 14 to 10 and the windows needing 8 blocks
-or more from 1.45 to 0.80 percent, for two percent of the bytes. At unit
-2 the widest window is 11 at every penalty tried, the mean of the tunes'
-worst moves 9.4 to 8.7, and the windows needing 8 or more stand at 0.08
-percent: there is little there to buy.
+**A penalty is for unit 1.** A unit-1 refill spans 30 units, twice a unit-2
+refill, so twice as many blocks can land in it. A penalty of 8 brings the
+widest window from 14 to 10 and cuts the windows needing 8 blocks or more
+from 1.45 to 0.80 percent, for two percent more bytes. At unit 2 the widest
+window is 11 at every penalty tried, the mean of the tunes' worst windows
+moves only from 9.4 to 8.7, and windows needing 8 or more stay at 0.08
+percent: there is little to gain.
 
-A few tunes read a few bytes smaller at a penalty than without one, which
-is the streams padding to longs over thirty columns and not a parse that
+A few tunes come out a few bytes smaller with a penalty than without. That
+is stream padding to long boundaries over thirty columns, not a parse that
 beat the unpenalised optimum.
 
 ## Sources
