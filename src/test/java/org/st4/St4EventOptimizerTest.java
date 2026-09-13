@@ -43,6 +43,44 @@ final class St4EventOptimizerTest {
                         java.nio.charset.StandardCharsets.US_ASCII));
     }
 
+    /**
+     * A penalised parse decodes back to the input, and a penalty of zero is
+     * the parse without one, bit for bit. The two parsers do not agree above
+     * zero and neither is exact there: ZX1's structure extends a literal run
+     * only where no offset matches, which is optimal for bits alone and not
+     * for bits with a charge a block. research.md, A penalty a block, has
+     * what an exact parse of the same input costs.
+     */
+    @Test
+    void aPenalisedParseDecodesAndZeroChangesNothing() {
+        for (byte[] input : inputs()) {
+            for (int unit : new int[] {1, 2}) {
+                for (int window : new int[] {16, 256}) {
+                    int[] units = Units.split(input, unit);
+                    assertArrayEquals(
+                            St4EventOptimizer.costs(units, unit, window),
+                            St4EventOptimizer.costs(units, unit, window, 0),
+                            "a penalty of zero is the parse without one");
+                    for (int penalty : new int[] {8, 32}) {
+                        St4Block parsed =
+                                St4EventOptimizer.optimize(units, unit, window, false, penalty);
+                        var packed = St4Compressor.compress(parsed, units, unit,
+                                St4Format.MAX_OP);
+                        byte[] want = new byte[packed.paddedSize()];
+                        for (int i = 0; i < units.length; i++) {
+                            Units.write(want, i * unit, units[i], unit);
+                        }
+                        assertArrayEquals(want, St4Decompressor.decompress(
+                                        packed.control(), packed.literal(), packed.byteOffsets(),
+                                        packed.wordOffsets(), unit, packed.paddedSize()),
+                                input.length + " bytes, k=" + unit + ", m=" + window
+                                        + ", p=" + penalty + " does not decode back");
+                    }
+                }
+            }
+        }
+    }
+
     @Test
     void computesTheExactSameCosts() {
         for (byte[] input : inputs()) {

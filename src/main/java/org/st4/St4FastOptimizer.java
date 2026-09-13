@@ -60,7 +60,7 @@ public final class St4FastOptimizer {
                                     boolean progress) {
         var optimizer = new St4FastOptimizer(units, unit, offsetLimit);
         optimizer.forward(progress);
-        return new St4ChainRebuilder(units, optimizer.literalBits, optimizer.optimalBits,
+        return new St4ChainRebuilder(units, optimizer.literalBits, 0, optimizer.optimalBits,
                 optimizer.winKind, optimizer.winOffset, optimizer.winAux).rebuild();
     }
 

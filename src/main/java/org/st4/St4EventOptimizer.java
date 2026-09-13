@@ -32,6 +32,7 @@ public final class St4EventOptimizer {
     private final int[] units;
     private final int literalBits;
     private final int offsetLimit;
+    private final int penalty;
 
     private final int[] optimalBits;
     private final byte[] winKind;
@@ -59,10 +60,11 @@ public final class St4EventOptimizer {
     private final int[] predNext;
     private final int[] succNext;
 
-    private St4EventOptimizer(int[] units, int unit, int offsetLimit) {
+    private St4EventOptimizer(int[] units, int unit, int offsetLimit, int penalty) {
         this.units = units;
         this.literalBits = 8 * unit;
         this.offsetLimit = offsetLimit;
+        this.penalty = penalty;
         int count = units.length;
         this.optimalBits = new int[count];
         this.winKind = new byte[count];
@@ -89,12 +91,25 @@ public final class St4EventOptimizer {
      */
     public static St4Block optimize(int[] units, int unit, int offsetLimit,
                                     boolean progress) {
-        var optimizer = new St4EventOptimizer(units, unit, offsetLimit);
+        return optimize(units, unit, offsetLimit, progress, 0);
+    }
+
+    /**
+     * The same, with {@code penalty} bits charged on every block besides
+     * what it writes, as {@link St4Optimizer#optimize(int[], int, int,
+     * boolean, int)} charges it. The churn fallback goes to the reference
+     * parser at a penalty, since the fast optimizer does not charge one.
+     */
+    public static St4Block optimize(int[] units, int unit, int offsetLimit,
+                                    boolean progress, int penalty) {
+        var optimizer = new St4EventOptimizer(units, unit, offsetLimit, penalty);
         if (optimizer.countEvents() > (long) CHURN * units.length) {
-            return St4FastOptimizer.optimize(units, unit, offsetLimit, progress);
+            return penalty == 0 ? St4FastOptimizer.optimize(units, unit, offsetLimit, progress)
+                    : St4Optimizer.optimize(units, unit, offsetLimit, progress, penalty);
         }
         optimizer.run(progress);
-        return new St4ChainRebuilder(units, optimizer.literalBits, optimizer.optimalBits,
+        return new St4ChainRebuilder(units, optimizer.literalBits, penalty,
+                optimizer.optimalBits,
                 optimizer.winKind, optimizer.winOffset, optimizer.winAux).rebuild();
     }
 
@@ -105,7 +120,12 @@ public final class St4EventOptimizer {
 
     /** The winning cost per position, for the equivalence tests. */
     static int[] costs(int[] units, int unit, int offsetLimit) {
-        var optimizer = new St4EventOptimizer(units, unit, offsetLimit);
+        return costs(units, unit, offsetLimit, 0);
+    }
+
+    /** The same, at a penalty a block. */
+    static int[] costs(int[] units, int unit, int offsetLimit, int penalty) {
+        var optimizer = new St4EventOptimizer(units, unit, offsetLimit, penalty);
         optimizer.run(false);
         return optimizer.optimalBits;
     }
@@ -224,7 +244,7 @@ public final class St4EventOptimizer {
                 if (enc == Long.MAX_VALUE) {
                     continue;
                 }
-                int candidate = key(enc) + j * literalBits + 1 + (2 * t + 1);
+                int candidate = key(enc) + j * literalBits + 1 + (2 * t + 1) + penalty;
                 if (candidate < best) {
                     best = candidate;
                     kind = St4ChainRebuilder.LITERALS;
@@ -244,7 +264,7 @@ public final class St4EventOptimizer {
                 if (enc == Long.MAX_VALUE) {
                     continue;
                 }
-                int candidate = key(enc) + 1 + (2 * t + 1);
+                int candidate = key(enc) + 1 + (2 * t + 1) + penalty;
                 if (candidate < best) {
                     best = candidate;
                     kind = St4ChainRebuilder.REP;
@@ -277,7 +297,7 @@ public final class St4EventOptimizer {
                         continue;
                     }
                     int candidate = (int) (enc >>> 22) + gammaBits + 3
-                            + (half == 0 ? 8 : 16);
+                            + (half == 0 ? 8 : 16) + penalty;
                     if (candidate < best) {
                         best = candidate;
                         kind = St4ChainRebuilder.NEW;
@@ -306,7 +326,7 @@ public final class St4EventOptimizer {
         if (stateE[offset] != NONE) {
             int length = (start - 1) - stateE[offset];
             int litKey = stateS[offset] + 1 + eliasGammaBits(length)
-                    + length * literalBits;
+                    + length * literalBits + penalty;
             litKeyOf[offset] = litKey;
             repTree.insert(start, encode(litKey, offset));
         } else {
@@ -326,13 +346,13 @@ public final class St4EventOptimizer {
         int state = Integer.MAX_VALUE;
         if (litKeyOf[offset] != NONE) {
             repTree.remove(start, encode(litKeyOf[offset], offset));
-            state = litKeyOf[offset] + 1 + eliasGammaBits(run);
+            state = litKeyOf[offset] + 1 + eliasGammaBits(run) + penalty;
         }
         if (run >= 2) {
             int core = bestSplit(end, run);
             if (core != Integer.MAX_VALUE) {
                 state = Math.min(state, core + 3
-                        + (offset > St4Format.BYTE_OFFSET_LIMIT ? 16 : 8));
+                        + (offset > St4Format.BYTE_OFFSET_LIMIT ? 16 : 8) + penalty);
             }
         }
         if (state != Integer.MAX_VALUE) {
