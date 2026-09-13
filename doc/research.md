@@ -512,13 +512,42 @@ At 225 to 240 cycles a block, and 6656 cycles in the thirteen scanlines
 YMXR's R4.5 allows the worst frame, the refill at k = 1 was 52 percent of
 that budget and a penalty of 8 makes it 42.
 
-### What it does not do
+### Neither parser is exact at a penalty
 
-`-pN` parses through the reference optimizer, which is quadratic in the
-window where the event-driven one is not, so a penalty costs packing time
-the default does not. The event-driven optimizer reproduces the
-reference's costs and would carry the penalty the same way; that it does
-not yet is why this is a measurement and not a default.
+The event-driven optimizer carries the penalty now, so `-pN` no longer
+costs the reference parser's quadratic time. Holding the two to each
+other found that they disagree above a penalty of zero, and an exact
+parse of the same input found that neither is right.
+
+The exact parse is a dynamic program over position and last offset that
+tries every literal run, every rep and every new offset at every length.
+It is far too slow for a column, and it settles small cases:
+
+| input | penalty | exact | reference | event-driven |
+|---|---:|---:|---:|---:|
+| `7 7` | 16 | 35 | 43 | 35 |
+| `5 5 5 5` | 64 | 101 | 141 | 101 |
+| `9 8 9 8 7 7 7 1` | 16 | 87 | 107 | 107 |
+| a column's first 200 units | 8 | 461 | 465 | 465 |
+| the same | 16 | 533 | 569 | 569 |
+| the same | 32 | 677 | 777 | 777 |
+
+Both are exact at a penalty of zero, which their tests hold them to, and
+the gap opens as the penalty grows: nothing at 4, 0.9 percent at 8, 6.8
+at 16, 14.8 at 32 on the column above. Another column reads exact at
+every penalty tried.
+
+ZX1's structure is why. A literal run is extended only where no offset
+matches, and a state a position keeps is the cheapest chain ending in a
+literal run or in a match at that offset. That is enough for bits alone,
+and a charge a block makes the count of blocks matter beyond the bits,
+which those states do not record.
+
+So the bytes in the table above are what these parsers reach and not what
+the parse costs: the real price of a shorter worst window is lower than
+they report. The window counts stand, since they were read off files that
+were really written. A penalty exact enough to pick a default from needs
+a parser this format does not have.
 
 ## Sources
 

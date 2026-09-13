@@ -25,15 +25,17 @@ final class St4ChainRebuilder {
 
     private final int[] units;
     private final int literalBits;
+    private final int penalty;
     private final int[] optimalBits;
     private final byte[] winKind;
     private final int[] winOffset;
     private final int[] winAux;
 
-    St4ChainRebuilder(int[] units, int literalBits, int[] optimalBits,
+    St4ChainRebuilder(int[] units, int literalBits, int penalty, int[] optimalBits,
                       byte[] winKind, int[] winOffset, int[] winAux) {
         this.units = units;
         this.literalBits = literalBits;
+        this.penalty = penalty;
         this.optimalBits = optimalBits;
         this.winKind = winKind;
         this.winOffset = winOffset;
@@ -176,7 +178,7 @@ final class St4ChainRebuilder {
                     }
                 }
                 frame.newBits = bestCore + 3
-                        + (offset > St4Format.BYTE_OFFSET_LIMIT ? 16 : 8);
+                        + (offset > St4Format.BYTE_OFFSET_LIMIT ? 16 : 8) + penalty;
             }
         }
 
@@ -187,7 +189,8 @@ final class St4ChainRebuilder {
                 return false;
             }
             St4Block literal = literalRun(previous, frame.runStart - 1);
-            int repBits = literal.bits() + 1 + eliasGammaBits(end - frame.runStart + 1);
+            int repBits = literal.bits() + 1 + eliasGammaBits(end - frame.runStart + 1)
+                    + penalty;
             if (frame.newLength == 0 || repBits <= frame.newBits) {
                 states.put(stateKey(offset, end),
                         new St4Block(repBits, end, offset, literal));
@@ -208,7 +211,7 @@ final class St4ChainRebuilder {
     /** The literal run from just after {@code state} through {@code litEnd}. */
     private St4Block literalRun(St4Block state, int litEnd) {
         int length = litEnd - state.index();
-        int bits = state.bits() + 1 + eliasGammaBits(length) + length * literalBits;
+        int bits = state.bits() + 1 + eliasGammaBits(length) + length * literalBits + penalty;
         return new St4Block(bits, litEnd, 0, state);
     }
 
