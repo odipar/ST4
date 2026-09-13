@@ -97,7 +97,7 @@ public final class St4Optimizer {
      * @param offsetLimit the furthest a match may reach back, in units
      */
     public static St4Block optimize(int[] units, int unit, int offsetLimit) {
-        return optimize(units, unit, offsetLimit, true);
+        return optimize(units, unit, offsetLimit, true, 0);
     }
 
     /**
@@ -112,6 +112,20 @@ public final class St4Optimizer {
      */
     public static St4Block optimize(int[] units, int unit, int offsetLimit,
                                     boolean progress) {
+        return optimize(units, unit, offsetLimit, progress, 0);
+    }
+
+    /**
+     * The same, with {@code penalty} bits charged on every block besides
+     * what it writes. A decoder parses one block at a time and a refill
+     * parses what falls in its window, so a parse of fewer, longer blocks
+     * costs a reader less however many bits it writes. At zero this is the
+     * parse above, bit for bit.
+     *
+     * @param penalty bits added to every block, 0 for none
+     */
+    public static St4Block optimize(int[] units, int unit, int offsetLimit,
+                                    boolean progress, int penalty) {
         int literalBits = 8 * unit;
         int maxOffset = offsetCeiling(units.length - 1, offsetLimit);
         var lastLiteral = new @Nullable St4Block[maxOffset + 1];
@@ -140,7 +154,7 @@ public final class St4Optimizer {
                     St4Block literal = lastLiteral[offset];
                     if (literal != null) {
                         int length = index - literal.index();
-                        int bits = literal.bits() + 1 + eliasGammaBits(length);
+                        int bits = literal.bits() + 1 + eliasGammaBits(length) + penalty;
                         St4Block match = new St4Block(bits, index, offset, literal);
                         lastMatch[offset] = match;
                         optimal[index] = better(optimal[index], match);
@@ -169,7 +183,7 @@ public final class St4Optimizer {
                         assert previous != null;
                         int bits = previous.bits() + 3
                                 + (offset > St4Format.BYTE_OFFSET_LIMIT ? 16 : 8)
-                                + eliasGammaBits(length - 1);
+                                + eliasGammaBits(length - 1) + penalty;
                         St4Block match = lastMatch[offset];
                         if (match == null || match.index() != index || match.bits() > bits) {
                             match = new St4Block(bits, index, offset, previous);
@@ -184,7 +198,8 @@ public final class St4Optimizer {
                     St4Block match = lastMatch[offset];
                     if (match != null) {
                         int length = index - match.index();
-                        int bits = match.bits() + 1 + eliasGammaBits(length) + length * literalBits;
+                        int bits = match.bits() + 1 + eliasGammaBits(length)
+                                + length * literalBits + penalty;
                         St4Block literal = new St4Block(bits, index, 0, match);
                         lastLiteral[offset] = literal;
                         optimal[index] = better(optimal[index], literal);
