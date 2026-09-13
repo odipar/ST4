@@ -546,8 +546,52 @@ which those states do not record.
 So the bytes in the table above are what these parsers reach and not what
 the parse costs: the real price of a shorter worst window is lower than
 they report. The window counts stand, since they were read off files that
-were really written. A penalty exact enough to pick a default from needs
-a parser this format does not have.
+were really written.
+
+### Where the event-driven parser is exact
+
+The gap closes at the penalties worth using. Seven columns of a tune,
+their first 300 bytes, against the exact parse at k = 2 and a window of
+64 units:
+
+| penalty | columns exact | the widest gap |
+|---:|---:|---:|
+| 2 | 7 of 7 | none |
+| 4 | 7 of 7 | none |
+| 8 | 5 of 7 | 0.65% |
+
+A penalty of 2 or 4 is exact on every column tried and 8 is within a
+percent, so a sweep over that range measures the parse and not the
+parser.
+
+### The sweep
+
+Fourteen tunes of the corpus, every column packed at each penalty, the
+windows counted off the files: a refill is 15 units at k = 2 and 30 at
+k = 1.
+
+| unit | tunes | penalty | bytes | against 0 | the widest window | a tune's worst, mean |
+|---:|---:|---:|---:|---:|---:|---:|
+| 1 | 4 | 0 | 11362 | | 14 | 13.0 |
+| | | 2 | 11380 | +0.16% | 13 | 11.8 |
+| | | 4 | 11430 | +0.60% | 13 | 11.5 |
+| | | 8 | 11588 | +1.99% | 10 | 9.8 |
+| 2 | 10 | 0 | 51880 | | 11 | 9.4 |
+| | | 2 | 51908 | +0.05% | 11 | 9.2 |
+| | | 4 | 51992 | +0.22% | 11 | 8.8 |
+| | | 8 | 52280 | +0.77% | 11 | 8.7 |
+
+**A penalty is for unit 1.** There a refill is 30 units, twice the span
+of a unit 2 refill, and twice as many blocks can land in it: a penalty of
+8 takes the widest window from 14 to 10 and the windows needing 8 blocks
+or more from 1.45 to 0.80 percent, for two percent of the bytes. At unit
+2 the widest window is 11 at every penalty tried, the mean of the tunes'
+worst moves 9.4 to 8.7, and the windows needing 8 or more stand at 0.08
+percent: there is little there to buy.
+
+A few tunes read a few bytes smaller at a penalty than without one, which
+is the streams padding to longs over thirty columns and not a parse that
+beat the unpenalised optimum.
 
 ## Sources
 
