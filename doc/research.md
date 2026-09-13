@@ -473,6 +473,53 @@ Against that stand a version bump, three decoders at three unit sizes, the
 Java, Go and C# packers, and every packed asset. The measurement is recorded
 here so the question does not have to be opened again without one.
 
+## A penalty a block, against the costliest frame
+
+A decoder parses one block at a time, and a DTX2 refill parses the blocks
+that begin in its window, so what a frame pays is the blocks it meets and
+not the bytes the column packs to. The parse can be asked for fewer of
+them: `st4 -pN` charges N bits on every block besides what it writes, so
+a chain of fewer, longer blocks wins where the bits are close. At a
+penalty of zero the reference parser writes the byte the event-driven one
+writes, which is how the rows below are read against each other.
+
+Deeper's thirty columns at k = 2, a window of 15 units, and low's thirty
+at k = 1, a window of 30:
+
+| tune | penalty | bytes | against 0 | blocks a window | worst | 8 or more |
+|---|---:|---:|---:|---:|---:|---:|
+| Deeper, k = 2 | 0 | 11956 | | 0.367 | 9 | 0.03% |
+| | 4 | 11972 | +0.1% | 0.358 | 9 | 0.01% |
+| | 8 | 12060 | +0.9% | 0.349 | 9 | 0.01% |
+| | 16 | 12292 | +2.8% | 0.333 | 7 | 0.00% |
+| | 32 | 12804 | +7.1% | 0.314 | 7 | 0.00% |
+| | 64 | 14368 | +20.2% | 0.287 | 7 | 0.00% |
+| low, k = 1 | 0 | 10780 | | 0.503 | 15 | 0.81% |
+| | 8 | 10970 | +1.8% | 0.437 | 12 | 0.40% |
+| | 16 | 11304 | +4.9% | 0.413 | 11 | 0.26% |
+| | 32 | 11956 | +10.9% | 0.389 | 10 | 0.12% |
+
+### What it is worth
+
+The worst window is what a demo budgets for. At k = 1 it stood at 15
+blocks, the most a window of 30 units can hold at one block a unit, and a
+penalty of 8 bits takes it to 12 for under two percent of the file. At
+k = 2 a penalty of 16 takes 9 to 7 for 2.8 percent, and 32 and 64 buy no
+further: the worst window is 7 from there down, and the bytes go on
+rising.
+
+At 225 to 240 cycles a block, and 6656 cycles in the thirteen scanlines
+YMXR's R4.5 allows the worst frame, the refill at k = 1 was 52 percent of
+that budget and a penalty of 8 makes it 42.
+
+### What it does not do
+
+`-pN` parses through the reference optimizer, which is quadratic in the
+window where the event-driven one is not, so a penalty costs packing time
+the default does not. The event-driven optimizer reproduces the
+reference's costs and would carry the penalty the same way; that it does
+not yet is why this is a measurement and not a default.
+
 ## Sources
 
 - J. A. Storer, T. G. Szymanski, *The macro model for data compression

@@ -23,6 +23,7 @@ public final class St4 {
         int maxOpLength = St4Format.MAX_OP;
         int repeatIndex = -1;
         boolean copies = false;
+        int penalty = 0;
         double search = 0;
         boolean forcedMode = false;
         int i = 0;
@@ -34,6 +35,10 @@ public final class St4 {
                     if (args[i].startsWith("-c")) {
                         copies = true;
                         search = parseNumber(args[i].substring(2));
+                    } else if (args[i].startsWith("-p")) {
+                        // zero is a penalty the parse reads, and the one the
+                        // default parser charges, so it is not turned away
+                        penalty = parseIndex(args[i].substring(2));
                     } else if (args[i].startsWith("-k")) {
                         unit = parseNumber(args[i].substring(2));
                     } else if (args[i].startsWith("-m")) {
@@ -64,6 +69,9 @@ public final class St4 {
                       -kK     Unit size: 1, 2 or 4 bytes (default 1). Lengths and
                               offsets count units, so the output is padded to a
                               whole number of them
+                      -pN     Charge N bits on every block besides what it
+                              writes, so the parse prefers fewer, longer ones:
+                              a decoder parses a block at a time
                       -mN     Limit back-references to N units
                       -lN     Split matches so no operation exceeds N units
                       -rR     Loop: after the last unit, the output continues
@@ -112,14 +120,14 @@ public final class St4 {
             int[] loop = Arrays.copyOfRange(units, repeatIndex, units.length);
             result = St4Compressor.compressRewinding(
                     intro.length == 0 ? null
-                            : parse(intro, unit, offsetLimit, maxOpLength, copies, search),
-                    parse(loop, unit, offsetLimit, maxOpLength, copies, search),
+                            : parse(intro, unit, offsetLimit, maxOpLength, copies, search, penalty),
+                    parse(loop, unit, offsetLimit, maxOpLength, copies, search, penalty),
                     units, unit, maxOpLength, repeatIndex, window);
         } else {
             // The loop fits the window: the end is an endless match back to
             // the loop point.
             result = St4Compressor.compress(
-                    parse(units, unit, offsetLimit, maxOpLength, copies, search), units,
+                    parse(units, unit, offsetLimit, maxOpLength, copies, search, penalty), units,
                     unit, maxOpLength, repeatIndex, window);
         }
 
@@ -159,11 +167,16 @@ public final class St4 {
      * seconds the search from there.
      */
     private static St4Block parse(int[] units, int unit, int window, int maxOpLength,
-                                  boolean copies, double seconds) {
-        if (!copies) {
-            return St4EventOptimizer.optimize(units, unit, window);
+                                  boolean copies, double seconds, int penalty) {
+        if (copies) {
+            return St4LiteralCopySearch.optimize(units, unit, window, maxOpLength, seconds, true);
         }
-        return St4LiteralCopySearch.optimize(units, unit, window, maxOpLength, seconds, true);
+        if (penalty != 0) {
+            // the reference parser is the one that charges a block, and it
+            // reproduces the event-driven one's costs at a penalty of zero
+            return St4Optimizer.optimize(units, unit, window, true, penalty);
+        }
+        return St4EventOptimizer.optimize(units, unit, window);
     }
 
     /**
