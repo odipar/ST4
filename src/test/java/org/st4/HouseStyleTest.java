@@ -19,7 +19,7 @@ import org.junit.jupiter.api.Test;
  * to define them.
  *
  * <p>It reads code comments the same way, in the four languages this
- * repository writes them: Java, C#, 68000 assembly and Python. The code
+ * repository writes them: Java, C#, Go, 68000 assembly and Python. The code
  * around a comment is left unread, since a field named {@code holds} or a
  * call to {@code getState} is a name and not prose.
  */
@@ -146,9 +146,9 @@ final class HouseStyleTest {
         }
     }
 
-    /** The four languages this repository writes comments in. */
+    /** The five languages this repository writes comments in. */
     private static final List<String> SOURCES =
-            List.of(".java", ".cs", ".S", ".py");
+            List.of(".java", ".cs", ".go", ".S", ".py");
 
     /** Every source in the tree but this one, which quotes the struck
      *  phrases to ban them, and the built trees, which are output. */
@@ -171,7 +171,8 @@ final class HouseStyleTest {
     private static List<String[]> commentsOf(Path source) throws IOException {
         List<String> lines = Files.readAllLines(source);
         String named = source.toString();
-        if (named.endsWith(".java") || named.endsWith(".cs")) {
+        if (named.endsWith(".java") || named.endsWith(".cs")
+                || named.endsWith(".go")) {
             return braces(lines);
         }
         if (named.endsWith(".S")) {

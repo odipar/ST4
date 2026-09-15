@@ -55,8 +55,8 @@ public final class ProgressMeter {
             shown = percent;
             long now = System.nanoTime();
             tickNanos[percent] = now;
-            System.out.printf("\r[%3d%%] %-12s", percent, estimate(percent, now));
-            System.out.flush();
+            System.err.printf("\r[%3d%%] %-12s", percent, estimate(percent, now));
+            System.err.flush();
         }
     }
 
@@ -64,7 +64,7 @@ public final class ProgressMeter {
     public void finish() {
         assert steps == total : "the step count is meant to be exact, not an estimate";
         if (enabled) {
-            System.out.printf("\r[100%%] %-12s%n", duration(System.nanoTime() - started));
+            System.err.printf("\r[100%%] %-12s%n", duration(System.nanoTime() - started));
         }
     }
 

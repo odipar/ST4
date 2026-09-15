@@ -1,0 +1,4 @@
+#!/bin/sh
+# A file into an ST4 container: standard input in, standard output out, the
+# report on standard error. README.md, The tools.
+exec "$(dirname -- "$0")/st4-run" org.st4.St4 "$@"

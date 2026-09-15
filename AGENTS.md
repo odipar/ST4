@@ -181,6 +181,15 @@ repositories of the family and the rows below it struck here.
 | `reaching 512 &minus; M literals` | `reaching 512 - M literals`; the minus sign is a dash |
 | `Nt4.Nt4.Container carries both names` | `Nt4.Nt4.Container repeats the name` |
 | the em dash in research.md's sources | a single `-`, as the house style sets |
+| the Go tree, 42 constructs | the same words the Java tree took; a carried copy had never been swept |
+| `PackedSize is the bytes all four streams take together` | `... occupy together` |
+| `a set bit patches that byte where it sits` | `... patches that byte in place` |
+| `NoRewind holds nothing` | `NoRewind reads none of it` |
+| `a length the caller refuses` | `a length the caller rejects` |
+| `The pass consumed the chains` | `The pass spent the chains` |
+| `IsUnitSize reports whether unit is one the format carries` | `... the format defines` |
+| `a wall of percentages in whatever reads it` | `a wall of percentages in the reader of it` |
+| `as a Go module takes semver from v0` | `since a Go module is versioned from v0` |
 | `consume n from the operation` | `subtract n from the operation` |
 | `the parse exit takes one branch` | `the parse exit costs one branch` |
 | `segments take the counted ladder` | `segments run the counted ladder` |
