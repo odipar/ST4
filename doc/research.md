@@ -622,6 +622,69 @@ beat the unpenalised optimum.
 - encode.su, *LZ style compression with static dictionary* -
   <https://encode.su/threads/2995-LZ-style-compression-with-static-Dictionary>
 
+# Can a step skip the tail it has already parsed?
+
+The note above reads 22 to 80 per cent of a step's tail as work already
+done: the parse rejoins the parse before it and agrees with it to the end
+of the column. This reads whether a step can stop there.
+
+## Verdict
+
+**Not exactly.** A copy reads from any literal before it, and the literals
+before a position set every later copy's offset, so a dictionary changed
+anywhere changes both what the tail may copy and what a copy there costs.
+Two parses in one state at a checkpoint part again as soon as the tail
+reads a unit the change touched. The state is not the whole of what a tail
+depends on; the dictionary is.
+
+**Heuristically it pays.** A parse that stops where its state equals the
+state of the parse before it, and whose chain reads that parse's blocks
+past there, runs a fifth of a column against two thirds, and the steps
+that buys are worth about half a per cent at equal time. Its steps are
+approximate, so the packer writes other bytes: measured here, not shipped.
+
+## What the stop is
+
+At each checkpoint the parse compares its state with the state the accepted
+parse had there: every state's cost and end, every literal run, the counts
+and lists of the copies a distance is open at, the winner at every
+position, and every value of the literal channel. Where the two are equal
+the parse stops, and its chain is the blocks it made up to there and the
+accepted parse's blocks past there.
+
+The comparison is equality, not equality up to a constant. Up to a constant
+is what the reading above found, and it is not enough to rest on: the
+channel's values before the change stand where they were while those after
+it move, so a class whose window spans the change can pick one end in one
+parse and another in the other.
+
+## What it costs and buys
+
+Over the 24-column subset, where the default writes 23,124 bytes:
+
+| the search | steps a column | of a column parsed | seconds | bytes |
+|---|---|---|---|---|
+| exact | 500 | 66% | 27 | 22,208 |
+| exact | 700 | 70% | 37 | 22,080 |
+| exact | 2,000 | 70% | 107 | 21,760 |
+| the stop | 500 | 19% | 8 | 22,776 |
+| the stop | 1,500 | 21% | 23 | 22,280 |
+| the stop | 2,500 | 20% | 38 | **21,962** |
+
+At equal steps the stop reads worse, which is the approximation showing:
+22,776 against 22,208 at 500 steps. At equal time it reads better, by 0.53
+per cent at 37 seconds: 21,962 against 22,080. A parse runs a fifth of a
+column rather than two thirds, and 56 per cent of the parses stop early.
+
+## Where that leaves it
+
+The trade is a search that makes more, cheaper steps against one that makes
+fewer exact ones. Half a per cent at equal time is worth having, and what
+it costs is the property every reading in these notes rests on: that a step
+weighs the parse a dictionary would write. Shipping it means all three
+trees stopping at the same checkpoint on the same comparison, since the
+parity between them is on the bytes out.
+
 # What a step of the search costs
 
 The search grinds: the note above reads it still improving at 4,000 steps a
