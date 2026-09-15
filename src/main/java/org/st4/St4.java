@@ -104,24 +104,35 @@ public final class St4 {
         }
         St4Compressor.Result result;
         int window = offsetLimit;
-        if (repeatIndex >= 0 && units.length - repeatIndex > offsetLimit) {
-            // The loop is longer than the window, so no match reaches across
-            // it and the caller replays the stream from the state it saved at
-            // the loop point. The loop is parsed on its own, so every pass
-            // sees the same history.
-            int[] intro = Arrays.copyOfRange(units, 0, repeatIndex);
-            int[] loop = Arrays.copyOfRange(units, repeatIndex, units.length);
-            result = St4Compressor.compressRewinding(
-                    intro.length == 0 ? null
-                            : parse(intro, unit, offsetLimit, maxOpLength, copies, search, penalty, !silent),
-                    parse(loop, unit, offsetLimit, maxOpLength, copies, search, penalty, !silent),
-                    units, unit, maxOpLength, repeatIndex, window);
-        } else {
-            // The loop fits the window: the end is an endless match back to
-            // the loop point.
-            result = St4Compressor.compress(
-                    parse(units, unit, offsetLimit, maxOpLength, copies, search, penalty, !silent), units,
-                    unit, maxOpLength, repeatIndex, window);
+        try {
+            if (repeatIndex >= 0 && units.length - repeatIndex > offsetLimit) {
+                // The loop is longer than the window, so no match reaches across
+                // it and the caller replays the stream from the state it saved at
+                // the loop point. The loop is parsed on its own, so every pass
+                // sees the same history.
+                int[] intro = Arrays.copyOfRange(units, 0, repeatIndex);
+                int[] loop = Arrays.copyOfRange(units, repeatIndex, units.length);
+                result = St4Compressor.compressRewinding(
+                        intro.length == 0 ? null
+                                : parse(intro, unit, offsetLimit, maxOpLength, copies, search, penalty, !silent),
+                        parse(loop, unit, offsetLimit, maxOpLength, copies, search, penalty, !silent),
+                        units, unit, maxOpLength, repeatIndex, window);
+            } else {
+                // The loop fits the window: the end is an endless match back to
+                // the loop point.
+                result = St4Compressor.compress(
+                        parse(units, unit, offsetLimit, maxOpLength, copies, search, penalty, !silent), units,
+                        unit, maxOpLength, repeatIndex, window);
+            }
+        } catch (OutOfMemoryError e) {
+            // The copies search makes a node a state reached, and a state is
+            // a position and an offset, so the heap it needs follows the
+            // window (doc/research.md, What the copies search costs in
+            // memory). The default heap is a quarter of the machine, which a
+            // wide window over a long input passes.
+            throw error("out of heap at " + units.length + " units and a window of "
+                    + window + (copies ? " with copies" : "")
+                    + ": name a narrower -m, or give java a larger -Xmx");
         }
 
         try {
