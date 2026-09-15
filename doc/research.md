@@ -622,6 +622,78 @@ beat the unpenalised optimum.
 - encode.su, *LZ style compression with static dictionary* -
   <https://encode.su/threads/2995-LZ-style-compression-with-static-Dictionary>
 
+# What a step of the search costs
+
+The search grinds: the note above reads it still improving at 4,000 steps a
+column, where a step is one dictionary, one parse of it and one count of
+the compressor's bits. So what a step costs is what the search is worth in
+a second of it.
+
+## Where the time goes
+
+Six columns at 400 steps each, under a CPU profile:
+
+| | share |
+|---|---|
+| the parse | 83% |
+| of it: the literal channel's reads of the min-tree | 13% |
+| of it: the best-split table | 13% |
+| of it: the ring loop and the rest | the remainder |
+| the compressor's count of the bits | below a per cent |
+
+A step is a parse. The count that scores it does not register.
+
+## A parse runs to the end of the column
+
+A parse restarts at the checkpoint before the first changed unit, which is
+why the checkpoint grid reads flat in the note above: it saves the prefix,
+and what it cannot save is the tail. Over 2,428 steps of six columns, the
+first changed unit stands at 41 per cent of the column on average and **a
+parse runs 66 per cent of it**.
+
+Most of that tail is work already done. Reading each step's parse against
+the parse before it, the two agree on the winner at every position from
+some point on, their costs apart by one constant:
+
+| column | the tail a step re-parses | where the two parses rejoin | work already done |
+|---|---|---|---|
+| 9,750 units | 3,478 | 697 | 80% |
+| 3,844 units | 1,590 | 828 | 48% |
+| 4,150 units | 2,019 | 540 | 73% |
+| 5,248 units | 4,103 | 3,182 | 22% |
+
+In 13 to 16 of every 40 steps the parse past the change is the same parse.
+A step that stopped where the two rejoin, and read the rest off the parse
+before it, would cost about half of what it costs. That is unwritten: the
+literal channel reads back over the whole prefix, so two parses that rejoin
+can part again, and a test that says when they have is the piece still
+missing.
+
+## The literal channel reads its least in one step
+
+What is done instead is the 13 per cent. The channel asks, at every
+position, for the best match or copy end within each gamma class of the run
+length that reaches it. A class is a window in slot space that slides one
+slot a position, so a queue kept least first reads its least in one step,
+where the min-tree read it in a logarithm.
+
+The parse writes the same bytes: 88 runs of eight inputs at eleven flag
+settings against the packer before it, and the three trees against one
+another. What moves is the time.
+
+| | before | after |
+|---|---|---|
+| 500 steps a column, 24 columns | 33s | 27s |
+| 2,000 steps a column, 24 columns | 133s | 107s |
+| the corpus at `-c` | 5.5s | 5.2s |
+| a 48 KB file at `-k1 -c`, window 32,512 | 23.1s | 22.8s |
+
+The search is where it pays: a fifth more steps a second at a ring of 256
+bytes. At a wide window the ring loop is the parse and the channel is
+noise, which is what the last row reads. At three seconds a column over 24
+columns the extra steps are worth 0.35 per cent: 21,936 bytes against
+22,012.
+
 # Can the search find better parses at a ring of 256 bytes?
 
 One column of a chiptune - a channel's tone period, one byte a frame -

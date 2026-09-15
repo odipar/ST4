@@ -24,7 +24,7 @@ namespace Nt4;
 /// <see cref="FastOptimizer"/>'s DP with copies added: sources found through
 /// two-unit chains over the dictionary, the rep of a copy as a ring rep at
 /// the same output distance with literal shadows at the source, the literal
-/// channel a min-tree keyed by match end, chains rebuilt from a node pool,
+/// channel a queue a gamma class over match ends, chains rebuilt from a node pool,
 /// and every parse restarted from a checkpoint before the first changed unit.
 /// A copy is costed with the literal count of the dictionary, a lower bound,
 /// so every copy is valid; the compressor's bits are the score.
@@ -611,9 +611,17 @@ public static class LiteralCopySearch
         private int limit = PoolFloor;             // the pool size a collection runs at
         private int[] forward = Array.Empty<int>();  // in a collection: where a node moved
 
-        // The literal channel: a min-tree by match end + 1 over bits - end*literalBits.
-        private readonly int half;
-        private readonly long[] tree;
+        // The literal channel: the best match or copy end, by the gamma class
+        // of the run length that reaches a position from it. A class is a
+        // window in slot space that slides one slot a position, so a queue
+        // kept least first reads its least in one step where a min-tree read
+        // it in a logarithm. The values stand beside the queues, since a
+        // parse that restarts at a checkpoint fills the queues from them.
+        private readonly long[] leaf;              // by match end + 1: bits - end*literalBits
+        private readonly int[][] dqAt;             // by class: the slots of its queue, least first
+        private readonly int[] dqLo;               // by class: where its queue begins
+        private readonly int[] dqEnd;              // by class: one past where its queue ends
+        private readonly int classes;
 
         // Checkpoints: the state before position k*checkpoint, for the base
         // dictionary, the last parse accepted, and for the parse under way.
@@ -667,13 +675,20 @@ public static class LiteralCopySearch
             {
                 prevSame2[count - 1] = -1;
             }
-            int h = 1;
-            while (h < count + 1)
+            leaf = new long[count + 2];
+            int kinds = 0;
+            while ((1 << kinds) <= count + 1)
             {
-                h <<= 1;
+                kinds++;
             }
-            half = h;
-            tree = new long[2 * h];
+            classes = kinds + 1;
+            dqAt = new int[classes][];
+            for (int k = 0; k < classes; k++)
+            {
+                dqAt[k] = new int[count + 2];
+            }
+            dqLo = new int[classes];
+            dqEnd = new int[classes];
             checkpoint = Math.Max(1024, (count + 7) / 8);
             int slots = (count + checkpoint - 1) / checkpoint;
             baseline = new Snapshot[slots];
@@ -769,6 +784,7 @@ public static class LiteralCopySearch
             {
                 forcedBefore[p + 1] = forcedBefore[p] + (forced[p] ? 1 : 0);
             }
+            Queues(start);
             var meter = new ProgressMeter(ProgressMeter.TotalSteps(count, start, window), progress);
             for (int index = start; index < count; index++)
             {
@@ -796,7 +812,7 @@ public static class LiteralCopySearch
                         break;
                     }
                     int slotLo = Math.Max(0, index - (2 << k) + 2);
-                    long found = Query(slotLo, slotHi);
+                    long found = Least(k, slotLo, slotHi);
                     if (found != long.MaxValue)
                     {
                         int candidate = (int)(found >> 32) + index * literalBits + 2 + 2 * k;
@@ -1074,7 +1090,7 @@ public static class LiteralCopySearch
             Array.Copy(optimalBits, into.OptimalBits, position);
             Array.Copy(winNode, into.WinNode, position);
             Array.Copy(matchNodeSlot, into.MatchNodeSlot, position + 1);
-            Array.Copy(tree, half, into.Leaves, 0, position + 1);
+            Array.Copy(leaf, 0, into.Leaves, 0, position + 1);
             Array.Copy(activePrev, into.ActivePrev, activePrevCount);
             Array.Copy(activeCur, into.ActiveCur, activeCurCount);
             Array.Copy(repable, into.Repable, repableCount);
@@ -1101,12 +1117,8 @@ public static class LiteralCopySearch
             Array.Copy(from.OptimalBits, optimalBits, position);
             Array.Copy(from.WinNode, winNode, position);
             Array.Copy(from.MatchNodeSlot, matchNodeSlot, position + 1);
-            Array.Fill(tree, long.MaxValue);
-            Array.Copy(from.Leaves, 0, tree, half, position + 1);
-            for (int i = half - 1; i >= 1; i--)
-            {
-                tree[i] = Math.Min(tree[2 * i], tree[2 * i + 1]);
-            }
+            Array.Fill(leaf, long.MaxValue);
+            Array.Copy(from.Leaves, 0, leaf, 0, position + 1);
             Array.Copy(from.ActivePrev, activePrev, from.ActivePrevCount);
             Array.Copy(from.ActiveCur, activeCur, from.ActiveCurCount);
             activePrevCount = from.ActivePrevCount;
@@ -1132,7 +1144,7 @@ public static class LiteralCopySearch
             Array.Fill(stateNode, -1);
             Array.Fill(matchLength, 0);
             Array.Fill(stamp, -2);
-            Array.Fill(tree, long.MaxValue);
+            Array.Fill(leaf, long.MaxValue);
             bestLength[2] = 2;
             nodes = poolTop;
             // The fake block every chain hangs from: one unit back, ending
@@ -1421,33 +1433,69 @@ public static class LiteralCopySearch
 
         private void Update(int slot, long value)
         {
-            int i = half + slot;
-            tree[i] = value;
-            for (i >>= 1; i >= 1; i >>= 1)
-            {
-                tree[i] = Math.Min(tree[2 * i], tree[2 * i + 1]);
-            }
+            leaf[slot] = value;
         }
 
-        private long Query(int lo, int hi)
+        /// <summary>
+        /// The least value of class <paramref name="k"/> over the slots
+        /// <paramref name="lo"/> to <paramref name="hi"/>, the slot
+        /// <paramref name="hi"/> entering the class as its window slides one
+        /// on. A slot is written before any class reaches it, so a queue
+        /// reads what a min-tree read.
+        /// </summary>
+        private long Least(int k, int lo, int hi)
         {
-            long result = long.MaxValue;
-            int l = half + lo;
-            int r = half + hi + 1;
-            while (l < r)
+            if (leaf[hi] != long.MaxValue)
             {
-                if ((l & 1) == 1)
+                long value = leaf[hi];
+                while (dqEnd[k] > dqLo[k] && leaf[dqAt[k][dqEnd[k] - 1]] >= value)
                 {
-                    result = Math.Min(result, tree[l++]);
+                    dqEnd[k]--;
                 }
-                if ((r & 1) == 1)
-                {
-                    result = Math.Min(result, tree[--r]);
-                }
-                l >>= 1;
-                r >>= 1;
+                dqAt[k][dqEnd[k]++] = hi;
             }
-            return result;
+            while (dqEnd[k] > dqLo[k] && dqAt[k][dqLo[k]] < lo)
+            {
+                dqLo[k]++;
+            }
+            if (dqEnd[k] == dqLo[k])
+            {
+                return long.MaxValue;
+            }
+            return leaf[dqAt[k][dqLo[k]]];
+        }
+
+        /// <summary>
+        /// Fills every class from the values a parse begins with, which is
+        /// what a checkpoint restored, for a parse that begins at
+        /// <paramref name="start"/>.
+        /// </summary>
+        private void Queues(int start)
+        {
+            for (int k = 0; k < classes; k++)
+            {
+                dqLo[k] = 0;
+                dqEnd[k] = 0;
+                int hi = start - (1 << k);
+                if (hi < 0)
+                {
+                    continue;
+                }
+                int lo = Math.Max(0, start - (2 << k) + 2);
+                for (int slot = lo; slot <= hi; slot++)
+                {
+                    long value = leaf[slot];
+                    if (value == long.MaxValue)
+                    {
+                        continue;
+                    }
+                    while (dqEnd[k] > dqLo[k] && leaf[dqAt[k][dqEnd[k] - 1]] >= value)
+                    {
+                        dqEnd[k]--;
+                    }
+                    dqAt[k][dqEnd[k]++] = slot;
+                }
+            }
         }
     }
 }
