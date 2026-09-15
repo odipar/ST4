@@ -8,8 +8,8 @@ into four streams instead of one, lengths and offsets count units of 1, 2 or
 4 bytes, and a match may reach past the decoder's ring into the literal
 stream.
 
-The streams and the units serve the 68000. With each stream holding one kind
-of value, the decoder reads each of them the fastest way it has: the bit
+The streams and the units serve the 68000. Each stream has one kind of
+value, so the decoder reads each of them the fastest way it has: the bit
 stream refills a word at a time, and literals copy with `move.w` or `move.l`
 because their alignment no longer depends on the bytes around them. Units
 make one operation move 2 or 4 bytes, so there are half or a quarter as many
@@ -24,8 +24,8 @@ ZX1.
 
 A stream can loop: packed with a loop point, it plays its intro once and its
 loop forever through a ring far smaller than itself. And a stream packed for
-a small ring can copy from its own literal stream, which stays in memory
-with the container, so the ring holds only what the literals cannot give.
+a small ring can copy from the literal stream, which stays in memory
+with the container, so the ring keeps only what the literals leave.
 
 The name follows the family: ZX1 for the ZX Spectrum, ST1 for the Atari ST,
 and 4 for the widest unit and the Mega ST4.
@@ -34,9 +34,9 @@ and 4 for the widest unit and the Mega ST4.
 
 All lengths and offsets count units of k bytes. Input that is not a whole
 number of units is padded with zeros, and the padding is part of the stored
-output. A container holds four streams:
+output. A container has four streams:
 
-| stream | holds |
+| stream | contents |
 |---|---|
 | A | all the bits: flags, class bits and lengths |
 | B | the literal data, whole units |
@@ -86,7 +86,7 @@ The class bits select the offset's stream and reach, or end the data:
 
 A byte offset of n units in bank b is stored as the byte 256(b + 1) - n. A
 word offset of n units is stored big-endian as 65536 - nk, which is -nk as
-the decoder holds it, so installing one is a single move. No offset reaches
+the decoder reads it, so installing one is a single move. No offset reaches
 further back than 32512 bytes, at any k, and a new-offset match is at least
 2 units long, which is why it stores gamma(length - 1).
 
@@ -150,7 +150,7 @@ A container is twenty-eight bytes of header, then the streams:
 28 ..  streams A, B, C and D in that order, each starting on a long boundary
 ```
 
-The header holds what the streams cannot give. Stream A begins where the
+The header records what the streams leave out. Stream A begins where the
 header ends. No stream length is stored: each stream runs to the next, and
 the decoder stops on the end code. The rewind point is set only for a
 stream the caller replays. The signature fits one long, so a decoder built
@@ -172,13 +172,13 @@ one pass every unit is the one O - R units back. It costs the container two
 bytes, and the pass is packed as it would be without the loop.
 
 A loop longer than the window is replayed from the encoded stream. The
-stream ends plainly and the header gives the rewind point. The caller saves
-the decoder's state when the output reaches R and restores it, all but the
-write pointer, when it reaches O, every pass. For every pass to see the
-same history, the loop `[R,O)` is packed on its own: no match in it reaches
-before R or straddles R. The cost is the first window's worth of the loop,
-which cannot reference the intro: on the test corpora, 0.4 to 1.3% of the
-packed size.
+stream ends plainly and the header records the rewind point. The caller
+saves the decoder's state when the output reaches R and restores it, all
+but the write pointer, when it reaches O, every pass. For every pass to see
+the same history, the loop `[R,O)` is packed separately: no match in it
+reaches before R or straddles R. The cost is the first window's worth of
+the loop, which cannot reference the intro: on the test corpora, 0.4 to
+1.3% of the packed size.
 
 ## 68000 decoders
 
@@ -200,14 +200,14 @@ each call at the ring end, for callers with variable call sizes.
 ### The copy ladders
 
 Each decoder runs two copy ladders: match runs of at most sixteen units, on
-measured streams four of every five, take a counter-free ladder that falls
-straight into what comes next; literals and longer runs take a counted one.
+measured streams four of every five, run a counter-free ladder that falls
+straight into what comes next; literals and longer runs run a counted one.
 Measured on real streams, ST4_wrap spends 12 to 14% fewer cycles in a
 small-budget streaming loop and 3 to 5% fewer in bulk, with no case slower.
 
 ### The state
 
-The state is held in registers:
+The state is in registers:
 
 ```
 container                registers
@@ -228,7 +228,7 @@ output               a1   the write pointer
                           -offset*k during a match, zero when done
 ```
 
-The sign of `d2` is the state. The two ring decoders hold `d1` and `d2` as
+The sign of `d2` is the state. The two ring decoders keep `d1` and `d2` as
 longs and keep the ring's bounds in the upper halves, which is how a match
 that reaches back past the ring start finds its source at the other end.
 Only `a6`, `d6` and `d7` survive a call.
@@ -247,7 +247,7 @@ the queue can run out only on a gamma continuation bit, the class bit right
 after a flag, and the repeat bit; every other read skips the test.
 The destination, stream B and the ring start on a unit boundary, and the
 ring size is a whole number of units, so a wide move never lands on an odd
-address. Each file states its contract and its numbered assumptions.
+address. Each file defines its contract and its numbered assumptions.
 
 ### Loops
 
@@ -257,7 +257,7 @@ read leaves it at, so the transition that would parse the next block re-arms
 instead. That adds one branch to a match-to-literals transition and one
 checked bit to the end code: streams that end pay 0.05 to 0.4% more cycles
 than decoders without loop code, and the loop itself runs at or below the
-pass's own rate, since it only copies. Such a stream never reaches DONE;
+rate of the pass, since it only copies. Such a stream never reaches DONE;
 drive it through `ST4_resume` with budgets and stop when you have enough,
 since `ST4_decompress` drains until DONE. A loop the caller replays needs no
 decoder code: when the output reaches the rewind point, save `a0`, `a2`,
@@ -270,10 +270,10 @@ other.
 
 A stream with copies from the literal stream needs a decoder built with
 `ST4_WINDOW equ 1`, and the window it was packed for, the header's field at
-byte 24: `ST4_init` takes it in `d3`, in bytes, and writes it into the two
+byte 24: `ST4_init` reads it in `d3`, in bytes, and writes it into the two
 instructions that use it. For the ring decoders that is the ring size
 `ST4_init` has already. Such a build tells a copy from a match by magnitude,
-a `cmp.w` and a short branch per match segment, and takes a copy's source
+a `cmp.w` and a short branch per match segment, and reads a copy's source
 from the stream B read pointer with one `lea` in place of the ring
 arithmetic a match needs:
 
@@ -283,8 +283,8 @@ d2 <  -M*k    a copy      a3 = a2 + M*k + d2      stream B, offset-M units behin
                           d2 += n*k               the offset advances by the segment
 ```
 
-One build per unit size serves every window, and the decoder holds no
-state for it: the window sits in its code. So the decoder is code in RAM,
+One build per unit size serves every window, and the decoder keeps no
+state for it: the window is in its code. So the decoder is code in RAM,
 and a 68030 caller flushes the instruction cache after `ST4_init`. A window
 build is 30 to 40 bytes larger, and a build without `ST4_WINDOW` is byte for
 byte the decoder above. Measured on the test corpora, streams without copies
@@ -292,7 +292,7 @@ pay 2.0 to 4.0% more cycles on a window build than on a plain one, and a
 stream with copies runs at the rate its operation count sets: word-soup at
 k = 1 packed with copies for a 16-unit ring decodes in ST4_wrap at 66.5
 cycles per unit, where the same data packed without them for a 256-unit
-ring takes 64.8, and for the 16-unit ring, nearly all of it literals, 42.0
+ring costs 64.8, and for the 16-unit ring, nearly all of it literals, 42.0
 for three times the bytes.
 
 ### What to feed them
@@ -332,8 +332,8 @@ decoder driven past the end would.
 
 ### The optimizers
 
-Three optimizers select the blocks of a stream without copies, all held to
-each other by tests:
+Three optimizers select the blocks of a stream without copies, and tests
+check the three against each other:
 
 - **St4Optimizer**, the readable reference. It tries every choice at every
   position and keeps the cheapest.
@@ -357,9 +357,9 @@ Measured on the optimizer alone:
 
 Copies need a different parse, since a copy is valid only where its source
 is literal and its distance counts the literals between: the best chain so
-far no longer gives the best parse, and the exact optimum is NP-hard.
+far no longer finds the best parse, and the exact optimum is NP-hard.
 **St4LiteralCopySearch** packs them. Its parser is the fast optimizer's
-dynamic program with copies added, exact for a given set of forced literals,
+dynamic program with copies added, exact for a fixed set of forced literals,
 the dictionary. `-c` runs its opening passes: the dictionary is the literals
 of a full-window parse, holes of a few units filled, shrunk to what gets
 copied from, up to four times. `-cS` then searches over dictionaries for S
@@ -382,7 +382,7 @@ same library classes, the same optimizers, the same options. The containers
 are interchangeable, measured byte-identical to the Java packer's on real
 data at every unit size, looping or not, and the tests are the Java suite,
 corpus for corpus. The port is not necessary: the Java tools are the
-reference and complete on their own, and the port follows them when that is
+reference and complete in themselves, and the port follows them when that is
 worth the work.
 
 ```sh
@@ -418,7 +418,7 @@ The ZX1 decoders this grew from and the jx1 packer are in
 [odipar/ST1](https://github.com/odipar/ST1). ST4 forked from it at
 `odipar/ST1@132aef0`; the emulator harness and the MC68000 cycle tables in
 the rigs are carried copies of that repository's, which remains the
-authority on ST1's own timing.
+authority on ST1's timing.
 
 ## License and attribution
 
