@@ -755,9 +755,9 @@ coarse shape of the dictionary rather than its detail.
 **On the whole corpus it is worth far less.** At 1,000 parses a column, 250
 of destroy and repair before the annealing writes 119,876 bytes against the
 annealing's 120,020: 0.12 per cent, where the subset read 0.97. The subset
-overstates it. What the opening is worth is somewhere between the two and
-is not settled by one corpus at one budget, so it is a result to read
-further rather than one to build on.
+reads high. What the opening is worth lies between the two, and one corpus
+at one budget does not settle it, so this is a result to read further
+rather than one to build on.
 
 ## What is left to try
 
