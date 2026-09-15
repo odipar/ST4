@@ -621,3 +621,162 @@ beat the unpenalised optimum.
   <https://en.wikibooks.org/wiki/Data_Compression/Dictionary_compression>
 - encode.su, *LZ style compression with static dictionary* —
   <https://encode.su/threads/2995-LZ-style-compression-with-static-Dictionary>
+
+# Is there a better algorithm at a ring of 256 bytes?
+
+The question: at a 256-byte ring ST4 packs the tone-period columns of a
+chiptune to 177,360 bytes where a 960-byte ring packs them to 112,972, and
+a player with 256 bytes needs that 57 per cent back. This note records what
+the literature offers, what each family measures on the data, and which of
+them a 68000 affords.
+
+## Verdict
+
+Copies from the literal stream recover 1.43 of the 1.57, to 124,220. No
+complete format published beats that number here. Of 108 candidates over
+six branches of the literature the closest is ZX2 with a short-offset
+class, 128,048 bytes, 3.1 per cent behind, and the cause repeats in every
+member: the family codes a match against a window, and none of them reaches
+past one.
+
+Two edits to ST4 pay. A short-offset class of five bits is worth about 2
+per cent, measured twice by separate routes. A match that reaches into the
+literal stream is worth 2.7 per cent within a column, and 3.9 per cent
+where it also reads the two other tone-period columns of the same tune.
+
+A grammar packs smaller than ST4 at any ring, 100,232 bytes, and costs 302
+cycles an output byte against ST4's 19. The 68000 settles that one.
+
+## What the figures are measured on
+
+120 columns: R0, R2 and R4, the low bytes of the three tone periods, of 40
+tunes drawn from a 543-tune corpus by the rig's rule, every 13th by name.
+898,830 bytes raw. Those three columns are 61 per cent of the compressed
+data of a tune. Each column packs alone, as ST4 packs it, and the 28-byte
+container header is excluded.
+
+| what packs it | bytes |
+|---|---|
+| stored | 898,830 |
+| ST4, ring 256 | 177,360 |
+| ST4, ring 256 with copies | 124,220 |
+| ST4, ring 960 | 112,972 |
+| ST4, ring 960 with copies | 98,400 |
+
+The constraints a candidate satisfies: a decoder buffer of about 256 bytes,
+a decode cost near ST4's, and no Huffman code and no range coder. The third
+is settled separately: a Huffman code capped at 8 bits, which one table
+lookup decodes, saves 0 per cent on this data, because all 256 values occur
+in every column and the eight commonest cover 27 to 30 per cent. An
+unbounded code saves 15 per cent of the literal stream and reads it bit by
+bit, which is the aligned literal copy stream B exists to provide.
+
+## What each family measures
+
+| family | best member | bytes | why it loses |
+|---|---|---|---|
+| bit-coded small-window LZSS: ZX0, ZX1, ZX2, ZX5, ZX7, aPLib, apultra, nrv2b, Pucrunch, MegaLZ, Pletter, Bitbuster, Doynax-LZ, LZB, BriefLZ | ZX2 with a short-offset class | 128,048 | ST4 descends from this family through ZX1 and ST1, and its members sit within a few per cent of each other. None reaches past the window, which is worth 1.43 here. ZX2 130,300, ZX0 131,457, aPLib about 135,600, LZB 141,113, BriefLZ 149,576. |
+| byte and nibble token formats: LZ4, LZSA1, LZSA2, LZ48, LZ49, FastLZ, LZO1X, Snappy, LZJB, LZRW1 | LZ4 with an 8-bit offset | 142,525 | A token of 8 fixed bits where ST4 spends 1 to 3 on a flag, and a minimum match of 3 or 4 where 18 per cent of matches here are 2 bytes. They buy cycles rather than bytes: 60 to 90 cycles a token against ST4's 239. |
+| LZ78 and LZW: LZ78, LZW, LZC, LZT, LZMW, LZAP, LZWL, LZFG, LZJ, LZD, V.42bis | LZAP, 65,536 entries | 124,152 | A tie, at about 201 KB of decoder RAM. At 4,096 entries it packs to 400,512, and the members that fit 256 bytes to 436,875 and worse. The next section has the reason. |
+| context prediction: LZP1 to LZP4, the RFC 1978 PPP predictor, ROLZ, LZRW3, LZRW4 | order-2 LZP | 157,972 | The offset LZP predicts is the offset the parse selects in 1.6 to 2.2 per cent of matches, at every table size and order tried: a tone-period column repeats at the period of the musical pattern, and LZP predicts from the preceding byte. It also floors at one flag bit an output byte, 112,357 bytes, before a length is coded. |
+| entropy coding: LZX, LHA, Hrust, Exomizer 2 and 3, Shrinkler, upkr, PPM, an order-1 range coder, Tunstall, move to front, BWT | - | - | Outside the third constraint, and outside the first independently: Shrinkler keeps 3,072 bytes of context, upkr 385, Exomizer 156 plus a header, against columns of 126 bytes. A binary range decode reads a bit with a `mulu.w`, 54 to 70 cycles. Order-1 coding of the literals alone is about 30 KB, a quarter of the target, which is the size of what the constraint costs. |
+| time-series integer coding: Gorilla delta-of-delta, frame of reference, simple-8b, PFOR-delta, bit-plane split, zero-run coding, two-level RLE | Gorilla | 775,736 | The first difference is 0 on 16.85 per cent of frames and the second on 31.8, where the data Gorilla was written for codes 96 per cent of timestamps to one bit. An RLE pass in front of ST4 packs to 135,486: ST4's last-offset block already codes a run of n in about 2 times bits(n), and the two code the same runs twice. |
+| plane splits and reorderings: byte-plane split, lo and hi interleaved, the nibble split of R1, a change-flag map, seasonal differencing | lo and hi interleaved | 172,806 | R0 and R1 cost 165,596 together today. The two change at the same instants, at note boundaries, so one match in the joint column covers both and a split pays a second full-length stream for it. ST4 packs R0 and R1 as separate columns, so the byte-plane split is in place. |
+| a dictionary trained over the corpus: zstd --train, Shared Brotli, femtozip, a static phrase table | zstd with a 16 KB trained dictionary | 67,065 | Trained on the test data itself and still behind: the payload falls from 58,956 to 50,681 and the dictionary costs 16,384. Repetition lives within a tune rather than across tunes, since two tunes share little beyond short runs of common values. |
+| a match at a transposed offset: copy a run and add a constant | - | - | 87.0 per cent of positions have an exact match and 86.4 a constant-offset match, and 1.8 per cent have a constant-offset match where no exact match exists. The low byte wraps at 256, so a transposed phrase keeps its offset until a wrap falls inside it. |
+| Fibonacci and Golomb-Rice codes for the token fields | - | - | Start-step-stop dominates both on every field: a match length costs 6.00 bits under Fibonacci, 6.02 under Rice at its best k, and 5.65 under (3,1,8). Start-step-stop covers Rice as the member (k,0,infinity). |
+| unbounded-window packers: LZR, LHA, Pack-Ice, StoneCracker | - | - | The window is the file and the decoder owns the whole output buffer, which is the opposite of a player reading one byte a column a frame. Pack-Ice decompresses backwards in place. Recorded because Pack-Ice is the first answer to the words "Atari ST packer". |
+| bidirectional macro schemes, LZRR | - | - | A phrase may copy from its right, so a right-pointing phrase names bytes the player has yet to produce. |
+
+## Why a dictionary cannot replace the ring
+
+The LZ78 family keeps a dictionary where LZ77 keeps a window, which reads
+as the shape a hard buffer limit wants. The arithmetic settles it:
+
+- a ring of 256 bytes addresses 32,896 pairs of an offset and a length, at
+  0 table bytes, since the phrases are the window;
+- a table of 256 bytes addresses 80 phrases, at 3 bytes each.
+
+That is a factor of 400 in phrases a byte of RAM, and a dictionary policy
+moves none of it. The measurements follow: LZW with 80 string entries and a
+ratio-monitored clear packs to 436,875, LZT charged for its LRU links to
+516,511, a byte-aligned LZW over a reduced alphabet to 586,230. Unbounded,
+the family draws level and no further, at 124,152 for about 201 KB.
+
+One policy is worth recording although this format has no use for it.
+LZC's ratio-monitored clear, which resets the dictionary where the ratio
+degrades, beat a frozen dictionary by 1.6 and beat every fixed interval.
+
+## What was built
+
+Ten candidates were implemented against the 120 columns and read by three
+verifiers each, one on the size accounting, one on decodability, one on the
+buffer and the cycles.
+
+| candidate | bytes | buffer | cycles a byte | refuted |
+|---|---|---|---|---|
+| ST4 over a Re-Pair axiom | 100,232 | 328 | 302.8 | none of three |
+| a short-offset class, the pairing dropped | 106,750 | about 292 | about 26 | within the build below |
+| one rule table for three columns | 106,758 | 5,042 | 261 | the cycles |
+| Re-Pair with the rule table in the container | 108,761 | 38 | 325 | the cycles |
+| paired blocks and a short-offset class | 108,771 | 292 | 26.4 | none of three |
+| start-step-stop codes for lengths and offsets | 113,980 | 396 | 19.4 | decodability |
+| the composite of four builds | 116,502 | 468 | 25.6 | the cycles |
+| a match that reaches past the ring | 116,869 | 272 | 19 | the size basis |
+| short names for recurring offsets | 126,632 | 360 | 35.2 | the cycles |
+| a delta filter before ST4, the control | 134,550 | 273 | 20.4 | the cycles |
+| an exact pricing parser | 137,408 | 280 | 27.4 | two of three |
+
+The control packs to 134,550, behind the baseline, which is the floor the
+rest are read against. The start-step-stop figure is refuted: its bits were
+counted for an encoding a decoder cannot read.
+
+## What survives
+
+**A short-offset class.** The paired-blocks build swept a 2 by 2 and
+reported against its heading: the pairing costs 0.9 to 2.7 per cent in
+all four arms, and a short-offset class saves 1.7 to 2.4 per cent in all
+four, five bits beating four everywhere. Its best arm is the class with the
+pairing dropped, 106,750. The survey reads the same feature from the other
+side, lifting ZX2 from 130,300 to 128,048.
+
+**A reach past the ring, until it saturates.** A match that reads the
+literal stream is worth 2.7 per cent within a column. Beyond that it
+stops, for a reason that binds any later attempt: the literal stream
+contains the bytes no match covered, 6.5 per cent of the output, so it
+lengthens no match, since the bytes a longer match reads are the ones an
+earlier match produced. The ring measurement reads the same way. From 256
+to 960 the literals fall 9 per cent and the flag, length and offset streams
+fall 33: reach lengthens matches, and a literal stream does no
+lengthening. An unbounded ring packs to 83,222, which is the largest single
+figure on this page and what 704 more bytes of RAM buy.
+
+## What this leaves out
+
+- Two builds priced their parse under a model of ST4 rather than the
+  packer, 2.1 and 3.6 per cent optimistic against it. The differences
+  within one model, where the short-offset class and the reach figures sit,
+  are sound; the absolute figures are soft by that much. Confirm the class
+  against the packer before it enters the format.
+- The cycle figures are counted from 68000 instruction timings rather than
+  measured on hardware. ST4's 239 cycles an operation is measured, and
+  the models reproduce the rig's costliest frame to within 6 per cent.
+- The 3.9 per cent reach reads the literal streams of the other two columns
+  of the tune, which requires a packing order and 16 bytes of pointers. The
+  streams are resident already.
+- The unit k above 2, and the 27 columns of a tune outside these three.
+
+## Sources
+
+- T. Nishimoto, Y. Tabei, *LZRR: LZ77 Parsing with Right Reference*, 2018 -
+  <https://arxiv.org/abs/1812.04261>
+- E. Saukas, ZX0 - <https://github.com/einar-saukas/ZX0>
+- E. Marty, LZSA - <https://github.com/emmanuel-marty/lzsa>
+- E. Marty, a ZX0 decompressor for the 68000 -
+  <https://github.com/emmanuel-marty/unzx0_68000>
+- C. Bloom, *LZP: a new data compression algorithm*, 1996 -
+  <https://www.cbloom.com/papers/lzp.pdf>
+- N. J. Larsson, A. Moffat, *Offline Dictionary-Based Compression*
+  (Re-Pair), 1999 - <https://ieeexplore.ieee.org/document/755679>
+- Wikipedia, *LZ77 and LZ78* -
+  <https://en.wikipedia.org/wiki/LZ77_and_LZ78>
