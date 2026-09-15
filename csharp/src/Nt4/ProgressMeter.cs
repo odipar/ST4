@@ -63,7 +63,7 @@ public sealed class ProgressMeter
             _shown = percent;
             long now = TimeProvider.System.GetTimestamp();
             _tickTimestamps[percent] = now;
-            Console.Write($"\r[{percent,3}%] {Estimate(percent, now),-12}");
+            Console.Error.Write($"\r[{percent,3}%] {Estimate(percent, now),-12}");
         }
     }
 
@@ -73,7 +73,7 @@ public sealed class ProgressMeter
         if (_enabled)
         {
             long elapsed = TimeProvider.System.GetTimestamp() - _started;
-            Console.WriteLine($"\r[100%] {Duration(elapsed),-12}");
+            Console.Error.WriteLine($"\r[100%] {Duration(elapsed),-12}");
         }
     }
 

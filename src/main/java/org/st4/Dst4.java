@@ -16,15 +16,12 @@ public final class Dst4 {
     private Dst4() {}
 
     public static void main(String[] args) {
-        System.out.println("DST4: aligned split-stream unpacker v7.0 by Robbert van Dalen, "
-                + "based on ZX1 v1.5 by Einar Saukas");
-
-        boolean forcedMode = false;
+        boolean silent = false;
         int times = 1;
         int i = 0;
         for (; i < args.length && args[i].startsWith("-"); i++) {
-            if (args[i].equals("-f")) {
-                forcedMode = true;
+            if (args[i].equals("-silent")) {
+                silent = true;
             } else if (args[i].startsWith("-r")) {
                 times = parseNumber(args[i].substring(2));
             } else {
@@ -32,45 +29,33 @@ public final class Dst4 {
             }
         }
 
-        String inputName;
-        String outputName;
-        if (args.length == i + 1) {
-            inputName = args[i];
-            if (inputName.length() > 4 && inputName.endsWith(".st4")) {
-                outputName = inputName.substring(0, inputName.length() - 4);
-            } else {
-                throw error("Cannot infer output filename");
-            }
-        } else if (args.length == i + 2) {
-            inputName = args[i];
-            outputName = args[i + 1];
-        } else {
+        if (args.length != i) {
             usage("""
-                    Usage: dst4 [-f] [-rN] input.st4 [output]
-                      -f      Force overwrite of output file
+                    Usage: dst4 [-rN] [-silent] < input.st4 > output
                       -rN     Play a looping stream's loop N times: the whole pass, then
                               N-1 repeats of its loop section (default 1, the pass)
+                      -silent Leave the report off standard error
                     The output is padded to a whole number of units, as the format stores it.""");
             return;
         }
 
-        byte[] file;
-        try {
-            file = Files.readAllBytes(Path.of(inputName));
-        } catch (IOException e) {
-            throw error("Cannot access input file " + inputName);
+        if (!silent) {
+            System.err.println("DST4: aligned split-stream unpacker v7.0 by Robbert van Dalen, "
+                    + "based on ZX1 v1.5 by Einar Saukas");
         }
 
-        Path outputPath = Path.of(outputName);
-        if (!forcedMode && Files.exists(outputPath)) {
-            throw error("Already existing output file " + outputName);
+        byte[] file;
+        try {
+            file = System.in.readAllBytes();
+        } catch (IOException e) {
+            throw error("Cannot read standard input");
         }
 
         St4Format.Container container;
         try {
             container = St4Format.read(file);
         } catch (IllegalArgumentException e) {
-            throw error(e.getMessage() + ": " + inputName);
+            throw error(e.getMessage() == null ? "not an ST4 stream" : e.getMessage());
         }
 
         St4Decompressor.Decoded decoded;
@@ -83,19 +68,23 @@ public final class Dst4 {
             output = played(container, decoded, times);
         } catch (AssertionError | IndexOutOfBoundsException | IllegalStateException e) {
             // A malformed stream trips an assertion under -ea; report it.
-            throw error("Corrupted or truncated ST4 data in " + inputName
+            throw error("Corrupted or truncated ST4 data on standard input"
                     + (e.getMessage() == null ? "" : ": " + e.getMessage()));
         } catch (IllegalArgumentException e) {
-            throw error(e.getMessage() + ": " + inputName);
+            throw error(e.getMessage() == null ? "not an ST4 stream" : e.getMessage());
         }
 
         try {
-            Files.write(outputPath, output);
+            System.out.write(output);
+            System.out.flush();
         } catch (IOException e) {
-            throw error("Cannot write output file " + outputName);
+            throw error("Cannot write standard output");
+        }
+        if (silent) {
+            return;
         }
 
-        System.out.printf("File decompressed from %d to %d bytes, k=%d%s%s%s!%n",
+        System.err.printf("File decompressed from %d to %d bytes, k=%d%s%s%s!%n",
                 file.length, output.length, container.unit(),
                 container.unit() == 1 ? "" : " (a whole number of units)",
                 decoded.repeatIndex() >= 0 ? ", looping from unit " + decoded.repeatIndex()

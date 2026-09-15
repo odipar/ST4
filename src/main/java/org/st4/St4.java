@@ -15,9 +15,6 @@ public final class St4 {
     private St4() {}
 
     public static void main(String[] args) {
-        System.out.println("ST4: aligned split-stream packer v7.0 by Robbert van Dalen, "
-                + "based on ZX1 v1.5 by Einar Saukas");
-
         int unit = 1;
         int offsetLimit = St4Format.MAX_OFFSET;
         int maxOpLength = St4Format.MAX_OP;
@@ -25,11 +22,11 @@ public final class St4 {
         boolean copies = false;
         int penalty = 0;
         double search = 0;
-        boolean forcedMode = false;
+        boolean silent = false;
         int i = 0;
         for (; i < args.length && args[i].startsWith("-"); i++) {
             switch (args[i]) {
-                case "-f" -> forcedMode = true;
+                case "-silent" -> silent = true;
                 case "-c" -> copies = true;
                 default -> {
                     if (args[i].startsWith("-c")) {
@@ -54,15 +51,10 @@ public final class St4 {
             }
         }
 
-        String outputName;
-        if (args.length == i + 1) {
-            outputName = args[i] + ".st4";
-        } else if (args.length == i + 2) {
-            outputName = args[i + 1];
-        } else {
+        if (args.length != i) {
             usage("""
-                    Usage: st4 [-f] [-c[S]] [-kK] [-mN] [-lN] [-rR] input [output.st4]
-                      -f      Force overwrite of output file
+                    Usage: st4 [-c[S]] [-kK] [-mN] [-lN] [-pN] [-rR] [-silent] \
+< input > output.st4
                       -c      Let a match beyond the -m window copy from the
                               literal stream; needs a decoder built with copies
                       -cS     The same, searching for S seconds for a better parse
@@ -75,8 +67,14 @@ public final class St4 {
                       -mN     Limit back-references to N units
                       -lN     Split matches so no operation exceeds N units
                       -rR     Loop: after the last unit, the output continues
-                              from unit R, forever""");
+                              from unit R, forever
+                      -silent Leave the report off standard error""");
             return;
+        }
+
+        if (!silent) {
+            System.err.println("ST4: aligned split-stream packer v7.0 by Robbert van Dalen, "
+                    + "based on ZX1 v1.5 by Einar Saukas");
         }
 
         String problem = St4Format.checkUnit(unit);
@@ -91,17 +89,12 @@ public final class St4 {
 
         byte[] input;
         try {
-            input = Files.readAllBytes(Path.of(args[i]));
+            input = System.in.readAllBytes();
         } catch (IOException e) {
-            throw error("Cannot access input file " + args[i]);
+            throw error("Cannot read standard input");
         }
         if (input.length == 0) {
-            throw error("Empty input file " + args[i]);
-        }
-
-        Path outputPath = Path.of(outputName);
-        if (!forcedMode && Files.exists(outputPath)) {
-            throw error("Already existing output file " + outputName);
+            throw error("Empty input on standard input");
         }
 
         int[] units = Units.split(input, unit);
@@ -120,25 +113,29 @@ public final class St4 {
             int[] loop = Arrays.copyOfRange(units, repeatIndex, units.length);
             result = St4Compressor.compressRewinding(
                     intro.length == 0 ? null
-                            : parse(intro, unit, offsetLimit, maxOpLength, copies, search, penalty),
-                    parse(loop, unit, offsetLimit, maxOpLength, copies, search, penalty),
+                            : parse(intro, unit, offsetLimit, maxOpLength, copies, search, penalty, !silent),
+                    parse(loop, unit, offsetLimit, maxOpLength, copies, search, penalty, !silent),
                     units, unit, maxOpLength, repeatIndex, window);
         } else {
             // The loop fits the window: the end is an endless match back to
             // the loop point.
             result = St4Compressor.compress(
-                    parse(units, unit, offsetLimit, maxOpLength, copies, search, penalty), units,
+                    parse(units, unit, offsetLimit, maxOpLength, copies, search, penalty, !silent), units,
                     unit, maxOpLength, repeatIndex, window);
         }
 
         try {
-            Files.write(outputPath, container(result));
+            System.out.write(container(result));
+            System.out.flush();
         } catch (IOException e) {
-            throw error("Cannot write output file " + outputName);
+            throw error("Cannot write standard output");
+        }
+        if (silent) {
+            return;
         }
 
         int padded = Units.paddedLength(input.length, unit);
-        System.out.printf("Packed %d bytes%s into %d (%.1f%%): A %d, B %d, C %d, D %d, "
+        System.err.printf("Packed %d bytes%s into %d (%.1f%%): A %d, B %d, C %d, D %d, "
                 + "%d operations%s%n",
                 input.length, padded == input.length ? "" : " padded to " + padded,
                 result.packedSize(), 100.0 * result.packedSize() / input.length,
@@ -150,12 +147,12 @@ public final class St4 {
                         + (repeatIndex < 0 ? "" : ", loops from unit " + repeatIndex
                         + (result.rewindIndex() < 0 ? "" : " by rewind")));
         if (result.rewindIndex() >= 0) {
-            System.out.printf("The loop is longer than the -m%d window, so the decoder cannot "
+            System.err.printf("The loop is longer than the -m%d window, so the decoder cannot "
                     + "loop it alone: save its state at unit %d and restore it at unit %d, "
                     + "every pass%n", offsetLimit, repeatIndex, units.length);
         }
         if (result.longestOp() > maxOpLength) {
-            System.out.printf("Warning: longest operation is %d units, over the -l%d limit: "
+            System.err.printf("Warning: longest operation is %d units, over the -l%d limit: "
                     + "a literal run, which the format cannot split%n",
                     result.longestOp(), maxOpLength);
         }
@@ -167,16 +164,16 @@ public final class St4 {
      * seconds the search from there.
      */
     private static St4Block parse(int[] units, int unit, int window, int maxOpLength,
-                                  boolean copies, double seconds, int penalty) {
+                                  boolean copies, double seconds, int penalty, boolean progress) {
         if (copies) {
-            return St4LiteralCopySearch.optimize(units, unit, window, maxOpLength, seconds, true);
+            return St4LiteralCopySearch.optimize(units, unit, window, maxOpLength, seconds, progress);
         }
         if (penalty != 0) {
             // the reference parser is the one that charges a block, and it
             // reproduces the event-driven one's costs at a penalty of zero
-            return St4Optimizer.optimize(units, unit, window, true, penalty);
+            return St4Optimizer.optimize(units, unit, window, progress, penalty);
         }
-        return St4EventOptimizer.optimize(units, unit, window);
+        return St4EventOptimizer.optimize(units, unit, window, progress);
     }
 
     /**

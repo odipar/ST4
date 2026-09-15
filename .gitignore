@@ -59,3 +59,7 @@ yx6/test/emu/.work/
 
 # rig scratch: assembled probes and packed tunes
 yx6/test/emu/.work*/
+
+### The Go tree and the releases it builds ###
+dist/
+go/st4/**/data/*.bin

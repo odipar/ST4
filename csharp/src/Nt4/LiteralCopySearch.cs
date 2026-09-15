@@ -163,7 +163,7 @@ public static class LiteralCopySearch
         {
             if (progress)
             {
-                Console.WriteLine(string.Format(CultureInfo.InvariantCulture,
+                Console.Error.WriteLine(string.Format(CultureInfo.InvariantCulture,
                     "{0,7:F1}s pass {1}: {2} bits, {3} bytes",
                     (Stopwatch.GetTimestamp() - started) / (double)Stopwatch.Frequency, pass,
                     bits, (bits + 7) / 8));
@@ -261,7 +261,7 @@ public static class LiteralCopySearch
             }
             if (progress && step > 0)
             {
-                Console.WriteLine(string.Format(CultureInfo.InvariantCulture,
+                Console.Error.WriteLine(string.Format(CultureInfo.InvariantCulture,
                     "{0} steps, {1} accepted: {2} bits, {3} bytes", step, accepted, bestBits,
                     (bestBits + 7) / 8));
             }
@@ -346,7 +346,7 @@ public static class LiteralCopySearch
         }
 
         private void Report(string move) =>
-            Console.WriteLine(string.Format(CultureInfo.InvariantCulture,
+            Console.Error.WriteLine(string.Format(CultureInfo.InvariantCulture,
                 "{0,7:F1}s {1,8} steps: {2} bits, {3} bytes  ({4})",
                 (Stopwatch.GetTimestamp() - started) / (double)Stopwatch.Frequency, step,
                 bestBits, (bestBits + 7) / 8, move));

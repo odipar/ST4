@@ -22,18 +22,15 @@ public static class Dnt4
     public static int Run(string[] args)
     {
         ArgumentNullException.ThrowIfNull(args);
-        Console.WriteLine("DNT4: aligned split-stream unpacker v7.0 by Robbert van Dalen, "
-            + "based on ZX1 v1.5 by Einar Saukas");
-
-        bool forcedMode = false;
+        bool silent = false;
         int times = 1;
         int index = 0;
         for (; index < args.Length
             && args[index].StartsWith('-'); index++)
         {
-            if (args[index] == "-f")
+            if (args[index] == "-silent")
             {
-                forcedMode = true;
+                silent = true;
             }
             else if (args[index].StartsWith("-r", StringComparison.Ordinal))
             {
@@ -49,48 +46,28 @@ public static class Dnt4
             }
         }
 
-        string inputName;
-        string outputName;
-        if (args.Length == index + 1)
-        {
-            inputName = args[index];
-            if (inputName.Length > 4 && inputName.EndsWith(".st4", StringComparison.Ordinal))
-            {
-                outputName = inputName[..^4];
-            }
-            else
-            {
-                return Cli.Error("Cannot infer output filename");
-            }
-        }
-        else if (args.Length == index + 2)
-        {
-            inputName = args[index];
-            outputName = args[index + 1];
-        }
-        else
+        if (args.Length != index)
         {
             return Cli.Usage(
-                "Usage: dnt4 [-f] [-rN] input.st4 [output]\n"
-                + "  -f      Force overwrite of output file\n"
+                "Usage: dnt4 [-rN] [-silent] < input.st4 > output\n"
                 + "  -rN     Play a looping stream's loop N times: the whole pass, then\n"
                 + "          N-1 repeats of its loop section (default 1, the pass)\n"
+                + "  -silent Leave the report off standard error\n"
                 + "The output is padded to a whole number of units, as the format stores it.");
         }
 
-        byte[] file;
-        try
+        if (!silent)
         {
-            file = File.ReadAllBytes(inputName);
-        }
-        catch (Exception exception) when (Cli.IsFileException(exception))
-        {
-            return Cli.Error($"Cannot access input file {inputName}");
+            Console.Error.WriteLine("DNT4: aligned split-stream unpacker v7.0 by Robbert van Dalen, "
+                + "based on ZX1 v1.5 by Einar Saukas");
         }
 
-        if (!forcedMode && Path.Exists(outputName))
+        byte[] file;
+        using (Stream stdin = Console.OpenStandardInput())
+        using (var buffer = new MemoryStream())
         {
-            return Cli.Error($"Already existing output file {outputName}");
+            stdin.CopyTo(buffer);
+            file = buffer.ToArray();
         }
 
         Format.Container container;
@@ -107,23 +84,23 @@ public static class Dnt4
         }
         catch (InvalidDataException exception)
         {
-            return Cli.Error($"{exception.Message}: {inputName}");
+            return Cli.Error(exception.Message);
         }
         catch (ArgumentException exception)
         {
-            return Cli.Error($"{exception.Message}: {inputName}");
+            return Cli.Error(exception.Message);
         }
 
-        try
+        using (Stream stdout = Console.OpenStandardOutput())
         {
-            File.WriteAllBytes(outputName, output);
+            stdout.Write(output, 0, output.Length);
         }
-        catch (Exception exception) when (Cli.IsFileException(exception))
+        if (silent)
         {
-            return Cli.Error($"Cannot write output file {outputName}");
+            return 0;
         }
 
-        Console.WriteLine($"File decompressed from {file.Length} to {output.Length} bytes, "
+        Console.Error.WriteLine($"File decompressed from {file.Length} to {output.Length} bytes, "
             + $"k={container.Unit}{(container.Unit == 1 ? "" : " (a whole number of units)")}"
             + $"{(decoded.RepeatIndex >= 0 ? $", looping from unit {decoded.RepeatIndex}"
                 : container.Rewind < 0 ? ""

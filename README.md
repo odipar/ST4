@@ -303,12 +303,41 @@ ring of N units, pack with `-mN` so the decoder never needs data that has
 left the ring, which also decides how a loop is packed; add `-c` and build
 with `ST4_WINDOW equ 1` to let the ring reach the literals it has read.
 
-## Java tools
+## The tools
+
+Every tool reads standard input, writes standard output and reports on
+standard error, so one pipes into the next and `-silent` leaves the report
+off.
 
 ```sh
-mvn package
-java -ea -cp target/classes org.st4.St4  [-f] [-c[S]] [-kK] [-mN] [-lN] [-rR] input [output.st4]
-java -ea -cp target/classes org.st4.Dst4 [-f] [-rN] input.st4 [output]
+bin/st4  [-c[S]] [-kK] [-mN] [-lN] [-pN] [-rR] [-silent] < input > output.st4
+bin/dst4 [-rN] [-silent] < input.st4 > output
+
+bin/st4 -k2 < tune.bin | bin/dst4 > back.bin
+```
+
+`bin/st4` and `bin/dst4` run the Java tools out of `target/classes`, and
+build first where a source is newer than the last build. The same tools are
+`org.st4.St4` and `org.st4.Dst4` under `java -ea -cp target/classes`.
+
+## Go tools
+
+[go/](go) is the port the releases ship: one executable a tool a platform,
+with no runtime to install beside it. The three trees write the same bytes
+for the same input and flags, which `GoParityTest` reads back over three
+inputs at ten flag settings.
+
+```sh
+cd go && go build ./cmd/...
+go get github.com/odipar/st4/go
+```
+
+The module is `github.com/odipar/st4/go`, tagged `go/vX.Y.Z`. Its version is
+the tools', not the format's: the format is 7 and the module starts at v0.1.0,
+since a Go module is versioned from v0.
+
+```sh
+release/publish.sh          # six platforms, one zip each, into dist/release
 ```
 
 ### Packing
@@ -386,13 +415,13 @@ reference and complete in themselves, and the port follows them when that is
 worth the work.
 
 ```sh
-dotnet run --project csharp/src/Nt4.Cli -- [-f] [-c[S]] [-kK] [-mN] [-lN] [-rR] input [output.st4]
+dotnet run --project csharp/src/Nt4.Cli -- [-c[S]] [-kK] [-mN] [-lN] [-pN] [-rR] [-silent] < input > output.st4
 ```
 
 ## Tests
 
 ```sh
-mvn test                                  # round-trips, containers, loops, copies, optimizers
+mvn test                                  # round-trips, containers, loops, copies, optimizers, Go parity
 dotnet test csharp/Nt4.slnx -c Release    # the C# port, same corpora
 python3 68k/test/emu/test_st4.py          # linear decoder vs the Java packer, k = 1, 2, 4
 python3 68k/test/emu/test_st4_wrap.py     # counted wrap, every unit size

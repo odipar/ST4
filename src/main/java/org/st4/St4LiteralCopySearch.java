@@ -160,7 +160,7 @@ public final class St4LiteralCopySearch {
 
         private void reportPass(int pass) {
             if (progress) {
-                System.out.printf("%7.1fs pass %d: %d bits, %d bytes%n",
+                System.err.printf("%7.1fs pass %d: %d bits, %d bytes%n",
                         (System.nanoTime() - started) / 1e9, pass, bits, (bits + 7) / 8);
             }
         }
@@ -244,7 +244,7 @@ public final class St4LiteralCopySearch {
                 }
             }
             if (progress && step > 0) {
-                System.out.printf("%d steps, %d accepted: %d bits, %d bytes%n", step, accepted,
+                System.err.printf("%d steps, %d accepted: %d bits, %d bytes%n", step, accepted,
                         bestBits, (bestBits + 7) / 8);
             }
             return best;
@@ -320,7 +320,7 @@ public final class St4LiteralCopySearch {
         }
 
         private void report(String move) {
-            System.out.printf("%7.1fs %8d steps: %d bits, %d bytes  (%s)%n",
+            System.err.printf("%7.1fs %8d steps: %d bits, %d bytes  (%s)%n",
                     (System.nanoTime() - started) / 1e9, step, bestBits, (bestBits + 7) / 8, move);
         }
 

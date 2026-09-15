@@ -23,24 +23,22 @@ public static class Nt4
     public static int Run(string[] args)
     {
         ArgumentNullException.ThrowIfNull(args);
-        Console.WriteLine("NT4: aligned split-stream packer v7.0 by Robbert van Dalen, "
-            + "based on ZX1 v1.5 by Einar Saukas");
-
         int unit = 1;
         int offsetLimit = Format.MaxOffset;
         int maxOpLength = Format.MaxOp;
         int repeatIndex = -1;
         bool copies = false;
         double search = 0;
-        bool forcedMode = false;
+        int penalty = 0;
+        bool silent = false;
         int index = 0;
         for (; index < args.Length
             && args[index].StartsWith('-'); index++)
         {
             switch (args[index])
             {
-                case "-f":
-                    forcedMode = true;
+                case "-silent":
+                    silent = true;
                     break;
                 case "-c":
                     copies = true;
@@ -54,6 +52,13 @@ public static class Nt4
                         {
                             return Cli.Error($"Invalid parameter value {args[index][2..]}");
                         }
+                        break;
+                    }
+                    if (args[index].StartsWith("-p", StringComparison.Ordinal))
+                    {
+                        // zero is a penalty the parse reads, and the one the
+                        // default parser charges, so it is not turned away
+                        penalty = Cli.ParseIndex(args[index][2..]);
                         break;
                     }
                     if (args[index].StartsWith("-r", StringComparison.Ordinal))
@@ -91,32 +96,32 @@ public static class Nt4
             }
         }
 
-        string outputName;
-        if (args.Length == index + 1)
-        {
-            outputName = args[index] + ".st4";
-        }
-        else if (args.Length == index + 2)
-        {
-            outputName = args[index + 1];
-        }
-        else
+        if (args.Length != index)
         {
             return Cli.Usage(
-                "Usage: nt4 [-f] [-c[S]] [-kK] [-mN] [-lN] [-rR] input [output.st4]\n"
-                + "  -f      Force overwrite of output file\n"
+                "Usage: nt4 [-c[S]] [-kK] [-mN] [-lN] [-pN] [-rR] [-silent]"
+                + " < input > output.st4\n"
                 + "  -c      Let a match beyond the -m window copy from the\n"
                 + "          literal stream; needs a decoder built with copies\n"
                 + "  -cS     The same, searching for S seconds for a better parse\n"
                 + "  -kK     Unit size: 1, 2 or 4 bytes (default 1). Lengths and\n"
                 + "          offsets count units, so the output is padded to a\n"
                 + "          whole number of them\n"
+                + "  -pN     Charge N bits on every block besides what it\n"
+                + "          writes, so the parse prefers fewer, longer ones:\n"
+                + "          a decoder parses a block at a time\n"
                 + "  -mN     Limit back-references to N units\n"
                 + "  -lN     Split matches so no operation exceeds N units\n"
                 + "  -rR     Loop: after the last unit, the output continues\n"
-                + "          from unit R, forever");
+                + "          from unit R, forever\n"
+                + "  -silent Leave the report off standard error");
         }
-        string inputName = args[index];
+
+        if (!silent)
+        {
+            Console.Error.WriteLine("NT4: aligned split-stream packer v7.0 by Robbert van Dalen, "
+                + "based on ZX1 v1.5 by Einar Saukas");
+        }
 
         string problem = Format.CheckUnit(unit);
         if (problem.Length != 0)
@@ -131,21 +136,15 @@ public static class Nt4
         }
 
         byte[] input;
-        try
+        using (Stream stdin = Console.OpenStandardInput())
+        using (var buffer = new MemoryStream())
         {
-            input = File.ReadAllBytes(inputName);
-        }
-        catch (Exception exception) when (Cli.IsFileException(exception))
-        {
-            return Cli.Error($"Cannot access input file {inputName}");
+            stdin.CopyTo(buffer);
+            input = buffer.ToArray();
         }
         if (input.Length == 0)
         {
-            return Cli.Error($"Empty input file {inputName}");
-        }
-        if (!forcedMode && Path.Exists(outputName))
-        {
-            return Cli.Error($"Already existing output file {outputName}");
+            return Cli.Error("Empty input on standard input");
         }
 
         int[] units = Units.Split(input, unit);
@@ -166,8 +165,8 @@ public static class Nt4
             int[] loop = units[repeatIndex..];
             result = Compressor.CompressRewinding(
                 intro.Length == 0 ? null
-                    : Parse(intro, unit, offsetLimit, maxOpLength, copies, search),
-                Parse(loop, unit, offsetLimit, maxOpLength, copies, search),
+                    : Parse(intro, unit, offsetLimit, maxOpLength, copies, search, penalty, !silent),
+                Parse(loop, unit, offsetLimit, maxOpLength, copies, search, penalty, !silent),
                 units, unit, maxOpLength, repeatIndex, window);
         }
         else
@@ -175,21 +174,22 @@ public static class Nt4
             // The loop fits the window: the end is an endless match back to
             // the loop point.
             result = Compressor.Compress(
-                Parse(units, unit, offsetLimit, maxOpLength, copies, search), units, unit,
+                Parse(units, unit, offsetLimit, maxOpLength, copies, search, penalty, !silent), units, unit,
                 maxOpLength, repeatIndex, window);
         }
 
-        try
+        using (Stream stdout = Console.OpenStandardOutput())
         {
-            File.WriteAllBytes(outputName, Container(result));
+            byte[] container = Container(result);
+            stdout.Write(container, 0, container.Length);
         }
-        catch (Exception exception) when (Cli.IsFileException(exception))
+        if (silent)
         {
-            return Cli.Error($"Cannot write output file {outputName}");
+            return 0;
         }
 
         int padded = Units.PaddedLength(input.Length, unit);
-        Console.WriteLine(string.Create(CultureInfo.InvariantCulture,
+        Console.Error.WriteLine(string.Create(CultureInfo.InvariantCulture,
             $"Packed {input.Length} bytes{(padded == input.Length ? "" : $" padded to {padded}")} "
             + $"into {result.PackedSize} ({100.0 * result.PackedSize / input.Length:F1}%): "
             + $"A {result.Control.Length}, B {result.Literal.Length}, "
@@ -200,13 +200,13 @@ public static class Nt4
             + $"{(result.RewindIndex < 0 ? "" : " by rewind")}"));
         if (result.RewindIndex >= 0)
         {
-            Console.WriteLine($"The loop is longer than the -m{offsetLimit} window, so the "
+            Console.Error.WriteLine($"The loop is longer than the -m{offsetLimit} window, so the "
                 + $"decoder cannot loop it alone: save its state at unit {repeatIndex} and "
                 + $"restore it at unit {units.Length}, every pass");
         }
         if (result.LongestOp > maxOpLength)
         {
-            Console.WriteLine(
+            Console.Error.WriteLine(
                 $"Warning: longest operation is {result.LongestOp} units, over the "
                 + $"-l{maxOpLength} limit: a literal run, which the format cannot split");
         }
@@ -219,13 +219,20 @@ public static class Nt4
     /// seconds the search from there.
     /// </summary>
     private static Block Parse(int[] units, int unit, int window, int maxOpLength, bool copies,
-                               double seconds)
+                               double seconds, int penalty, bool progress)
     {
-        if (!copies)
+        if (copies)
         {
-            return EventOptimizer.Optimize(units, unit, window);
+            return LiteralCopySearch.Optimize(units, unit, window, maxOpLength, seconds,
+                progress);
         }
-        return LiteralCopySearch.Optimize(units, unit, window, maxOpLength, seconds, true);
+        if (penalty != 0)
+        {
+            // the reference parser is the one that charges a block, and it
+            // reproduces the event-driven one's costs at a penalty of zero
+            return Optimizer.Optimize(units, unit, window, progress, penalty);
+        }
+        return EventOptimizer.Optimize(units, unit, window, progress);
     }
 
     /// <summary>
