@@ -190,6 +190,11 @@ repositories of the family and the rows below it struck here.
 | `IsUnitSize reports whether unit is one the format carries` | `... the format defines` |
 | `a wall of percentages in whatever reads it` | `a wall of percentages in the reader of it` |
 | `as a Go module takes semver from v0` | `since a Go module is versioned from v0` |
+| `the heap it asks for` | `the heap it needs` |
+| `retains almost nothing` | `keeps almost none of it` |
+| `the states are positions by offsets` | `a state is a position and an offset` |
+| `The pool grows to hold them` | `The pool grows to fit them` |
+| `the window bounds the states` | `the window bounds how many there are` |
 | `consume n from the operation` | `subtract n from the operation` |
 | `the parse exit takes one branch` | `the parse exit costs one branch` |
 | `segments take the counted ladder` | `segments run the counted ladder` |

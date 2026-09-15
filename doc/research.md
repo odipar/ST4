@@ -622,6 +622,91 @@ beat the unpenalised optimum.
 - encode.su, *LZ style compression with static dictionary* -
   <https://encode.su/threads/2995-LZ-style-compression-with-static-Dictionary>
 
+# What the copies search costs in memory
+
+The question: `st4 -c` on a 41 KB file ends in `OutOfMemoryError` under the
+Java tools at the default heap, where the Go tools pack it. This note
+records what the memory is spent on, since the first two answers were wrong.
+
+## Verdict
+
+The search is sound and keeps almost none of it: after it returns, the
+heap has 1 MB. What it spends is churn. Packing `doc/research.md`, 41,743
+bytes, at `-k1 -c` allocates **33 GB** in total and asks the operating
+system for 15 GB, against a live set of about 5 GB. 98.2 per cent of every
+byte allocated is one function, `newNode`.
+
+Java ends in `OutOfMemoryError` because the JVM caps the heap at a quarter
+of the machine, 4 GB of 16; Go has no cap and reaches 6.2 GB. The two write
+the same bytes. The cap is the messenger.
+
+## What it is not
+
+Two readings were measured and are wrong.
+
+**Not the pool's retention.** The pool compacts at four times a full parse.
+Lowering that to one makes the peak **worse**, 6,596 MB against 6,212, and
+at four the limit is never reached at all: 0 compactions over the opening
+passes. The pool bound is not the lever.
+
+**Not the width of a node.** Go kept the five fields beside the kind in
+`int`, eight bytes where the Java and C# pools spend four. Narrowing them to
+`int32` leaves the peak inside the noise of repeated runs, 6,120 MB against
+6,433 at best of three. It is worth having for the time it saves, 24.7
+seconds against 61.0, and it is not the memory.
+
+## What it is
+
+A parse materialises one node a DP state reached, and a state is a
+position and an offset. One full parse of those 41,743 units at a window of
+32,512 makes **85,971,635 nodes**, and the opening passes reach 261,766,765:
+6,270 a position. The pool grows to fit them, geometrically, and every
+growth abandons the array it came from. That abandoned array is the 33 GB.
+
+The two parsers beside it keep, for each position, the winner and enough to
+re-derive the state, and walk the positions backwards to rebuild the chain.
+Their memory is positions plus window rather than positions by offsets. On
+the same input:
+
+| parser | peak | time | bytes out |
+|---|---|---|---|
+| the event-driven DP | 274 MB | 3.6s | 17,614 |
+| the reference DP | 258 MB | 2.9s | 17,614 |
+| the copies search | 6,800 MB | 36.4s | 17,612 |
+
+Twenty-six times the memory, for two bytes, on prose. Prose is the wrong
+input for copies: on a tone-period column of 19,500 bytes at `-m256` the
+copies search costs 75 MB against the event-driven parser's 9 and packs
+1,494 bytes against 2,100.
+
+## What the window is worth
+
+The window bounds how many there are, so `-m` bounds the memory. On the
+same 41 KB
+input at `-k1 -c`:
+
+| window | peak | seconds | bytes out |
+|---|---|---|---|
+| the default, 32,512 | 6,337 MB | 49.3 | 17,612 |
+| 2,048 | 3,724 MB | 6.1 | 20,666 |
+| 960 | 2,313 MB | 5.1 | 22,274 |
+| 256 | 610 MB | 4.0 | 25,662 |
+| 64 | 396 MB | 3.9 | 30,868 |
+
+Every asset this format is written for names a window: a DTX2 column packs
+at a ring of 960 bytes and a YMXR tune at 256. The unbounded case is a large
+input that compresses badly at the widest window the format has, which is
+outside what the search is for.
+
+## What is left to do
+
+The representation is what costs: a node a state against a winner a
+position. The two parsers beside it show the second works, and
+`rebuilder.resolveState` in optimize.go is what re-derives a state on
+demand, at 422 MB of the 31 GB. Bringing the copies search to it is a
+redesign of the parse, the checkpoints and the rebuild together, written to
+the same bytes out. It is not written here.
+
 # Is there a better algorithm at a ring of 256 bytes?
 
 The question: at a 256-byte ring ST4 packs the tone-period columns of a

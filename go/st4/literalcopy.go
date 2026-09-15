@@ -557,13 +557,18 @@ type copyParser struct {
 	bestMatchIdx   int
 	bestLengthSize int
 
-	// The node pool.
+	// The node pool. The five fields beside the kind are int32, as the
+	// Java and C# pools are: a parse of a long input at a wide window makes
+	// tens of millions of nodes, and Go's int is eight bytes where those
+	// trees spend four. Every value fits: an index and a length are bounded
+	// by the unit count, an offset by the window, and the bits by the
+	// output a 32-bit count already bounds.
 	nodeKind   []byte
-	nodeEnd    []int
-	nodeOffset []int
-	nodeAux    []int
-	nodePred   []int
-	nodeBits   []int
+	nodeEnd    []int32
+	nodeOffset []int32
+	nodeAux    []int32
+	nodePred   []int32
+	nodeBits   []int32
 	nodes      int
 
 	// The literal channel: a min-tree by match end + 1 over bits -
@@ -619,11 +624,11 @@ func newCopyParser(units []uint32, unit, window int) *copyParser {
 		repable:       make([]int, size),
 		inRepable:     make([]bool, size),
 		nodeKind:      make([]byte, 0, 1024),
-		nodeEnd:       make([]int, 0, 1024),
-		nodeOffset:    make([]int, 0, 1024),
-		nodeAux:       make([]int, 0, 1024),
-		nodePred:      make([]int, 0, 1024),
-		nodeBits:      make([]int, 0, 1024),
+		nodeEnd:       make([]int32, 0, 1024),
+		nodeOffset:    make([]int32, 0, 1024),
+		nodeAux:       make([]int32, 0, 1024),
+		nodePred:      make([]int32, 0, 1024),
+		nodeBits:      make([]int32, 0, 1024),
 	}
 	last := map[uint64]int{}
 	for q := 0; q+1 < count; q++ {
@@ -1143,28 +1148,28 @@ func (p *copyParser) newNode(kind byte, end, offset, aux, pred, bits int) int {
 		p.nodeBits = append(p.nodeBits, 0)
 	}
 	p.nodeKind[p.nodes] = kind
-	p.nodeEnd[p.nodes] = end
-	p.nodeOffset[p.nodes] = offset
-	p.nodeAux[p.nodes] = aux
-	p.nodePred[p.nodes] = pred
-	p.nodeBits[p.nodes] = bits
+	p.nodeEnd[p.nodes] = int32(end)
+	p.nodeOffset[p.nodes] = int32(offset)
+	p.nodeAux[p.nodes] = int32(aux)
+	p.nodePred[p.nodes] = int32(pred)
+	p.nodeBits[p.nodes] = int32(bits)
 	p.nodes++
 	return p.nodes - 1
 }
 
 func (p *copyParser) rebuild(last int) *Block {
 	var order []int
-	for node := last; node >= 0; node = p.nodePred[node] {
+	for node := last; node >= 0; node = int(p.nodePred[node]) {
 		order = append(order, node)
 	}
 	chain := &Block{Bits: -1, Index: -1, Offset: InitialOffset}
 	for i := len(order) - 2; i >= 0; i-- {
 		node := order[i]
-		offset := p.nodeOffset[node]
+		offset := int(p.nodeOffset[node])
 		if p.nodeKind[node] == ckLiterals {
 			offset = 0
 		}
-		chain = &Block{Bits: p.nodeBits[node], Index: p.nodeEnd[node],
+		chain = &Block{Bits: int(p.nodeBits[node]), Index: int(p.nodeEnd[node]),
 			Offset: offset, Chain: chain}
 	}
 	return chain
