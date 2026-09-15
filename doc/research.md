@@ -637,11 +637,13 @@ Two parses in one state at a checkpoint part again as soon as the tail
 reads a unit the change touched. The state is not the whole of what a tail
 depends on; the dictionary is.
 
-**Heuristically it pays.** A parse that stops where its state equals the
-state of the parse before it, and whose chain reads that parse's blocks
-past there, runs a fifth of a column against two thirds, and the steps
-that buys are worth about half a per cent at equal time. Its steps are
-approximate, so the packer writes other bytes: measured here, not shipped.
+**Heuristically it is a wash, and worse where it counts.** A parse that
+stops where its state equals the state of the parse before it, and whose
+chain reads that parse's blocks past there, runs a fifth of a column
+against two thirds. The steps that buys read half a per cent better on a
+24-column subset and 0.35 per cent worse over the whole corpus, and they
+are approximate, so the packer writes other bytes: measured here, not
+shipped.
 
 ## What the stop is
 
@@ -675,6 +677,17 @@ At equal steps the stop reads worse, which is the approximation showing:
 22,776 against 22,208 at 500 steps. At equal time it reads better, by 0.53
 per cent at 37 seconds: 21,962 against 22,080. A parse runs a fifth of a
 column rather than two thirds, and 56 per cent of the parses stop early.
+
+**The whole corpus reads the other way.** At equal time over the 120
+columns, the exact search writes 120,020 bytes in 341 seconds at 1,000
+steps a column and the stop writes **120,440** in 337 at 3,400 steps: 0.35
+per cent worse, where the subset read 0.53 per cent better. The cheaper
+steps are bought at a price that the wider reading charges in full.
+
+That is the second reading where the 24-column subset points the other way
+from the 120 - the opening of destroy and repair is the first, at 0.97 per
+cent on the subset against 0.12 on the corpus. A subset reads a search's
+shape; what a change is worth is a figure only the corpus settles.
 
 ## Where that leaves it
 
