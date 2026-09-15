@@ -622,6 +622,70 @@ beat the unpenalised optimum.
 - encode.su, *LZ style compression with static dictionary* -
   <https://encode.su/threads/2995-LZ-style-compression-with-static-Dictionary>
 
+# What a short-offset class is worth against the packer
+
+The models above put a short-offset class at about 2 per cent and were
+2.1 and 3.6 per cent optimistic against the packer besides. This prices it
+on the blocks `dtx-write` writes.
+
+## Verdict
+
+**4.25 per cent**, and the figure rests on which class code grows the third
+bit: the end code saves 4.25 where the word-offset code saves 2.82. Five
+bits beat four and six. The figure is a floor, since the parse it is priced
+on was made under the old costs, and a parse under the new costs has more
+short offsets in it.
+
+It costs the decode 3.7 per cent: a near offset is five bits out of stream
+A where a byte offset is one byte out of stream C.
+
+## What the parse is
+
+Every column of the 120 packed at `-k2 -m256 -copies`, the stream read back
+block by block. The blocks decode to 124,220 bytes, the figure the packer
+writes, so the figures below cover the whole parse: 8,634 literal
+runs, 28,226 matches at a new offset and 2,214 at the last offset.
+
+Half the new offsets are within 32 units.
+
+| offset | matches | share |
+|---|---|---|
+| 1 to 16, four bits | 9,592 | 34.0% |
+| 1 to 32, five bits | 14,362 | 50.9% |
+| 1 to 64, six bits | 17,788 | 63.0% |
+| 33 to 128, the ring | 6,249 | 22.1% |
+| 129 to 256, a copy from bank 0 | 4,479 | 15.9% |
+| 257 to 512, a copy from bank 1 | 2,438 | 8.6% |
+| past 512, a word | 698 | 2.5% |
+
+## Which code grows
+
+A new-offset match spends a flag bit, two class bits and a byte today. A
+fifth outcome needs one of the four class codes to grow a third bit, and the
+code to grow is the rarest: the end code stands once a stream, 120 times
+over the set, where a word offset stands 698 times.
+
+| the code that grows | four bits | five bits | six bits |
+|---|---|---|---|
+| the word-offset code | 2.83% | 2.82% | 1.72% |
+| the end code | 3.78% | **4.25%** | 3.50% |
+
+At the end code a near match spends two class bits and five, seven against
+the ten it spends now, and the word offset and the end each spend one more:
+14,362 x 3 - 698 - 120 = 42,268 bits, 5,284 bytes of 124,220.
+
+## What it costs to decode
+
+A byte offset is `move.b (a2)+,d1` and an `ext.w`, 16 cycles, and the two
+class bits 24: 40 cycles. A five-bit near offset is five reads out of
+stream A at ST4's 12 cycles a bit, 60, and the same two class bits: 84. The
+44 cycles between them, over 14,362 near matches and 898,830 output bytes,
+is 0.70 cycles a byte on the 19.00 the format decodes at, 3.7 per cent.
+
+So the trade is 4.25 per cent of the file for 3.7 per cent of the decode,
+and the file figure is the one that grows when the parse is made under the
+new costs.
+
 # What the copies search costs in memory
 
 The question: `st4 -c` on a 41 KB file ends in `OutOfMemoryError` under the
@@ -823,7 +887,8 @@ reported against its heading: the pairing costs 0.9 to 2.7 per cent in
 all four arms, and a short-offset class saves 1.7 to 2.4 per cent in all
 four, five bits beating four everywhere. Its best arm is the class with the
 pairing dropped, 106,750. The survey reads the same feature from the other
-side, lifting ZX2 from 130,300 to 128,048.
+side, lifting ZX2 from 130,300 to 128,048. The section below prices it
+against the packer rather than a model, and reads 4.25 per cent.
 
 **A reach past the ring, until it saturates.** A match that reads the
 literal stream is worth 2.7 per cent within a column. Beyond that it
