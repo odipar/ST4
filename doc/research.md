@@ -710,15 +710,55 @@ units, at 16 bits each, writes 410,792 bytes before a sweep shrinks it.
 Copying wants a large dictionary and the dictionary is charged by the unit,
 which is what the search is weighing at every step.
 
+## Destroy and repair
+
+Since every single-run move is exhausted at the incumbent, the next
+neighbourhood is a window rebuilt whole: the dictionary cleared over a
+window of units, rebuilt, and the column kept when it packs smaller. Two
+repairs were read against the annealing at the same number of parses. One
+seeds at random inside the window. The other seeds by what copying wants
+there: a parse that lets a source inside the window be free names the
+positions a copy would read from, and the repair seeds those and lets the
+rest of the search trim them.
+
+On a 24-column subset, 500 parses a column:
+
+| the search | bytes | against the annealing |
+|---|---|---|
+| the annealing | 22,208 | - |
+| a window of 256 units, seeds at random | 22,862 | +2.94% |
+| a window of 256 units, seeded by what copying wants | **22,130** | **-0.35%** |
+| a window of 512 units, seeded by what copying wants | 22,590 | +1.72% |
+| a window of 1,024 units, seeded by what copying wants | 22,902 | +3.12% |
+
+Random seeding rebuilds little of a cleared window, so the window is rarely
+kept. Seeding by what copying wants rebuilds it, and the narrowest
+window reads best of the three.
+
+**The edge is early, not late.** At 2,000 parses a column the annealing
+passes it, 21,760 against the window search's 22,044. A window rebuilt
+whole moves the dictionary a long way in one step, which pays while the
+dictionary is coarse and costs while it is being polished.
+
+**So run the one and then the other.** On the same subset at 2,000 parses a
+column:
+
+| the search | bytes | against the annealing |
+|---|---|---|
+| the annealing alone | 21,760 | - |
+| 500 parses of destroy and repair, then the annealing | 21,584 | -0.81% |
+| 250 parses of destroy and repair, then the annealing | **21,548** | **-0.97%** |
+
+The opening is worth about one per cent at the same work, and the shorter
+of the two openings is the better, so what it buys is the coarse shape of
+the dictionary rather than its detail.
+
 ## What is left to try
 
-- **Destroy and repair.** Since every single-run move is exhausted at the
-  incumbent, the next neighbourhood to read is a window rebuilt whole: free
-  every literal in 512 units and search that window alone against the rest.
-- **Seeding by what a copy would pay.** The relaxed parse names the sources
-  copying wants. Ranked by what each saves against its alternative, the top
-  of that list is where seeding pays; seeding from the whole of it does
-  not, at 410,792 bytes.
+- **Seeding by what a copy would pay.** The window repair seeds every
+  position copying wants inside its window. Ranked by what each saves
+  against its alternative, the top of that list may be enough; seeding
+  from the whole of a column does not pay, at 410,792 bytes.
 - **A tighter bound.** The relaxation lets a source be free. One that
   charges a price a unit, swept over the price, would say how much of the
   4.4 per cent is reachable.
