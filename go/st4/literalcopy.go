@@ -22,8 +22,8 @@ import (
 // returns to the best and sweeps again when it stalls. The parse is the fast
 // optimizer's DP with copies added: sources found through two-unit chains
 // over the dictionary, the rep of a copy as a ring rep at the same output
-// distance with literal shadows at the source, the literal channel a
-// min-tree keyed by match end, chains rebuilt from a node pool, and every
+// distance with literal shadows at the source, the literal channel a queue
+// a gamma class over match ends, chains rebuilt from a node pool, and every
 // parse restarted from a checkpoint before the first changed unit. A copy is
 // costed with the literal count of the dictionary, a lower bound, so every
 // copy is valid; the compressor's bits are the score.
@@ -586,10 +586,17 @@ type copyParser struct {
 	forward    []int32 // in a collection: where a node moved, or -1, or
 	//                    poolMarked for one marked and not yet moved
 
-	// The literal channel: a min-tree by match end + 1 over bits -
-	// end*literalBits.
-	half int
-	tree []int64
+	// The literal channel: the best match or copy end, by the gamma class of
+	// the run length that reaches a position from it. A class is a window in
+	// slot space that slides one slot a position, so a queue kept least
+	// first reads its least in one step where a min-tree read it in a
+	// logarithm. The values stand beside the queues, since a parse that
+	// restarts at a checkpoint fills the queues from them.
+	leaf    []int64   // by match end + 1: bits - end*literalBits
+	dqAt    [][]int32 // by class: the slots of its queue, least first
+	dqLo    []int     // by class: where its queue begins
+	dqEnd   []int     // by class: one past where its queue ends
+	classes int
 
 	// Checkpoints: the state before position k*checkpoint, for the base
 	// dictionary, the last parse accepted, and for the parse under way. A
@@ -653,12 +660,16 @@ func newCopyParser(units []uint32, unit, window int) *copyParser {
 	if count > 0 {
 		p.prevSame2[count-1] = -1
 	}
-	h := 1
-	for h < count+1 {
-		h <<= 1
+	p.leaf = make([]int64, count+2)
+	for p.classes = 0; (1 << p.classes) <= count+1; p.classes++ {
 	}
-	p.half = h
-	p.tree = make([]int64, 2*h)
+	p.classes++
+	p.dqAt = make([][]int32, p.classes)
+	p.dqLo = make([]int, p.classes)
+	p.dqEnd = make([]int, p.classes)
+	for k := range p.dqAt {
+		p.dqAt[k] = make([]int32, count+2)
+	}
 	p.checkpoint = max(1024, (count+7)/8)
 	slots := (count + p.checkpoint - 1) / p.checkpoint
 	p.base = make([]*copySnapshot, slots)
@@ -750,6 +761,7 @@ func (p *copyParser) parseReporting(dictionary []bool, progress bool) *Block {
 			p.forcedBefore[q+1]++
 		}
 	}
+	p.queues(start)
 	meter := NewMeter(TotalSteps(p.count, start, p.window), progress)
 	for index := start; index < p.count; index++ {
 		if p.nodes > p.limit {
@@ -772,7 +784,7 @@ func (p *copyParser) parseReporting(dictionary []bool, progress bool) *Block {
 				break
 			}
 			slotLo := max(0, index-(2<<k)+2)
-			found := p.query(slotLo, slotHi)
+			found := p.least(k, slotLo, slotHi)
 			if found != math.MaxInt64 {
 				candidate := int(found>>32) + index*p.literalBits + 2 + 2*k
 				if candidate < litCand {
@@ -1003,7 +1015,7 @@ func (p *copyParser) snapshot(into *copySnapshot, position int) {
 	copy(into.optimalBits, p.optimalBits[:position])
 	copy(into.winNode, p.winNode[:position])
 	copy(into.matchNodeSlot, p.matchNodeSlot[:position+1])
-	copy(into.leaves, p.tree[p.half:p.half+position+1])
+	copy(into.leaves, p.leaf[:position+1])
 	copy(into.activePrev, p.activePrev[:p.activePrevCount])
 	copy(into.activeCur, p.activeCur[:p.activeCurCount])
 	copy(into.repable, p.repable[:p.repableCount])
@@ -1029,13 +1041,10 @@ func (p *copyParser) restore(from *copySnapshot) {
 	copy(p.optimalBits, from.optimalBits[:position])
 	copy(p.winNode, from.winNode[:position])
 	copy(p.matchNodeSlot, from.matchNodeSlot[:position+1])
-	for i := range p.tree {
-		p.tree[i] = math.MaxInt64
+	for i := range p.leaf {
+		p.leaf[i] = math.MaxInt64
 	}
-	copy(p.tree[p.half:], from.leaves[:position+1])
-	for i := p.half - 1; i >= 1; i-- {
-		p.tree[i] = min(p.tree[2*i], p.tree[2*i+1])
-	}
+	copy(p.leaf, from.leaves[:position+1])
 	copy(p.activePrev, from.activePrev[:from.activePrevCount])
 	copy(p.activeCur, from.activeCur[:from.activeCurCount])
 	p.activePrevCount = from.activePrevCount
@@ -1060,8 +1069,8 @@ func (p *copyParser) prepare() {
 		p.matchLength[i] = 0
 		p.stamp[i] = -2
 	}
-	for i := range p.tree {
-		p.tree[i] = math.MaxInt64
+	for i := range p.leaf {
+		p.leaf[i] = math.MaxInt64
 	}
 	p.bestLength[2] = 2
 	p.nodes = p.poolTop
@@ -1305,28 +1314,50 @@ func (p *copyParser) rebuild(last int) *Block {
 }
 
 func (p *copyParser) update(slot int, value int64) {
-	i := p.half + slot
-	p.tree[i] = value
-	for i >>= 1; i >= 1; i >>= 1 {
-		p.tree[i] = min(p.tree[2*i], p.tree[2*i+1])
-	}
+	p.leaf[slot] = value
 }
 
-func (p *copyParser) query(lo, hi int) int64 {
-	result := int64(math.MaxInt64)
-	l := p.half + lo
-	r := p.half + hi + 1
-	for l < r {
-		if l&1 == 1 {
-			result = min(result, p.tree[l])
-			l++
+// least is the least value of class k over the slots lo to hi, the slot hi
+// entering the class as its window slides one on. A slot is written before
+// any class reaches it, so a queue reads what a min-tree read.
+func (p *copyParser) least(k, lo, hi int) int64 {
+	if p.leaf[hi] != math.MaxInt64 {
+		value := p.leaf[hi]
+		for p.dqEnd[k] > p.dqLo[k] && p.leaf[p.dqAt[k][p.dqEnd[k]-1]] >= value {
+			p.dqEnd[k]--
 		}
-		if r&1 == 1 {
-			r--
-			result = min(result, p.tree[r])
-		}
-		l >>= 1
-		r >>= 1
+		p.dqAt[k][p.dqEnd[k]] = int32(hi)
+		p.dqEnd[k]++
 	}
-	return result
+	for p.dqEnd[k] > p.dqLo[k] && int(p.dqAt[k][p.dqLo[k]]) < lo {
+		p.dqLo[k]++
+	}
+	if p.dqEnd[k] == p.dqLo[k] {
+		return math.MaxInt64
+	}
+	return p.leaf[p.dqAt[k][p.dqLo[k]]]
+}
+
+// queues fills every class from the values a parse begins with, which is
+// what a checkpoint restored, for a parse that begins at start.
+func (p *copyParser) queues(start int) {
+	for k := 0; k < p.classes; k++ {
+		p.dqLo[k], p.dqEnd[k] = 0, 0
+		hi := start - (1 << k)
+		if hi < 0 {
+			continue
+		}
+		lo := max(0, start-(2<<k)+2)
+		for slot := lo; slot <= hi; slot++ {
+			value := p.leaf[slot]
+			if value == math.MaxInt64 {
+				continue
+			}
+			for p.dqEnd[k] > p.dqLo[k] && p.leaf[p.dqAt[k][p.dqEnd[k]-1]] >= value {
+				p.dqEnd[k]--
+			}
+			p.dqAt[k][p.dqEnd[k]] = int32(slot)
+			p.dqEnd[k]++
+		}
+	}
 }
