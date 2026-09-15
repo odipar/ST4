@@ -639,9 +639,11 @@ moves the annealing accepts rather than gains.
 
 At odds of two, four, twelve, one and one - free, seed, extend, trim, the
 pair - the search writes **0.72 per cent fewer bytes at the same steps**
-over the whole corpus, 119,158 against 120,020, and **1.3 per cent fewer at
-three seconds a column**, 21,650 against 21,936 over the subset. The gap
-widens with the budget.
+over the whole corpus, 119,158 against 120,020. At a clock rather than a
+step count it reads the same way: 121,052 against 121,668 at one second a
+column over the corpus, 0.51 per cent, and 21,650 against 21,936 at three
+seconds a column over the subset, 1.3 per cent. The gap widens with the
+budget.
 
 ## What each move saved
 
