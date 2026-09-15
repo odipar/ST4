@@ -354,26 +354,34 @@ public static class LiteralCopySearch
                 (Stopwatch.GetTimestamp() - started) / (double)Stopwatch.Frequency, step,
                 bestBits, (bestBits + 7) / 8, move));
 
-        /// <summary>Changes the dictionary in place, and says how.</summary>
+        /// <summary>
+        /// Changes the dictionary in place, and says how. The odds follow
+        /// what each move saved when it was accepted, read over 24 columns:
+        /// extend saved 4,528 bits over 203 moves where free saved 892 over
+        /// 4,889, most of them the sideways and uphill moves the annealing
+        /// accepts. Weighted this way the search writes 0.72 per cent fewer
+        /// bytes at the same steps, and more as the budget grows
+        /// (doc/research.md).
+        /// </summary>
         private string Propose(bool[] dictionary)
         {
             int kind = random.NextInt(20);
-            if (kind < 6)
+            if (kind < 2)
             {
                 Free(dictionary);
                 return "free";
             }
-            if (kind < 12)
+            if (kind < 6)
             {
                 Seed(dictionary);
                 return "seed";
             }
-            if (kind < 15)
+            if (kind < 18)
             {
                 Extend(dictionary);
                 return "extend";
             }
-            if (kind < 18)
+            if (kind < 19)
             {
                 Trim(dictionary);
                 return "trim";

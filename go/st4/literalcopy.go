@@ -323,20 +323,25 @@ func (s *copySearch) report(move string) {
 		(s.bestBits+7)/8, move)
 }
 
-// propose changes the dictionary in place, and says how.
+// propose changes the dictionary in place, and says how. The odds follow
+// what each move saved when it was accepted, read over 24 columns: extend
+// saved 4,528 bits over 203 moves where free saved 892 over 4,889, most of
+// them the sideways and uphill moves the annealing accepts. Weighted this
+// way the search writes 0.72 per cent fewer bytes at the same steps, and
+// more as the budget grows (doc/research.md).
 func (s *copySearch) propose(dictionary []bool) string {
 	kind := s.random.nextInt(20)
 	switch {
-	case kind < 6:
+	case kind < 2:
 		s.free(dictionary)
 		return "free"
-	case kind < 12:
+	case kind < 6:
 		s.seed(dictionary)
 		return "seed"
-	case kind < 15:
+	case kind < 18:
 		s.extend(dictionary)
 		return "extend"
-	case kind < 18:
+	case kind < 19:
 		s.trim(dictionary)
 		return "trim"
 	default:
