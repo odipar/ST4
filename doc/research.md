@@ -622,6 +622,96 @@ beat the unpenalised optimum.
 - encode.su, *LZ style compression with static dictionary* -
   <https://encode.su/threads/2995-LZ-style-compression-with-static-Dictionary>
 
+# Which of the search's moves pay
+
+The search proposes a move at fixed odds: free a literal run or part of
+one, seed literals where the parse matches or copies, extend a run, trim a
+run, or free and seed together. Six of twenty went to free, six to seed,
+three to extend, three to trim and two to the pair. This reads what each is
+worth.
+
+## Verdict
+
+**Extend pays, and the odds weighed it light.** Over 24 columns at 1,000
+steps, extend was accepted 203 times and saved 4,528 bits where free was
+accepted 4,889 times and saved 892, most of them the sideways and uphill
+moves the annealing accepts rather than gains.
+
+At odds of two, four, twelve, one and one - free, seed, extend, trim, the
+pair - the search writes **0.72 per cent fewer bytes at the same steps**
+over the whole corpus, 119,158 against 120,020. At a clock rather than a
+step count it reads the same way: 121,052 against 121,668 at one second a
+column over the corpus, 0.51 per cent, and 21,650 against 21,936 at three
+seconds a column over the subset, 1.3 per cent. The gap widens with the
+budget.
+
+## What each move saved
+
+Over 24 columns at 1,000 steps a column, at the odds as they were:
+
+| move | accepted | bits saved |
+|---|---|---|
+| extend | 203 | 4,528 |
+| sweep free | 119 | 2,222 |
+| seed | 55 | 1,462 |
+| free | 4,889 | 892 |
+| trim | 2,461 | 622 |
+| free and seed | 9 | 138 |
+| sweep trim | 1 | 14 |
+
+A move accepted thousands of times for a few hundred bits is the annealing
+walking, which the schedule is there for. What lands the bits is extend, the
+sweep's freeing of a whole run, and seeding.
+
+## The odds swept
+
+Over the subset at 1,000 steps a column, where the odds as they were write
+21,878 bytes:
+
+| free, seed, extend, trim of twenty | bytes |
+|---|---|
+| 6, 6, 3, 3 (as they were) | 21,878 |
+| 4, 6, 7, 2 | 21,756 |
+| 3, 8, 7, 1 | 21,802 |
+| 2, 6, 10, 1 | 21,620 |
+| 2, 4, 12, 1 | **21,590** |
+| 2, 3, 13, 1 | 21,584 |
+| 1, 6, 12, 1 | 21,760 |
+| 0, 6, 12, 1 | 21,690 |
+
+The floor is flat from free at two, seed at three to six, extend at ten to
+thirteen. At 300 steps the same odds are 0.66 per cent better and at 3,000
+they are 2.2, so what the weighting buys grows with the budget.
+
+## Seeding by what copying wants does not pay
+
+The parse that lets a source be free names what copying would read from
+where a dictionary is free. Seeding there, ranked by how many copy units
+read from each position, is worse than the opening passes at every share
+tried:
+
+| the dictionary | bytes, no steps |
+|---|---|
+| the opening passes | 23,124 |
+| the 5 per cent most read from | 32,926 |
+| the 10 per cent most read from | 38,388 |
+| the 20 per cent most read from | 53,146 |
+
+Adding those positions to the opening passes' dictionary rather than
+replacing it is worse too, by 0.17 to 1.00 per cent at 200 steps. A literal
+a parse would not write costs 16 bits at `-k2`, and the copies a free-source
+parse wants do not repay it.
+
+## What the search does to the dictionary it starts from
+
+The opening passes name 5,193 units over the subset. The best dictionary
+after 1,000 steps keeps 4,961 of them, 96 per cent, and names 335 the
+opening passes did not, 6.3 per cent of the 5,296 it names. So the search
+trims
+and frees most of what it is handed and adds a few units of its own, found
+by seeding where the parse already matches or copies - not by what a
+free-source parse would read from.
+
 # Can a step skip the tail it has already parsed?
 
 The note above reads 22 to 80 per cent of a step's tail as work already
