@@ -16,7 +16,7 @@ public final class St4FastOptimizer {
     /** The offset a stream starts with, as ZX1: one unit. */
     public static final int INITIAL_OFFSET = St4Optimizer.INITIAL_OFFSET;
 
-    /** No state, and no literal run: nothing has happened at this offset yet. */
+    /** A fresh offset: no state and no literal run yet. */
     private static final int NONE = Integer.MIN_VALUE;
 
 
@@ -65,7 +65,7 @@ public final class St4FastOptimizer {
     }
 
     /**
-     * The winning cost per position, for the tests that hold other optimizers
+     * The winning cost per position, for the tests that check other optimizers
      * to this one: the optimum is unique, so an exact optimizer produces this
      * array.
      */
@@ -86,7 +86,7 @@ public final class St4FastOptimizer {
      * primitives. Per offset: the best chain ending in a match at
      * {@code stateEnd} costing {@code stateBits}, and the best chain ending in
      * a literal run at {@code litEnd} costing {@code litBits}. A position's
-     * winner is recorded when it takes the lead, and replaced only by a
+     * winner is recorded when it reaches the lead, and replaced only by a
      * strictly better one, so ties keep the earlier candidate.
      */
     private void forward(boolean progress) {

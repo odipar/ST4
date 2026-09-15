@@ -4,9 +4,9 @@ import org.jspecify.annotations.Nullable;
 
 /**
  * The optimal parser: ZX1's, moved from bytes to k-byte units, and the
- * readable reference the fast optimizers are held to. For every position it
+ * readable reference the fast optimizers are checked against. For every position it
  * keeps, per offset, the cheapest chain ending in a literal run and the
- * cheapest ending in a match, and takes the best. Only the costs differ from
+ * cheapest ending in a match, and selects the best. Only the costs differ from
  * ZX1's: a literal unit costs {@code 8 * k} bits, an offset counts units, a
  * new-offset match pays three control bits and a byte or a word. The result
  * is a chain of {@link St4Block}s, last block first, which
@@ -122,7 +122,7 @@ public final class St4Optimizer {
      * costs a reader less however many bits it writes. At zero this is the
      * parse above, bit for bit.
      *
-     * @param penalty bits added to every block, 0 for none
+     * @param penalty bits added to every block, 0 for a plain parse
      */
     public static St4Block optimize(int[] units, int unit, int offsetLimit,
                                     boolean progress, int penalty) {

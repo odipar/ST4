@@ -64,7 +64,7 @@ public final class St4Decompressor {
      * As above, at the window the stream was packed for: a match reaches at
      * most {@code window} units back, so a stream that decodes is safe for a
      * ring of that many units, and an offset beyond it copies from the
-     * literal stream. Tests hold a {@code -mN} stream to its ring this way.
+     * literal stream. Tests check a {@code -mN} stream against its ring this way.
      *
      * @throws IllegalStateException when a copy does not stay behind the
      *     literal read pointer, or a loop reaches past the window
@@ -85,7 +85,7 @@ public final class St4Decompressor {
     }
 
     /**
-     * As above, holding a stream to its rewind point: from {@code rewindAt}
+     * As above, reading a stream to its rewind point: from {@code rewindAt}
      * bytes on, no match reaches before it, so the loop replays from the
      * state saved there and every pass sees the same history. A stream that
      * reaches before it would loop wrongly on the 68000, and is rejected
@@ -201,7 +201,7 @@ public final class St4Decompressor {
      */
     private void endOrRepeat() {
         if (readBit()) {
-            // Stream D holds the distance back to the loop point.
+            // Stream D has the distance back to the loop point.
             int distance = readWordOffset();
             assert distance > 0 : "a repeat must reach back at least one unit";
             if (distance > window) {

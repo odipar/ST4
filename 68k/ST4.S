@@ -7,7 +7,7 @@
 ; including commercially, as long as your documentation says you used ZX1
 ; through ST4 (see LICENSE).
 ;
-; ST4 is ZX1 in four streams at a unit size of 1, 2 or 4 bytes: stream A holds
+; ST4 is ZX1 in four streams at a unit size of 1, 2 or 4 bytes: stream A has
 ; the bits, so the queue refills a word at a time; stream B the literal units;
 ; stream C the byte offsets; stream D the word offsets, stored as the decoder
 ; keeps them. Lengths and offsets count units. A stream can loop, and an
@@ -22,22 +22,22 @@
 ; ST4_WINDOW, set to 1, builds the copy code. A stream packed with st4 -c
 ; writes a copy from the literal stream as an offset beyond its window M: it
 ; copies offset-M literal units from behind the stream B read pointer, without
-; moving it. The window is a stream's, not the build's: ST4_init takes it in
+; moving it. The window is a stream's, not the build's: ST4_init reads it in
 ; d3.w, in bytes, and writes it into the two instructions that use it, the
 ; compare that tells a copy from a match and the lea that finds a copy's
 ; source. So the decoder is code in RAM, and a 68030 caller flushes the
 ; instruction cache after ST4_init. A build without ST4_WINDOW, or with 0,
-; has no copy code and takes no window.
+; has no copy code and reads no window.
 ;
 ;       ST4_UNIT    equ     4
 ;       ST4_WINDOW  equ     1
 ;               include "ST4.S"
 ;
 ; The window a stream was packed for is in its header at byte 24, in units; a
-; stream without copies decodes with any window at least its own.
+; stream without copies decodes with any window at least as wide.
 ;
 ; ALIGNMENT. Streams A and D are read a word at a time, so both start on an
-; even address; the packer pads A to an even length and D holds whole words.
+; even address; the packer pads A to an even length and D has whole words.
 ; At ST4_UNIT 2 or 4 the caller starts the destination and stream B on a unit
 ; boundary, or a wide move raises an address error.
 ;
@@ -90,7 +90,7 @@
 ; A loop longer than the window is replayed by the caller: when the output
 ; reaches the rewind point, save the seven registers but a1; when it reaches
 ; O, restore them and carry on, every pass. The packer parsed the loop on its
-; own, so nothing in it reaches before the rewind point and every pass sees
+; alone, so every match in it stands after the rewind point and every pass sees
 ; the same history. Arrange the budgets so a call ends on both points; the
 ; state mid-operation is saved like any other.
 ;
@@ -116,10 +116,10 @@
 ;      what fits the word it is kept in
 ;   3. at ST4_UNIT 2 or 4 the destination and stream B start on a unit
 ;      boundary
-;   4. streams A and D start on even addresses; A holds an even number of
+;   4. streams A and D start on even addresses; A has an even number of
 ;      bytes
 ;   5. the budget in d3.w is 1..65535 units; zero makes no progress
-;   6. a stream with copies was packed with -m equal to the window given to
+;   6. a stream with copies was packed with -m equal to the window passed to
 ;      ST4_init, and every copy is shorter than its distance, so the offset
 ;      never reaches zero: the packer keeps both
 ;

@@ -2,10 +2,10 @@ package org.st4;
 
 /**
  * ST4: ZX1's three block types at a unit size of 1, 2 or 4 bytes, in four
- * streams that a 68000 reads each at its own width.
+ * streams that a 68000 reads each at a separate width.
  *
- * <p>Stream A holds the bits, the flags and the interlaced Elias gamma
- * lengths, read a word at a time. Stream B holds the literal units, stream C
+ * <p>Stream A has the bits, the flags and the interlaced Elias gamma
+ * lengths, read a word at a time. Stream B has the literal units, stream C
  * the byte offsets and stream D the word offsets. Two class bits select the
  * stream an offset comes from:
  *
@@ -34,7 +34,7 @@ package org.st4;
  * <p>The end code's extra bit: 0 ends the stream; 1 repeats it from a loop
  * point R, so it decodes as {@code units[0..R) units[R..O)} forever, with
  * the distance O-R as one last word in stream D, matched endlessly. A loop
- * longer than the window is replayed instead: the header gives the rewind
+ * longer than the window is replayed instead: the header records the rewind
  * point in bytes, the caller saves the decoder's registers there and
  * restores them, all but the write pointer, at O. The packer parses the loop
  * on its own, so every pass sees the same history.
@@ -54,7 +54,7 @@ package org.st4;
  *
  * Stream A begins where the header ends and each stream runs to the next: no
  * length is stored, and the decoders stop on the end marker. The signature
- * holds magic, version and k in one long, so a decoder built for one k checks
+ * has magic, version and k in one long, so a decoder built for one k checks
  * an asset with one {@code cmp.l}; the starts are header-relative, so opening
  * a container is one {@code adda.l} per stream. A stream cut at the next
  * start can be up to three bytes of padding longer than what was written.
@@ -117,7 +117,7 @@ public final class St4Format {
     }
 
     /**
-     * What a container holds: the four streams, the unit size, the output
+     * What a container has: the four streams, the unit size, the output
      * size, the rewind point in bytes or {@link #NO_REWIND}, and the window
      * in units.
      */

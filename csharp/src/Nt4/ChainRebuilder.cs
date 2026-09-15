@@ -53,7 +53,7 @@ internal sealed class ChainRebuilder
 
     /// <summary>
     /// A pending resolution: the winner chain at <c>Index</c>, or the state an
-    /// offset held when it last matched at <c>Index</c>. Frames form a chain
+    /// offset kept when it last matched at <c>Index</c>. Frames form a chain
     /// of single dependencies, resolved on an explicit stack, since a chain of
     /// one-unit blocks is as deep as the input is long.
     /// </summary>
@@ -78,7 +78,7 @@ internal sealed class ChainRebuilder
 
     /// <summary>
     /// Builds the winning chain from the descriptors. A winner's parent is an
-    /// earlier winner, recorded, or the state an offset held at a recorded
+    /// earlier winner, recorded, or the state an offset had at a recorded
     /// position; a state is derived from its match run, the recorded winning
     /// costs and, when it reused its offset, the state before it.
     /// </summary>
@@ -163,7 +163,7 @@ internal sealed class ChainRebuilder
     }
 
     /// <summary>
-    /// Resolves the state offset <c>frame.Offset</c> held after matching at
+    /// Resolves the state offset <c>frame.Offset</c> kept after matching at
     /// <c>frame.Index</c>: the cheaper of reusing the offset across the
     /// literal run before this match run, and a new-offset match at the best
     /// split, the two candidates the forward pass weighed, with its tie rule.

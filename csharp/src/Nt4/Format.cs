@@ -5,11 +5,11 @@ namespace Nt4;
 
 /// <summary>
 /// ST4: ZX1's three block types at a unit size of 1, 2 or 4 bytes, in four
-/// streams that a 68000 reads each at its own width. The Java
+/// streams that a 68000 reads each at a separate width. The Java
 /// <c>St4Format</c> is the reference.
 /// </summary>
 /// <remarks>
-/// <para>Stream A holds the bits, read a word at a time; stream B the literal
+/// <para>Stream A has the bits, read a word at a time; stream B the literal
 /// units, stream C the byte offsets, stream D the word offsets. Lengths and
 /// offsets count units of k bytes. An offset of at most the window M is a
 /// match; an offset beyond M copies offset minus M units from behind the
@@ -17,8 +17,8 @@ namespace Nt4;
 /// what it copied. The end marker's extra bit repeats the stream from a loop
 /// point, the distance written as one last word in stream D; a loop longer
 /// than the window is replayed by the caller from the rewind point the
-/// header gives.</para>
-/// <para>The header is twenty-eight bytes: a signature holding magic, version
+/// header records.</para>
+/// <para>The header is twenty-eight bytes: a signature with magic, version
 /// and k in one long, the padded output size, where streams B, C and D begin
 /// relative to the header, the rewind point, and the window. Stream A begins
 /// where the header ends and each stream runs to the next.</para>
@@ -84,7 +84,7 @@ public static class Format
     /// <summary>How far back a match may reach at this unit size, in units.</summary>
     public static int MaxOffsetUnits(int unit) => MaxOffset / unit;
 
-    /// <summary>What a container holds.</summary>
+    /// <summary>What a container has.</summary>
     /// <param name="Unit">Bytes per unit: 1, 2 or 4.</param>
     /// <param name="Size">The padded output size in bytes, a multiple of the unit.</param>
     /// <param name="Control">Stream A, the bits.</param>
@@ -102,7 +102,7 @@ public static class Format
     /// the next.
     /// </summary>
     /// <param name="file">The complete container, header first.</param>
-    /// <returns>What the container holds.</returns>
+    /// <returns>What the container has.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="file"/> is null.</exception>
     /// <exception cref="InvalidDataException">
     /// The file is not an ST4 file of this version, or its streams do not lie

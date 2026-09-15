@@ -308,8 +308,8 @@ v2:
 """
 
 # Two tables so an entry needs no unpacking, which costs two address registers
-# on top of the length stream's own pointer.  Every flag read needs a refill
-# check now: a stream of nothing but flag bits has no parity to argue from.
+# on top of the pointer of the length stream.  Every flag read needs a refill
+# check now: a stream of flag bits alone has no parity to argue from.
 V3 = """
         move.w  #$8000,d0
         moveq   #0,d7
@@ -432,7 +432,7 @@ def main():
             control, literal, _, _, _ = st4.pack(data, unit, 32512 // unit)
             lengths, between = operations(control)
             if len(lengths) < 4:
-                continue                        # nothing to time
+                continue                        # no work to time
 
             joint = MsbBits()
             split_flags, split_lengths = MsbBits(), LsbBits()

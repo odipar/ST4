@@ -10,7 +10,7 @@ namespace Nt4;
 /// </summary>
 /// <remarks>
 /// Between the start and end of a match run every candidate's cost is a
-/// closed form of the position, so this class takes three channel minima per
+/// closed form of the position, so this class keeps three channel minima per
 /// position from range structures and does per-offset work only where a run
 /// starts or ends. It reproduces the fast optimizer's cost array exactly;
 /// where candidates tie the chain may differ, the packed size cannot.
@@ -389,7 +389,7 @@ public sealed class EventOptimizer
             if (stateE[offset] != None)
             {
                 // The reference overwrites an offset's state at its next match
-                // run whatever the cost; this does the same.
+                // run at any cost; this does the same.
                 literalTree.Remove(stateE[offset] + 1,
                     Encode(stateS[offset] - stateE[offset] * literalBits, offset));
             }
@@ -501,7 +501,7 @@ public sealed class EventOptimizer
         }
     }
 
-    /// <summary>A min tree whose slots hold sets, so an entry can be removed.</summary>
+    /// <summary>A min tree whose slots are sets, so an entry can be removed.</summary>
     private sealed class SlotTree : MinTree
     {
         private readonly Dictionary<int, SortedSet<long>> slots = new();

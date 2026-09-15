@@ -9,15 +9,15 @@ namespace Nt4;
 /// <summary>
 /// The optimizer for streams with copies from the literal stream: a search
 /// over which units are literal, each step scored by an exact parse for that
-/// choice and by what the compressor then writes, for as long as it is given.
+/// choice and by what the compressor then writes, for as long as the search runs.
 /// The port of the Java <c>St4LiteralCopySearch</c>.
 /// </summary>
 /// <remarks>
 /// A dictionary is a set of forced literals: they stay literal, a copy comes
 /// only from them, the parse decides the rest. The opening passes, what
-/// <c>nt4 -c</c> alone writes, take the literals of a full-window parse, fill
+/// <c>nt4 -c</c> alone writes, read the literals of a full-window parse, fill
 /// holes of a few units, and shrink the dictionary to what gets copied from.
-/// Given time, a sweep frees or trims every literal run, keeping what packs
+/// With time, a sweep frees or trims every literal run, keeping what packs
 /// smaller; then random moves free, seed, extend or trim runs, accepted when
 /// they pack smaller and by annealing when they do not, and the search
 /// returns to the best and sweeps again when it stalls. The parse is
@@ -26,7 +26,7 @@ namespace Nt4;
 /// the same output distance with literal shadows at the source, the literal
 /// channel a min-tree keyed by match end, chains rebuilt from a node pool,
 /// and every parse restarted from a checkpoint before the first changed unit.
-/// A copy is costed with the dictionary's own literal count, a lower bound,
+/// A copy is costed with the literal count of the dictionary, a lower bound,
 /// so every copy is valid; the compressor's bits are the score.
 /// </remarks>
 public static class LiteralCopySearch
@@ -175,7 +175,7 @@ public static class LiteralCopySearch
 
         /// <summary>
         /// Makes <paramref name="parsed"/>, the parse just made, the incumbent,
-        /// its own literals the dictionary from here on.
+        /// its literals the dictionary from here on.
         /// </summary>
         private void Adopt(Block parsed)
         {
@@ -605,7 +605,7 @@ public static class LiteralCopySearch
         // Checkpoints: the state before position k*checkpoint, for the base
         // dictionary, the last parse accepted, and for the parse under way.
         // A parse restarts from the last checkpoint before its dictionary
-        // first differs from the base's, since nothing before depends on
+        // first differs from the base's, since what stands before is independent of
         // what comes after. Nodes are appended past the base's, so a
         // rejected parse leaves the base's intact.
         private readonly int checkpoint;
@@ -1037,7 +1037,7 @@ public static class LiteralCopySearch
             Settle();
             if (poolTop > 4L * fullNodes + 65536)
             {
-                // The pool holds the tails of every parse since the last full
+                // The pool has the tails of every parse since the last full
                 // one; one full parse of the base compacts it. The limit is a
                 // multiple of what a full parse takes, so the compaction does
                 // not find the pool too big again.

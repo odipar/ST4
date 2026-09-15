@@ -8,7 +8,7 @@ namespace Nt4;
 /// <summary>Command-line ST4 packer, the port of the Java <c>St4</c>.</summary>
 /// <remarks>
 /// <c>-k1</c> is ZX1's unit size and packs to within a few percent of jx1,
-/// which a test holds; <c>-k2</c> and <c>-k4</c> trade ratio for a decoder
+/// which a test checks; <c>-k2</c> and <c>-k4</c> trade ratio for a decoder
 /// that runs half or a quarter as many operations.
 /// </remarks>
 public static class Nt4

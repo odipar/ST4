@@ -99,7 +99,7 @@ public static class Dnt4
         try
         {
             container = Format.Read(file);
-            // One whole pass; -r asks for more of it.
+            // One whole pass; -r extends it.
             decoded = Decompressor.Decode(container.Control, container.Literal,
                 container.ByteOffsets, container.WordOffsets, container.Unit,
                 container.Size, container.Window, container.Rewind);

@@ -63,7 +63,7 @@ public final class St4LiteralCopyOracle {
      * allows there, keeping the cheapest complete parse.
      *
      * @param bits          the cost so far
-     * @param lastOffset    the offset the decoder holds, as the compressor
+     * @param lastOffset    the offset the decoder keeps, as the compressor
      *                      writes it: beyond the window for a copy, less what
      *                      the copy copied
      * @param afterLiterals whether the last block was a literal run
@@ -163,7 +163,7 @@ public final class St4LiteralCopyOracle {
                     break;
                 }
                 // The copied units are one run in the output: the compressor
-                // gives the source as an output position.
+                // names the source as an output position.
                 if (literalPositions[source + length - 1] != literalPositions[source] + length - 1) {
                     break;
                 }

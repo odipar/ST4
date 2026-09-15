@@ -8,11 +8,11 @@
 ; ZX1 through ST4 (see LICENSE).
 ;
 ; ST4_ring decodes through a ring and clamps each call to the ring end, wrapping
-; the write pointer on the next entry, so the caller asks for any budget and
-; counts nothing. d1.w = 0 means done; a stream packed with st4 -r is never
+; the write pointer on the next entry, so the caller sets any budget and
+; counts none of it. d1.w = 0 means done; a stream packed with st4 -r is never
 ; done: its end marker installs one last offset and the decoder matches it
 ; forever, re-arming 65535 units at a time. Literals come from stream B in a2
-; and offsets from stream C in a4 (bytes) or D in a5 (words); stream A holds
+; and offsets from stream C in a4 (bytes) or D in a5 (words); stream A has
 ; the bits, so the queue refills a word at a time. Set the unit size before
 ; including:
 ;
@@ -37,9 +37,9 @@
 ; its header records at byte 24; a stream without copies decodes through any
 ; ring at least its window.
 ;
-; Two copy ladders: match segments of at most sixteen units take a
+; Two copy ladders: match segments of at most sixteen units run a
 ; counter-free ladder that falls into the match epilogue; literals and longer
-; segments take the counted ladder. ST4_wrap.S has the measurement behind the
+; segments run the counted ladder. ST4_wrap.S has the measurement behind the
 ; split.
 ;
 ; The container is ST4.S's, and opening one is shown there. So is the rewind:
@@ -66,13 +66,13 @@
 ; ASSUMPTIONS, unchecked:
 ;
 ;   1. the ring size N is a multiple of ST4_UNIT, and the ring starts on a
-;      unit boundary: the room the decoder clamps to, the unit it holds back
+;      unit boundary: the room the decoder clamps to, the unit it keeps back
 ;      when it wraps, and the wide move that faults on an odd address all
 ;      depend on it
 ;   2. no offset exceeds 32512 bytes: the packer clamps -m to that
 ;   3. no operation is longer than 65535 units: pack with -l65535
 ;   4. the budget in d3.w is 1..65535 units
-;   5. streams A and D start on even addresses, and A holds an even number of
+;   5. streams A and D start on even addresses, and A has an even number of
 ;      bytes: the bit queue is refilled with a move.w, and so is a word offset
 ;   6. a stream with copies was packed with -m equal to the ring in units,
 ;      and every copy is shorter than its distance, so the offset never
@@ -113,13 +113,13 @@ ST4_WINDOW      equ     0
 
 ; ST4_init: a0 = A, a1 = first ring byte, a2 = B, a4 = C, a5 = D,
 ; d3 = one past the last ring byte. Packs -start.low and end.low above the
-; common state; writes no memory.
+; common state; leaves memory alone.
 ST4_init:
         moveq   #0,d1
         sub.w   a1,d1                   ; -start.low, exact modulo 65536
         swap    d1                      ; pack it high; remaining = 0
 ; The initial offset lands in the low word after the swap, so it starts in the
-; high half: moveq would put -1 there whatever the unit size.
+; high half: moveq would put -1 there at any unit size.
         move.l  #(-ST4_UNIT)<<16,d2
         move.w  d3,d2                   ; end.low lives below it for now
         swap    d2                      ; end.low above, -INITIAL_OFFSET*UNIT below
@@ -155,7 +155,7 @@ wrap_a1:
         .endif
 ; Leave room one unit short of the ring. A call that wraps and then fills the
 ; whole ring would return a1 where it started, and the caller reads its output
-; as [old a1 .. new a1), so a full ring would read as nothing. A one-unit ring
+; as [old a1 .. new a1), so a full ring would read as empty. A one-unit ring
 ; cannot spare the unit; there the span stays ambiguous unless the caller
 ; wraps a1 itself.
         subq.w  #1,d5
@@ -227,7 +227,7 @@ window_cmp:
         move.w  d5,d4                   ; this segment stops at the wrap
         bra.s   source_wrapped
 copy:                                   ; MATCH copies only reach this entry
-        sub.w   d4,d1                   ; consume n from the operation
+        sub.w   d4,d1                   ; subtract n from the operation
         sub.w   d4,d3                   ; and from this call's budget
         cmp.w   #17,d4
         bcc.s   copy_slow               ; n >= 17: the counted ladder
@@ -273,7 +273,7 @@ window_lea:
 
 literal_source:
         movea.l a2,a3                   ; literals copy from stream B
-        sub.w   d4,d1                   ; consume n from the operation
+        sub.w   d4,d1                   ; subtract n from the operation
         sub.w   d4,d3                   ; and from this call's budget
 copy_slow:                              ; any n; the subs are already done
         moveq   #15,d5                  ; d5 = n&15, partial-pass dispatch
@@ -403,7 +403,7 @@ gamma_loop:                             ; branch is the one normally not taken
 gamma_done:                             ; doubles as the loop jump
         add.w   d4,d1                   ; +1 only for a new-offset match
         move.w  d3,d4                   ; the resume_fresh tail, duplicated so
-        bne.w   segment                 ; the parse exit takes one branch
+        bne.w   segment                 ; the parse exit costs one branch
         rts                             ; budget spent: the d1.w result stands
 gamma_refill:                           ; queue-empty continuations share one
         move.w  (a0)+,d0                ; refill; carry set means another pair

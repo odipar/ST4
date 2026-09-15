@@ -7,7 +7,7 @@ import java.util.Arrays;
 
 /**
  * Command-line ST4 packer. {@code -k1} is ZX1's unit size and packs to within
- * a few percent of jx1, which a test holds; {@code -k2} and {@code -k4} trade
+ * a few percent of jx1, which a test checks; {@code -k2} and {@code -k4} trade
  * ratio for a decoder that runs half or a quarter as many operations.
  */
 public final class St4 {
@@ -182,7 +182,7 @@ public final class St4 {
     /**
      * Twenty-eight bytes of header, then A, B, C and D, each on a long
      * boundary. No length is stored: a stream runs to the next, and the last
-     * to whatever the caller loads after the container. Public because other
+     * to what the caller loads after the container. Public because other
      * formats embed containers, many at once.
      */
     public static byte[] container(St4Compressor.Result result) {

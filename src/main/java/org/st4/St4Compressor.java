@@ -16,7 +16,7 @@ import org.jspecify.annotations.Nullable;
  * {@link Result#longestOp()} reports it. A copy from the literal stream is
  * written as the window plus the literal units between its source and
  * itself, and is shorter than that count: the one copy that would not be
- * gives its last unit to a literal. The intro and the loop of a rewind
+ * leaves its last unit to a literal. The intro and the loop of a rewind
  * stream are two parses written back to back; two literal runs that meet at
  * the seam merge, and a one-unit rep the intro left no offset for is written
  * as a literal.
@@ -34,7 +34,7 @@ public final class St4Compressor {
                          int operations, int rewindIndex, int window, int copies,
                          int controlBits, boolean repeatWord) {
 
-        /** Bytes all four streams take together. */
+        /** Bytes all four streams occupy together. */
         public int packedSize() {
             return control.length + literal.length + byteOffsets.length
                     + wordOffsets.length;
@@ -70,7 +70,7 @@ public final class St4Compressor {
     private int copies;
 
     // The walk: where the next unit comes from, the literal run gathered but
-    // not yet written, the offset the stream holds, whether the first block,
+    // not yet written, the offset the stream keeps, whether the first block,
     // which has no flag, is still to come, and how many literal units precede
     // each position written so far.
     private int readIndex;
@@ -212,7 +212,7 @@ public final class St4Compressor {
      * A copy from the literal stream, {@code distance} units back in the
      * output for {@code length} units, in pieces the counters hold. A piece
      * is written as a match at the window plus the literals between its
-     * source and itself; a piece as long as that count gives its last unit
+     * source and itself; a piece as long as that count leaves its last unit
      * to a literal, so the decoder's offset, advanced by what it copies,
      * never reaches zero.
      */
