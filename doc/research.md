@@ -622,6 +622,113 @@ beat the unpenalised optimum.
 - encode.su, *LZ style compression with static dictionary* -
   <https://encode.su/threads/2995-LZ-style-compression-with-static-Dictionary>
 
+# Can the search find better parses at a ring of 256 bytes?
+
+One column of a chiptune - a channel's tone period, one byte a frame -
+packed alone through a 256-byte ring, where a match beyond the ring copies
+from the literal stream. `st4 -c` alone writes the opening passes;
+the search that may follow is simulated annealing over which units are
+literal. How near is either to what a parse could reach?
+
+## Verdict
+
+**The opening passes leave 5.1 per cent, and the curve is still falling.**
+The search finds better parses than the default for as long as it runs: 4.4
+per cent below it at ten seconds a column, 5.1 at twelve, and on a
+24-column subset 8.6 per cent below at 8,000 steps a column.
+
+**The schedule is not what bounds it.** The search already anneals, from 10
+bits hot to 0.3 cold, and returns to its best after 2,000 steps without
+one. **The neighbourhood is**: at the dictionary the search returns, every
+single-run move is exhausted.
+
+## The corpus
+
+120 columns of real tunes, the three tone-period low bytes of each, 898,830
+bytes in all, packed a column at a time at `-k2` through a ring of 256
+bytes. ST4 without copies writes 177,356 bytes of payload over them; with
+copies and the opening passes alone, 124,220.
+
+## What the search is worth
+
+| search a column | bytes | against the default |
+|---|---|---|
+| none, the opening passes | 124,220 | - |
+| 1 second | 121,894 | -1.9% |
+| 3 seconds | 120,192 | -3.2% |
+| 10 seconds | 118,796 | **-4.4%** |
+
+A step budget reads the same and repeats exactly, a step being one
+dictionary, one parse of it and one count of the compressor's bits: 1,000
+steps a column writes 120,020 bytes and 4,000 writes **117,942**, 5.1 per
+cent below the default at twelve seconds a column. Deeper, on a 24-column
+subset whose default is 23,124 bytes: 22,208 at 500 steps, 21,760 at 2,000
+and 21,138 at 8,000, which is 8.6 per cent below the default and falling
+there too.
+
+## The incumbent is a local optimum of every single-run move
+
+After 1,000 steps, every literal run of the dictionary was freed, trimmed
+by one at either end, extended by one at either end, and shifted by one
+either way, and each of those parsed and counted:
+
+| column | units | runs | moves that pack smaller | the best of them |
+|---|---|---|---|---|
+| one | 9,750 | 68 | 1 of 476 | 6 bits of 12,773 |
+| two | 8,256 | 72 | 1 of 504 | 30 bits of 7,267 |
+| three | 9,236 | 141 | 10 of 987 | 16 bits of 22,477 |
+
+So the search sits where the moves it makes reach, and what it finds after
+that comes from the moves annealing accepts uphill.
+
+## One chain beats a portfolio
+
+Over a 24-column subset: five seeds of 500 steps each, the best of the five
+a column, writes 22,048 bytes; one chain of 2,000 steps writes 21,760. The
+spread between seeds at 500 steps is 0.9 per cent. The search is not
+luck-bound, so restarts are not the lever either.
+
+## The checkpoint grid is not the lever
+
+A parse restarts from the last checkpoint before the first changed unit, so
+a finer grid makes a move cheaper and buys steps a second. At two seconds a
+column the grid reads flat: 8 slots writes 22,264 bytes and 128 slots the
+same 22,264, and a floor of 128 units rather than 1,024 moves it by 0.1 per
+cent either way.
+
+## What copying would be worth if the dictionary were free
+
+Relax the format: let a copy read from any earlier position, literal or
+not, and charge the fewest literals the format allows between the source
+and its use. Every parse a real dictionary allows is allowed here and costs
+no more, so what the relaxed parse writes is a bound no dictionary beats:
+**80,106 bytes** against the 124,220 the packer writes.
+
+The bound is loose, and its looseness is the tension itself. The relaxed
+parse reads from **40.4 per cent of all units**, and a dictionary of those
+units, at 16 bits each, writes 410,792 bytes before a sweep shrinks it.
+Copying wants a large dictionary and the dictionary is charged by the unit,
+which is what the search is weighing at every step.
+
+## What is left to try
+
+- **Destroy and repair.** Since every single-run move is exhausted at the
+  incumbent, the next neighbourhood to read is a window rebuilt whole: free
+  every literal in 512 units and search that window alone against the rest.
+- **Seeding by what a copy would pay.** The relaxed parse names the sources
+  copying wants. Ranked by what each saves against its alternative, the top
+  of that list is where seeding pays; seeding from the whole of it does
+  not, at 410,792 bytes.
+- **A tighter bound.** The relaxation lets a source be free. One that
+  charges a price a unit, swept over the price, would say how much of the
+  4.4 per cent is reachable.
+
+## What a caller does today
+
+Spend the seconds on an asset that ships. `st4 -c10` writes 4.4 per cent
+less than `st4 -c` over this corpus, and the tools above it name the same
+budget: `dtx-write -copiesS` and the YMXR converters through it.
+
 # What a short-offset class is worth against the packer
 
 The models above put a short-offset class at about 2 per cent and were
