@@ -749,9 +749,15 @@ column:
 | 500 parses of destroy and repair, then the annealing | 21,584 | -0.81% |
 | 250 parses of destroy and repair, then the annealing | **21,548** | **-0.97%** |
 
-The opening is worth about one per cent at the same work, and the shorter
-of the two openings is the better, so what it buys is the coarse shape of
-the dictionary rather than its detail.
+The shorter of the two openings is the better, so what it buys is the
+coarse shape of the dictionary rather than its detail.
+
+**On the whole corpus it is worth far less.** At 1,000 parses a column, 250
+of destroy and repair before the annealing writes 119,876 bytes against the
+annealing's 120,020: 0.12 per cent, where the subset read 0.97. The subset
+overstates it. What the opening is worth is somewhere between the two and
+is not settled by one corpus at one budget, so it is a result to read
+further rather than one to build on.
 
 ## What is left to try
 
