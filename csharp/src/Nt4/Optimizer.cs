@@ -5,11 +5,11 @@ namespace Nt4;
 
 /// <summary>
 /// The optimal parser: ZX1's, moved from bytes to k-byte units, and the
-/// readable reference the fast optimizers are held to.
+/// readable reference the fast optimizers are checked against.
 /// </summary>
 /// <remarks>
 /// For every position it keeps, per offset, the cheapest chain ending in a
-/// literal run and the cheapest ending in a match, and takes the best. Only
+/// literal run and the cheapest ending in a match, and selects the best. Only
 /// the costs differ from ZX1's: a literal unit costs <c>8 * k</c> bits, an
 /// offset counts units, a new-offset match pays three control bits and a
 /// byte or a word. The result is a chain of <see cref="Block"/>s, last block

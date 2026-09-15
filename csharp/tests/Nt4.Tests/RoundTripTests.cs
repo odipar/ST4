@@ -142,9 +142,9 @@ public sealed class RoundTripTests
     [Fact]
     public void TheLimitCheckingDecoderRefusesAWiderStream()
     {
-        // Decoding through an offset limit is how tests hold a -mN stream to
+        // Decoding through an offset limit is how tests check a -mN stream against
         // its ring, so a stream that reaches further must fail loudly rather
-        // than pretend - random data repeated once guarantees one far match.
+        // than pretend - random data repeated once forces one far match.
         byte[] half = new byte[1000];
         new JavaRandom(5).NextBytes(half);
         byte[] input = new byte[2000];
@@ -195,7 +195,7 @@ public sealed class RoundTripTests
                         packed.Control, packed.Literal, packed.ByteOffsets,
                         packed.WordOffsets, unit, expected.Length));
                     // One exact pass is still decodable: the repeat has no room
-                    // and the streams must come out fully consumed anyway.
+                    // and the streams must come out fully read anyway.
                     Assert.Equal(pass, Unpack(packed));
                 }
             }
@@ -207,7 +207,7 @@ public sealed class RoundTripTests
     {
         // The loop is parsed on its own, so replaying it from the state saved
         // at the loop point sees the same history every pass. The reference
-        // holds a stream to that: from the rewind point on, no match may reach
+        // checks a stream against that: from the rewind point on, no match may reach
         // before it - and the pass must still be the input.
         foreach (int unit in new[] { 1, 2, 4 })
         {
@@ -243,13 +243,13 @@ public sealed class RoundTripTests
         // its first match may be a one-unit rep of offset one - which, after an
         // intro that left another offset behind, the format cannot write. The
         // compressor turns that unit into a literal; the stream must still
-        // decode, and still hold to its rewind point.
+        // decode, and still stop at its rewind point.
         byte[] input = Encoding.ASCII.GetBytes("xyzxyzxyzxyzabb");
         Compressor.Result packed = PackRewinding(input, 1, 512, 12);
         Assert.Equal(input, Decompressor.Decode(packed.Control, packed.Literal,
             packed.ByteOffsets, packed.WordOffsets, 1, input.Length, 512, 12).Output);
         // And two literal runs meeting at the seam become one, which the
-        // format demands: 256 distinct bytes hold no match at all, so an
+        // format demands: 256 distinct bytes have no match, so an
         // intro and a loop cut from them are one literal run each - and one
         // together.
         byte[] distinct = new byte[256];
@@ -268,7 +268,7 @@ public sealed class RoundTripTests
     {
         // A stream packed without the rewind constraint lets its second half
         // match its first; replayed from the halfway point it would read what
-        // the ring held instead, so the reference must refuse it there.
+        // the ring kept instead, so the reference rejects it there.
         byte[] half = new byte[1000];
         new JavaRandom(5).NextBytes(half);
         byte[] input = new byte[2000];
@@ -346,7 +346,7 @@ public sealed class RoundTripTests
     public void TheOracleCostsExactlyWhatTheCompressorWrites()
     {
         // The oracle claims to know the format's every cost; the compressor is
-        // the authority. Every oracle parse must write to its own bit count
+        // the authority. Every oracle parse must write to the bit count it reports
         // and decode.
         var random = new JavaRandom(17);
         for (int trial = 0; trial < 60; trial++)
@@ -402,7 +402,7 @@ public sealed class RoundTripTests
 
     /// <summary>
     /// ZX1's packed size for each of <see cref="Inputs"/>, recorded from jx1
-    /// in odipar/ST1 at commit 132aef0, as the Java suite holds them.
+    /// in odipar/ST1 at commit 132aef0, as the Java suite checks them.
     /// </summary>
     private static readonly int[] Zx1Sizes = [4, 6, 1006, 6, 19, 383, 26];
 
@@ -453,7 +453,7 @@ public sealed class RoundTripTests
     public void TheSearchIsReproducibleAndItsParsesDecode()
     {
         // A seeded search is a function of its input: the same steps give the
-        // same parse. Every parse it scores decodes, whatever the corpus or
+        // same parse. Every parse it scores decodes, at any corpus or
         // window, and its best is never dearer than the heuristic's.
         foreach (int unit in new[] { 1, 2, 4 })
         {
@@ -490,10 +490,10 @@ public sealed class RoundTripTests
     {
         // A parse restarted from a checkpoint before the first changed unit
         // must be the parse from scratch, block for block - accepted or
-        // not, and whatever the parses in between did to the arrays. At a
+        // not, and for any state the parses in between left in the arrays. At a
         // 512-unit window a single parse makes more nodes than a small
         // input's worth, which is where the pool's compaction has to know
-        // what a full parse takes rather than go round again.
+        // what a full parse costs rather than go round again.
         var random = new JavaRandom(31);
         int count = 6000;
         int[] units = new int[count];
@@ -587,8 +587,8 @@ public sealed class RoundTripTests
     [Fact]
     public void UnitOneStaysWithinAFewPercentOfZx1()
     {
-        // k=1 is ZX1's parse with everything moved into its own stream. Splitting
-        // by offset width costs two control bits per new-offset match and gives
+        // k=1 is ZX1's parse with everything moved into a separate stream. Splitting
+        // by offset width costs two control bits per new-offset match and returns
         // back a byte offset that reaches 512 units instead of 128, so the sizes
         // no longer match exactly - but they must stay close.
         List<byte[]> inputs = Inputs();
@@ -612,12 +612,12 @@ public sealed class RoundTripTests
             byte[] file = Nt4.Container(packed);
 
             Assert.Equal(28, Format.HeaderSize);
-            // A stream that ends has no rewind point: nothing for a caller to do.
+            // A stream that ends has no rewind point, so a caller stops there.
             Assert.Equal(Format.NoRewind, LongAt(file, Format.OffsetRewind));
             // The window a decoder needs to tell a match from a copy: here the
             // widest, since the pack had no limit.
             Assert.Equal(Format.MaxOffsetUnits(unit), LongAt(file, Format.OffsetWindow));
-            // One long carries magic, version and k, so a decoder built for one
+            // One long has magic, version and k, so a decoder built for one
             // unit size checks an asset against itself with a single cmp.l.
             Assert.Equal(Format.Signature(unit), LongAt(file, Format.OffsetSignature));
             Assert.Equal(packed.PaddedSize, LongAt(file, Format.OffsetSize));
@@ -636,7 +636,7 @@ public sealed class RoundTripTests
             Assert.Equal(file.Length, wordAt + packed.WordOffsets.Length);
 
             // Stream A needs no field: it begins where the header ends. Every
-            // other start is one adda.l from the asset's own address.
+            // other start is one adda.l from the asset's address.
             Assert.Equal(packed.Control,
                 file[Format.HeaderSize..(Format.HeaderSize + packed.Control.Length)]);
             Assert.Equal(packed.Literal, file[literalAt..(literalAt + packed.Literal.Length)]);
@@ -644,7 +644,7 @@ public sealed class RoundTripTests
             Assert.Equal(packed.WordOffsets, file[wordAt..(wordAt + packed.WordOffsets.Length)]);
 
             // A derived length is the real one, or up to three bytes of padding
-            // longer - and nothing reads the padding.
+            // longer, and a reader skips the padding.
             Format.Container read = Format.Read(file);
             AssertPadded(packed.Control, read.Control);
             AssertPadded(packed.Literal, read.Literal);

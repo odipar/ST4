@@ -20,7 +20,7 @@ public sealed class FastOptimizer
     /// <summary>The offset a stream starts with, as ZX1: one unit.</summary>
     public const int InitialOffset = Optimizer.InitialOffset;
 
-    /// <summary>No state, and no literal run: nothing has happened at this offset yet.</summary>
+    /// <summary>A fresh offset: no state and no literal run yet.</summary>
     private const int None = int.MinValue;
 
     private readonly int[] units;
@@ -76,7 +76,7 @@ public sealed class FastOptimizer
     }
 
     /// <summary>
-    /// The winning cost per position, for the tests that hold other optimizers
+    /// The winning cost per position, for the tests that check other optimizers
     /// to this one: the optimum is unique, so an exact optimizer produces this
     /// array.
     /// </summary>
@@ -95,7 +95,7 @@ public sealed class FastOptimizer
     /// primitives. Per offset: the best chain ending in a match at
     /// <c>stateEnd</c> costing <c>stateBits</c>, and the best chain ending in
     /// a literal run at <c>litEnd</c> costing <c>litBits</c>. A position's
-    /// winner is recorded when it takes the lead, and replaced only by a
+    /// winner is recorded when it reaches the lead, and replaced only by a
     /// strictly better one, so ties keep the earlier candidate.
     /// </summary>
     private void Forward(bool progress)

@@ -76,7 +76,7 @@ public final class Dst4 {
         St4Decompressor.Decoded decoded;
         byte[] output;
         try {
-            // One whole pass; -r asks for more of it.
+            // One whole pass; -r extends it.
             decoded = St4Decompressor.decode(container.control(), container.literal(),
                     container.byteOffsets(), container.wordOffsets(), container.unit(),
                     container.size(), container.window(), container.rewind());

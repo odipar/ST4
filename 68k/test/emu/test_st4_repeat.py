@@ -247,7 +247,7 @@ def main() -> int:
         for name, data, _ in t.testcases():
             padded = data + bytes(-len(data) % unit)
             units_total = len(padded) // unit
-            # Past two whole passes, so the repeat crosses its own output.
+            # Past two whole passes, so the repeat crosses the output it wrote.
             target_units = 2 * units_total + 7
 
             for index in repeats_for(units_total, window):
@@ -304,7 +304,7 @@ def main() -> int:
                                 failures += 1
                             cases += 1
         # Cross the 65535-unit counter: the endless match re-arms itself from
-        # the pinned queue mid-flight, and each decoder carries its own copy of
+        # the pinned queue mid-flight, and each decoder has a separate copy of
         # that path, so each one has to be marched past the boundary.
         name, data, _ = next(c for c in t.testcases() if c[0] == 'text')
         padded = data + bytes(-len(data) % unit)

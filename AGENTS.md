@@ -181,6 +181,22 @@ repositories of the family and the rows below it struck here.
 | `reaching 512 &minus; M literals` | `reaching 512 - M literals`; the minus sign is a dash |
 | `Nt4.Nt4.Container carries both names` | `Nt4.Nt4.Container repeats the name` |
 | the em dash in research.md's sources | a single `-`, as the house style sets |
+| `consume n from the operation` | `subtract n from the operation` |
+| `the parse exit takes one branch` | `the parse exit costs one branch` |
+| `segments take the counted ladder` | `segments run the counted ladder` |
+| `the calling convention promises to preserve` | `the calling convention preserves` |
+| `repeated once guarantees one far match` | `repeated once forces one far match` |
+| `the reference must refuse it there` | `the reference rejects it there` |
+| `and still hold to its rewind point` | `and still stop at its rewind point`; `keep to` is struck with it |
+| `256 distinct bytes hold no match at all` | `256 distinct bytes have no match` |
+| `nothing has happened at this offset yet` | `a fresh offset: no state and no literal run yet` |
+| `run whatever the cost` | `run at any cost`; `whatever` struck throughout |
+| `writes no memory` | `leaves memory alone` |
+| `a stream of nothing but flag bits` | `a stream of flag bits alone` |
+| `0 for none` | `0 for a plain parse` |
+| `each decoder carries its own copy` | `each decoder has a separate copy` |
+| `-r asks for more of it` | `-r extends it` |
+| `a stream decodes with any window at least its own` | `with any window at least as wide` |
 
 ## A specification defines operations
 

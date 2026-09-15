@@ -34,7 +34,7 @@ from unicorn.m68k_const import (                                    # noqa: E402
 )
 
 QUICK = '--quick' in sys.argv
-LITERAL = 0x100000                  # a region of its own for stream B
+LITERAL = 0x100000                  # a separate region for stream B
 BYTE_OFFSETS = 0x140000             # and one each for streams B and C
 WORD_OFFSETS = 0x180000
 PRESERVED = {UC_M68K_REG_D6: 0xD6D6D6D6, UC_M68K_REG_D7: 0xD7D7D7D7,

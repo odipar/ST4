@@ -13,7 +13,7 @@ namespace Nt4;
 /// a literal run cannot be, and <see cref="Result.LongestOp"/> reports it. A
 /// copy from the literal stream is written as the window plus the literal
 /// units between its source and itself, and is shorter than that count: the
-/// one copy that would not be gives its last unit to a literal. The intro
+/// one copy that would not be leaves its last unit to a literal. The intro
 /// and the loop of a rewind stream are two parses written back to back; two
 /// literal runs that meet at the seam merge, and a one-unit rep the intro
 /// left no offset for is written as a literal.
@@ -38,7 +38,7 @@ public sealed class Compressor
         byte[] WordOffsets, int Unit, int PaddedSize, int LongestOp, int Operations,
         int RewindIndex, int Window, int Copies, int ControlBits, bool RepeatWord)
     {
-        /// <summary>Bytes all four streams take together.</summary>
+        /// <summary>Bytes all four streams occupy together.</summary>
         public int PackedSize =>
             Control.Length + Literal.Length + ByteOffsets.Length + WordOffsets.Length;
 
@@ -71,7 +71,7 @@ public sealed class Compressor
     private int copies;
 
     // The walk: where the next unit comes from, the literal run gathered but
-    // not yet written, the offset the stream holds, whether the first block,
+    // not yet written, the offset the stream keeps, whether the first block,
     // which has no flag, is still to come, and how many literal units precede
     // each position written so far.
     private int readIndex;
@@ -150,7 +150,7 @@ public sealed class Compressor
     /// where the caller saves the decoder's state. The stream ends plainly.
     /// </summary>
     /// <param name="intro">Final block of a parse of the units before the loop, or null when there are none.</param>
-    /// <param name="loop">Final block of a parse of the loop's units on their own.</param>
+    /// <param name="loop">Final block of a parse of the loop's units alone.</param>
     /// <param name="units">The whole input as k-byte units.</param>
     /// <param name="unit">Bytes per unit: 1, 2 or 4.</param>
     /// <param name="maxOpLength">Positive maximum length requested for each operation, in units.</param>
@@ -163,7 +163,7 @@ public sealed class Compressor
 
     /// <summary>As above, for parses made at <paramref name="window"/> units.</summary>
     /// <param name="intro">Final block of a parse of the units before the loop, or null when there are none.</param>
-    /// <param name="loop">Final block of a parse of the loop's units on their own.</param>
+    /// <param name="loop">Final block of a parse of the loop's units alone.</param>
     /// <param name="units">The whole input as k-byte units.</param>
     /// <param name="unit">Bytes per unit: 1, 2 or 4.</param>
     /// <param name="maxOpLength">Positive maximum length requested for each operation, in units.</param>
@@ -172,7 +172,7 @@ public sealed class Compressor
     /// <returns>The four streams and their metadata.</returns>
     /// <exception cref="ArgumentNullException"><paramref name="loop"/> or <paramref name="units"/> is null.</exception>
     /// <exception cref="ArgumentOutOfRangeException">
-    /// <paramref name="rewindIndex"/> is not a unit of the stream, or an intro is given exactly when there is none.
+    /// <paramref name="rewindIndex"/> is not a unit of the stream, or an intro is exactly when there is none.
     /// </exception>
     public static Result CompressRewinding(Block? intro, Block loop, int[] units, int unit,
         int maxOpLength, int rewindIndex, int window)
@@ -279,7 +279,7 @@ public sealed class Compressor
     /// in the output for <paramref name="length"/> units, in pieces the
     /// counters hold. A piece is written as a match at the window plus the
     /// literals between its source and itself; a piece as long as that count
-    /// gives its last unit to a literal, so the decoder's offset, advanced by
+    /// leaves its last unit to a literal, so the decoder's offset, advanced by
     /// what it copies, never reaches zero.
     /// </summary>
     private void Copy(int distance, int length, int maxOpLength)

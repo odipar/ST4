@@ -126,7 +126,7 @@ public sealed class Decompressor
             Format.NoRewind);
 
     /// <summary>
-    /// As above, holding a stream to its rewind point: from
+    /// As above, reading a stream to its rewind point: from
     /// <paramref name="rewindAt"/> bytes on, no match reaches before it, so
     /// the loop replays from the state saved there and every pass sees the
     /// same history. A stream that reaches before it would loop wrongly on
@@ -311,7 +311,7 @@ public sealed class Decompressor
     {
         if (ReadBit())
         {
-            // Stream D holds the distance back to the loop point.
+            // Stream D has the distance back to the loop point.
             int distance = ReadWordOffset();
             if (distance <= 0)
             {

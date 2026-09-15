@@ -174,7 +174,7 @@ public sealed class LiteralCopyOracle
                     break;
                 }
                 // The copied units are one run in the output: the compressor
-                // gives the source as an output position.
+                // names the source as an output position.
                 if (literalPositions[source + length - 1] != literalPositions[source] + length - 1)
                 {
                     break;

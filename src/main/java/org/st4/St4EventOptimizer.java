@@ -358,7 +358,7 @@ public final class St4EventOptimizer {
         if (state != Integer.MAX_VALUE) {
             if (stateE[offset] != NONE) {
                 // The reference overwrites an offset's state at its next match
-                // run whatever the cost; this does the same.
+                // run at any cost; this does the same.
                 literalTree.remove(stateE[offset] + 1,
                         encode(stateS[offset] - stateE[offset] * literalBits, offset));
             }
@@ -456,7 +456,7 @@ public final class St4EventOptimizer {
         }
     }
 
-    /** A min tree whose slots hold sets, so an entry can be removed. */
+    /** A min tree whose slots are sets, so an entry can be removed. */
     private static final class SlotTree extends MinTree {
         private final HashMap<Integer, TreeSet<Long>> slots = new HashMap<>();
 

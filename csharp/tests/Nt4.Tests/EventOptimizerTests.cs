@@ -11,7 +11,7 @@ namespace Nt4.Tests;
 /// optimum is unique, so the cost arrays are equal element for element, the
 /// strongest check on an optimizer that breaks ties differently. The rebuilt
 /// chain decompresses back to the input and packs to the same size, give or
-/// take stream padding.
+/// read stream padding.
 /// </summary>
 public sealed class EventOptimizerTests
 {

@@ -130,7 +130,7 @@ final class St4RoundTripTest {
 
     @Test
     void theLimitCheckingDecoderRefusesAWiderStream() {
-        // Decoding at a window is how tests hold a -mN stream to its ring. A
+        // Decoding at a window is how tests check a -mN stream against its ring. A
         // stream that reaches further reads as copies from the literal stream
         // there, and random data repeated once makes one that cannot be: a
         // thousand units copied from 992 literals back.
@@ -180,7 +180,7 @@ final class St4RoundTripTest {
                             packed.control(), packed.literal(), packed.byteOffsets(),
                             packed.wordOffsets(), unit, expected.length), shape);
                     // One exact pass is still decodable: the repeat has no room
-                    // and the streams must come out fully consumed anyway.
+                    // and the streams must come out fully read anyway.
                     assertArrayEquals(pass, unpack(packed), shape);
                 }
             }
@@ -191,7 +191,7 @@ final class St4RoundTripTest {
     void aRewindStreamDecodesToItsPassAndNeverReachesBeforeTheLoop() {
         // The loop is parsed on its own, so replaying it from the state saved
         // at the loop point sees the same history every pass. The reference
-        // holds a stream to that: from the rewind point on, no match may reach
+        // checks a stream against that: from the rewind point on, no match may reach
         // before it - and the pass must still be the input.
         for (int unit : new int[] {1, 2, 4}) {
             for (byte[] input : inputs()) {
@@ -224,13 +224,13 @@ final class St4RoundTripTest {
         // its first match may be a one-unit rep of offset one - which, after an
         // intro that left another offset behind, the format cannot write. The
         // compressor turns that unit into a literal; the stream must still
-        // decode, and still hold to its rewind point.
+        // decode, and still stop at its rewind point.
         byte[] input = "xyzxyzxyzxyzabb".getBytes(java.nio.charset.StandardCharsets.US_ASCII);
         St4Compressor.Result packed = packRewinding(input, 1, 512, 12);
         assertArrayEquals(input, St4Decompressor.decode(packed.control(), packed.literal(),
                 packed.byteOffsets(), packed.wordOffsets(), 1, input.length, 512, 12).output());
         // And two literal runs meeting at the seam become one, which the
-        // format demands: 256 distinct bytes hold no match at all, so an
+        // format demands: 256 distinct bytes have no match, so an
         // intro and a loop cut from them are one literal run each - and one
         // together.
         byte[] distinct = new byte[256];
@@ -248,7 +248,7 @@ final class St4RoundTripTest {
     void theRewindCheckRefusesALoopThatReachesBeforeItsPoint() {
         // A stream packed without the rewind constraint lets its second half
         // match its first; replayed from the halfway point it would read what
-        // the ring held instead, so the reference must refuse it there.
+        // the ring kept instead, so the reference rejects it there.
         byte[] half = new byte[1000];
         new Random(5).nextBytes(half);
         byte[] input = new byte[2000];
@@ -327,7 +327,7 @@ final class St4RoundTripTest {
         // The oracle claims to know the format's every cost, reps of copies and
         // the offset a copy leaves behind included; the compressor is the
         // authority. On inputs small enough to exhaust, every oracle parse
-        // must write to its own bit count and decode.
+        // must write to the bit count it reports and decode.
         var random = new Random(17);
         for (int trial = 0; trial < 60; trial++) {
             int count = 6 + random.nextInt(6);
@@ -437,7 +437,7 @@ final class St4RoundTripTest {
     @Test
     void theSearchIsReproducibleAndItsParsesDecode() {
         // A seeded search is a function of its input: the same steps give the
-        // same parse. Every parse it scores decodes, whatever the corpus or
+        // same parse. Every parse it scores decodes, at any corpus or
         // window, and its best is never dearer than its opening passes'.
         for (int unit : new int[] {1, 2, 4}) {
             for (byte[] input : inputs()) {
@@ -470,10 +470,10 @@ final class St4RoundTripTest {
     void theSearchParserRestartsFromItsCheckpointsExactly() {
         // A parse restarted from a checkpoint before the first changed unit
         // must be the parse from scratch, block for block - accepted or
-        // not, and whatever the parses in between did to the arrays. At a
+        // not, and for any state the parses in between left in the arrays. At a
         // 512-unit window a single parse makes more nodes than a small
         // input's worth, which is where the pool's compaction has to know
-        // what a full parse takes rather than go round again.
+        // what a full parse costs rather than go round again.
         var random = new Random(31);
         int count = 6000;
         int[] units = new int[count];
@@ -558,8 +558,8 @@ final class St4RoundTripTest {
 
     @Test
     void unitOneStaysWithinAFewPercentOfZx1() {
-        // k=1 is ZX1's parse with everything moved into its own stream. Splitting
-        // by offset width costs two control bits per new-offset match and gives
+        // k=1 is ZX1's parse with everything moved into a separate stream. Splitting
+        // by offset width costs two control bits per new-offset match and returns
         // back a byte offset that reaches 512 units instead of 128, so the sizes
         // no longer match exactly - but they must stay close, and the padding
         // between four streams is itself a few bytes.
@@ -581,12 +581,12 @@ final class St4RoundTripTest {
             byte[] file = St4.container(packed);
 
             assertEquals(28, St4Format.HEADER_SIZE);
-            // A stream that ends has no rewind point: nothing for a caller to do.
+            // A stream that ends has no rewind point, so a caller stops there.
             assertEquals(St4Format.NO_REWIND, longAt(file, St4Format.OFFSET_REWIND));
             // The window a decoder needs to tell a match from a copy: here the
             // widest, since the pack had no limit.
             assertEquals(St4Format.maxOffsetUnits(unit), longAt(file, St4Format.OFFSET_WINDOW));
-            // One long carries magic, version and k, so a decoder built for one
+            // One long has magic, version and k, so a decoder built for one
             // unit size checks an asset against itself with a single cmp.l.
             assertEquals(St4Format.signature(unit), longAt(file, St4Format.OFFSET_SIGNATURE));
             assertEquals(packed.paddedSize(), longAt(file, St4Format.OFFSET_SIZE));
@@ -606,7 +606,7 @@ final class St4RoundTripTest {
                     "stream D runs to the end of the file");
 
             // Stream A needs no field: it begins where the header ends. Every
-            // other start is one adda.l from the asset's own address.
+            // other start is one adda.l from the asset's address.
             assertArrayEquals(packed.control(), Arrays.copyOfRange(file,
                     St4Format.HEADER_SIZE, St4Format.HEADER_SIZE + packed.control().length));
             assertArrayEquals(packed.literal(),
@@ -617,7 +617,7 @@ final class St4RoundTripTest {
                     Arrays.copyOfRange(file, wordAt, wordAt + packed.wordOffsets().length));
 
             // A derived length is the real one, or up to three bytes of padding
-            // longer - and nothing reads the padding.
+            // longer, and a reader skips the padding.
             St4Format.Container read = St4Format.read(file);
             assertPadded(packed.control(), read.control());
             assertPadded(packed.literal(), read.literal());

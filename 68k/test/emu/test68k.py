@@ -64,7 +64,7 @@ def _binary(name):
 POS = [a for a in sys.argv[1:] if not a.startswith('-')]   # flags are not positional
 # In odipar/ST1 this file is also a runnable ST1 test and assembles the decoder
 # here. In this repository it is the shared harness the ST4 rigs import - they
-# assemble their own decoders - so the binary is only demanded when named.
+# assemble separate decoders - so the binary is only demanded when named.
 BIN = _binary(POS[0]) if POS else b''
 
 CHUNKS = [int(c) for c in POS[1].split(',')] if len(POS) > 1 else [16, 1, 7, 127, 255, 4096]
@@ -74,8 +74,8 @@ QUICK = '--quick' in sys.argv     # the whole matrix runs by default: with the
                                   # the ones whose cost is calls, not coverage
 
 CODE, CTX, SRC, DST, STACK_TOP, MAGIC = 0x1000, 0x20000, 0x40000, 0x80000, 0xF8000, 0xE0000
-# Registers the calling convention promises to preserve. a5 is here because the
-# decompressors have no context block at all any more - nothing uses it.
+# Registers the calling convention preserves. a5 is here because the
+# decompressors have no context block any more.
 PRESERVED = {UC_M68K_REG_D6: 0xD6D61234,
              UC_M68K_REG_A3: 0x00030234, UC_M68K_REG_A4: 0x00040234,
              UC_M68K_REG_A5: 0x00050234, UC_M68K_REG_A6: 0xCAFEBABE,
@@ -231,7 +231,7 @@ def run_oneshot(compressed: bytes, expected: bytes, src_bias: int = 0) -> None:
     uc = make_emu(compressed, src_bias)
     uc.reg_write(UC_M68K_REG_A0, SRC + src_bias)
     uc.reg_write(UC_M68K_REG_A1, DST)
-    for reg, canary in PRESERVED.items():          # ST1_decompress promises to
+    for reg, canary in PRESERVED.items():          # ST1_decompress is defined to
         uc.reg_write(reg, canary)                  # leave these alone, a5 included
     sp_after = STACK_TOP - 256 + 4          # call() pushes the return address
     assert call(uc, ENTRY_DECOMPRESS) == 0

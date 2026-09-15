@@ -18,8 +18,10 @@ import org.junit.jupiter.api.Test;
  * find. AGENTS.md and CLAUDE.md are left out: they quote the struck phrases
  * to define them.
  *
- * <p>Code comments are outside this test at present. The sweep that would
- * bring the three source trees under it is a separate round.
+ * <p>It reads code comments the same way, in the four languages this
+ * repository writes them: Java, C#, 68000 assembly and Python. The code
+ * around a comment is left unread, since a field named {@code holds} or a
+ * call to {@code getState} is a name and not prose.
  */
 final class HouseStyleTest {
 
@@ -142,6 +144,114 @@ final class HouseStyleTest {
                     .sorted()
                     .toList();
         }
+    }
+
+    /** The four languages this repository writes comments in. */
+    private static final List<String> SOURCES =
+            List.of(".java", ".cs", ".S", ".py");
+
+    /** Every source in the tree but this one, which quotes the struck
+     *  phrases to ban them, and the built trees, which are output. */
+    private static List<Path> sources() throws IOException {
+        try (Stream<Path> tree = Files.walk(Path.of("."))) {
+            return tree.filter(Files::isRegularFile)
+                    .filter(path -> SOURCES.stream()
+                            .anyMatch(one -> path.toString().endsWith(one)))
+                    .filter(path -> !path.toString().contains("/target/")
+                            && !path.toString().contains("/bin/")
+                            && !path.toString().contains("/obj/"))
+                    .filter(path -> !path.getFileName().toString()
+                            .equals("HouseStyleTest.java"))
+                    .sorted()
+                    .toList();
+        }
+    }
+
+    /** The comment text of a source, each piece with the line it opens on. */
+    private static List<String[]> commentsOf(Path source) throws IOException {
+        List<String> lines = Files.readAllLines(source);
+        String named = source.toString();
+        if (named.endsWith(".java") || named.endsWith(".cs")) {
+            return braces(lines);
+        }
+        if (named.endsWith(".S")) {
+            return opener(lines, ";");
+        }
+        return opener(lines, "#");
+    }
+
+    /** A comment opened by {@code //} or run between {@code /*} and its close. */
+    private static List<String[]> braces(List<String> lines) {
+        List<String[]> out = new ArrayList<>();
+        boolean block = false;
+        for (int i = 0; i < lines.size(); i++) {
+            String line = lines.get(i);
+            String text = "";
+            if (block) {
+                int end = line.indexOf("*/");
+                text = end >= 0 ? line.substring(0, end) : line;
+                if (end >= 0) {
+                    block = false;
+                }
+            } else {
+                int open = line.indexOf("/*");
+                int slash = line.indexOf("//");
+                if (open >= 0 && (slash < 0 || open < slash)) {
+                    int end = line.indexOf("*/", open + 2);
+                    if (end >= 0) {
+                        text = line.substring(open + 2, end);
+                    } else {
+                        text = line.substring(open + 2);
+                        block = true;
+                    }
+                } else if (slash >= 0) {
+                    text = line.substring(slash + 2);
+                }
+            }
+            text = text.replace('*', ' ').strip();
+            if (!text.isEmpty()) {
+                out.add(new String[] {String.valueOf(i + 1), text});
+            }
+        }
+        return out;
+    }
+
+    /** A comment opened by one mark and running to the end of the line. */
+    private static List<String[]> opener(List<String> lines, String mark) {
+        List<String[]> out = new ArrayList<>();
+        for (int i = 0; i < lines.size(); i++) {
+            String line = lines.get(i);
+            if (line.startsWith("#!")) {
+                continue;
+            }
+            int at = line.indexOf(mark);
+            if (at < 0) {
+                continue;
+            }
+            String text = line.substring(at + mark.length()).strip();
+            if (!text.isEmpty()) {
+                out.add(new String[] {String.valueOf(i + 1), text});
+            }
+        }
+        return out;
+    }
+
+    @Test
+    void noCommentUsesAPhraseStruckInReview() throws IOException {
+        List<String> found = new ArrayList<>();
+        for (Path source : sources()) {
+            for (String[] comment : commentsOf(source)) {
+                String lower = comment[1].toLowerCase();
+                for (String phrase : STRUCK) {
+                    if (lower.contains(phrase.toLowerCase())) {
+                        found.add(source + ":" + comment[0] + " reads \""
+                                + phrase + "\": " + comment[1]);
+                    }
+                }
+            }
+        }
+        assertTrue(found.isEmpty(), () -> String.join("\n", found)
+                + "\nAGENTS.md, Struck in review, has what to write instead.");
     }
 
     @Test

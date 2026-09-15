@@ -10,7 +10,7 @@
 ; ST4_wrap decodes through a ring of N bytes in calls of C units: the caller
 ; resets a1 to the ring start after every F = N/(C*UNIT) calls. Literals come
 ; from stream B in a2 and offsets from stream C in a4 (bytes) or D in a5
-; (words); stream A holds the bits, so the queue refills a word at a time.
+; (words); stream A has the bits, so the queue refills a word at a time.
 ; Set the unit size before including:
 ;
 ;       ST4_UNIT    equ     4
@@ -44,7 +44,7 @@
 ; which keeps the wrap arithmetic ST1_wrap's.
 ;
 ; Two copy ladders: match segments of at most sixteen units, measured at four
-; of every five segments a small-budget streamer makes, take a counter-free
+; of every five segments a small-budget streamer makes, run a counter-free
 ; ladder that falls into the match epilogue; literals and longer segments take
 ; the counted ladder. There is no first-call test: ST4_init seeds the bit
 ; queue with one virtual 0 flag ($4000), so the first call runs a zero-unit
@@ -78,7 +78,7 @@
 ;   4. no operation is longer than 65535 units: pack with -l65535
 ;   5. the caller makes T = ceil(O/C) calls, as for ST1_wrap, unless the
 ;      stream repeats: then any number of calls is fine
-;   6. streams A and D start on even addresses, and A holds an even number of
+;   6. streams A and D start on even addresses, and A has an even number of
 ;      bytes: the bit queue is refilled with a move.w, and so is a word offset
 ;   7. a stream with copies was packed with -m equal to the ring in units,
 ;      and every copy is shorter than its distance, so the offset never
@@ -125,7 +125,7 @@ ST4_init:
         sub.w   a1,d1                   ; -ring_start.low, exact modulo 65536
         swap    d1                      ; pack it high; remaining = 0
 ; The initial offset lands in the low word after the swap, so it starts in the
-; high half: moveq would put -1 there whatever the unit size, a byte short at
+; high half: moveq would put -1 there at any unit size, a byte short at
 ; k=2 and three at k=4, which shows on a stream whose first match reuses the
 ; initial offset.
         move.l  #(-ST4_UNIT)<<16,d2
@@ -208,7 +208,7 @@ window_cmp:
         bra.s   source_wrapped
 
 copy:                                   ; MATCH copies only reach this entry
-        sub.w   d4,d1                   ; consume n from the operation
+        sub.w   d4,d1                   ; subtract n from the operation
         sub.w   d4,d3                   ; and from this call's budget
         cmp.w   #17,d4
         bcc.s   copy_slow               ; n >= 17: the counted ladder
@@ -232,7 +232,7 @@ resume_return:
 
 literal_source:
         movea.l a2,a3                   ; literals copy from stream B
-        sub.w   d4,d1                   ; consume n from the operation
+        sub.w   d4,d1                   ; subtract n from the operation
         sub.w   d4,d3                   ; and from this call's budget
 copy_slow:                              ; any n; the subs are already done
         moveq   #15,d5                  ; d5 = n&15, partial-pass dispatch
@@ -289,7 +289,7 @@ gamma_loop:
 gamma_done:
         add.w   d4,d1                   ; +1 only for a new-offset match
         move.w  d3,d4                   ; the resume_fresh tail, duplicated so
-        bne.w   segment                 ; the parse exit takes one branch
+        bne.w   segment                 ; the parse exit costs one branch
 parse_done:
         rts
 gamma_refill:
