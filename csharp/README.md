@@ -52,7 +52,7 @@ byte[] restored = Decompressor.Decompress(read.Control, read.Literal,
     read.ByteOffsets, read.WordOffsets, read.Unit, read.Size);
 ```
 
-`Nt4.Nt4.Container` carries both names because the class and the namespace
+`Nt4.Nt4.Container` repeats the name because the class and the namespace
 share one: in a `using Nt4;` file the bare `Nt4` binds to the namespace.
 
 `EventOptimizer` is the CLI's default and falls back to `FastOptimizer`

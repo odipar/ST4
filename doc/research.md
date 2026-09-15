@@ -1,17 +1,17 @@
 # Copies from the literal stream: is it new, and does it work?
 
 The question: let a back-reference reach past the ring into the literal
-stream itself. The ring then holds only what a match needs that no literal
-can give, packing improves for small rings, and the ring can shrink to
-almost nothing. The optimizers have to know. This note records what the
-literature says, what the mechanism is, and what it measured.
+stream itself. The ring then keeps only what a match needs beyond the
+literals, packing improves for small rings, and the ring can shrink far.
+The optimizers have to know. This note records what the literature says,
+what the mechanism is, and what the measurements read.
 
 ## Verdict
 
 The parts are known; the combination is not; it works. Pointers into the
 compressed text are the classical *macro schemes* of Storer and Szymanski,
 and a dictionary placed before the output buffer is LZ4's prefix mode. No
-scheme found uses an asset's own literal stream, resident because the
+scheme found uses the literal stream of an asset, resident because the
 container is, as a dictionary that decouples the window from the ring. The
 decoders need one compare per match. The parse is the work: the exact
 problem is NP-complete, so the packer needs a heuristic, and with a search
@@ -23,12 +23,12 @@ match or a copy, and of the forms tried that one packs best.
 
 ## What the idea is
 
-Stream B holds every literal of the stream in emission order, for as long
+Stream B has every literal of the stream in emission order, for as long
 as the container is in memory: a second dictionary that never scrolls.
 Anything that entered the output as a literal can be copied again from it,
-however small the ring, so the ring has to hold only what is generated
-rather than stored - self-overlapping copies, and whatever chains of matches
-the packer still chooses. The reach is what the word offset allows: 32512
+however small the ring, so the ring needs only what is generated rather
+than stored - self-overlapping copies, and the chains of matches the packer
+still chooses. The reach is what the word offset allows: 32512
 literals less the window, which with a tiny ring is a 32 KB dictionary at
 k = 1, today's whole window.
 
@@ -60,10 +60,10 @@ The packer never writes a ring offset above the window M, so an offset of
 at most M is a match exactly as before, and one beyond M copies from the
 literal stream, M less than that far back from the literal read pointer:
 the same three control bits, the same byte-or-word encoding, a byte offset
-reaching 512 − M literals. The decoder compares an offset against M, which
+reaching 512 - M literals. The decoder compares an offset against M, which
 it knows at build time, and copies from the read pointer instead of the
 write pointer, without a wrap. Streams that never exceed M decode as they
-always did, and nothing depends on where the ring or the literal stream is.
+always did, and the position of the ring and the literal stream is free.
 
 The packer is the work. The parse decides which units are literal, a copy
 is valid only if its source is, and its offset counts the literals between:
@@ -93,7 +93,7 @@ the ring alone and `st4 -c120 -mN` for the ring with copies - the one-shot
 passes of `St4LiteralCopySearch` and then two minutes of its search per
 cell, which on the larger corpora is still
 improving when time runs out. `St4LiteralCopyOracle`, the exhaustive search
-on inputs of a dozen units, holds both to the optimum where it is known.
+on inputs of a dozen units, reads both against the known optimum.
 
 ### How the circularity was broken
 
@@ -108,7 +108,7 @@ Holes of up to three units between dictionary runs are filled, and a second
 pass keeps only the units the first copied from. Each pass is the ordinary
 DP with the copy candidates added: a copy's offset depends only on the
 literals between source and copy, which the chain prefix fixes, and the DP
-needs just the cost class, byte or word, which it takes from the previous
+needs just the cost class, byte or word, which it reads from the previous
 pass and can mis-cost by eight bits at most. That parse is far too literal,
 and the search starts from it: a greedy sweep frees and trims every literal
 run, keeping what packs smaller, then random moves free, seed, extend or
@@ -120,7 +120,7 @@ the cost model.
 
 Packed size in bytes and as a share of the input, the way the packers report
 it: smaller is better. Only ring decoders are compared - a stream that stays
-in one buffer has the whole window and nothing to gain. "Ring alone" is the
+in one buffer has the whole window already. "Ring alone" is the
 parse at that ring size without copies, "with copies" the same ring with
 copies from the literal stream.
 
@@ -184,7 +184,7 @@ ring a decoder without copies needs to match a 16-unit ring with them:
 
 | corpus | k | 16 units with copies | ring alone, for the same ratio |
 |---|---:|---:|---:|
-| far-match | 1 | 7.2% | any ring shorter than the gap gives 14.1% |
+| far-match | 1 | 7.2% | any ring shorter than the gap reads 14.1% |
 | period-129 | 1 | 15.0% | 256 units (13.1%); 64 units give 101.2% |
 | word-soup | 1 | 30.5% | between 256 (41.0%) and 1024 (27.9%) |
 | class file | 1 | 65.9% | just short of 256 units (63.5%); 64 give 75.0% |
@@ -226,8 +226,8 @@ it: the one copy 32512 literals back no longer fits.
 The test corpora are synthetic; the assets this is for are register dumps.
 YMX, the streaming YM player this format was split from, packs a tune as
 twenty-five streams - fourteen sound registers, one value per frame, and
-eleven of a compiled effect script - each decoded through its own ring of
-960 bytes by default. The four example tunes of that repository and one
+eleven of a compiled effect script - each decoded through a separate ring
+of 960 bytes by default. The four example tunes of that repository and one
 long one, Synergy's Wicked Polygons 2 at 43132 frames, their stream vectors
 built as its encoder builds them, packed here one section per stream: the
 previous ST4, which is what YMX packs with today, against this one with
@@ -295,8 +295,8 @@ At k = 2:
 |  |  | 256 | 97391 | 84400 | 13% |
 |  |  | 128 | 121815 | 100493 | 18% |
 
-At the player's own ring and above it the copies gain one to four percent:
-the ring already holds what these tunes repeat. The gain is in shrinking
+At the player's ring and above it the copies gain one to four percent: the
+ring already has what these tunes repeat. The gain is in shrinking
 it: one to fifteen percent at 512 bytes, three to nineteen at 256 and 128
 at k = 1, and ten to thirty-six at k = 2, where a byte offset reaches twice
 as far. What that buys is RAM: the rings cost 25 × N bytes, 25600 at 1024,
@@ -322,17 +322,17 @@ of what it packs to today, most to within two, the long one included. Dark
 Side of the Spoon costs two to four percent more at a quarter. The others do
 not get that far, since a period stream that repeats at long range is
 match-shaped rather than literal-shaped, and shrinking the ring costs a
-tune that packed to almost nothing the most. The tune data needs nothing
-for this: copies read the literal stream out of the file the player
+tune that packed smallest the most. The tune data needs no change for
+this: copies read the literal stream out of the file the player
 already keeps in memory.
 
 ### What decides it
 
-`st4 -c` writes the one-shot parse and the decoders take it when built with
+`st4 -c` writes the one-shot parse and the decoders read it when built with
 `ST4_WINDOW`; `st4 -cS` searches for S seconds beyond it, descending and
 annealing over which units are literal with an exact parse for each choice
 and the rep of a copy in its cost model - on this README at k = 1 and a
-64-unit window that takes the one-shot parse's 78% of the input to 61% in
+64-unit window that brings the one-shot parse's 78% of the input to 61% in
 ten minutes, still improving. What is left is one-unit copies in the cost
 model, and the same candidates in the fast optimizer, the event-driven one
 falling back.
@@ -512,7 +512,7 @@ k = 1 (a window of 30):
 ### What it is worth
 
 The worst window is what a demo has to budget for. At k = 1 it was 15
-blocks, the most a 30-unit window can hold at one block per unit; a penalty
+blocks, the most a 30-unit window fits at one block per unit; a penalty
 of 8 bits brings it to 12 for under two percent more file. At k = 2 a
 penalty of 16 brings 9 down to 7 for 2.8 percent, and 32 and 64 buy no
 further reduction: the worst window stays at 7 while the bytes keep rising.
@@ -549,7 +549,7 @@ The cause is ZX1's parse structure. A literal run is only ever extended at a
 position where no offset matches, and the state kept per offset is the
 cheapest chain ending in a literal run or in a match at that offset. That is
 sufficient when only bits count. A charge per block makes the number of
-blocks matter as well, and those states do not record it.
+blocks matter as well, and those figures do not record it.
 
 So the byte figures in the table above are what these parsers reach, not
 what an exact penalised parse would cost: the true price of a shorter worst
@@ -604,20 +604,20 @@ beat the unpenalised optimum.
 ## Sources
 
 - J. A. Storer, T. G. Szymanski, *The macro model for data compression
-  (extended abstract)*, STOC 1978 —
+  (extended abstract)*, STOC 1978 -
   <https://www.semanticscholar.org/paper/686b27e3d215720b57c6c498ddb734b6faab578b>
 - J. A. Storer, T. G. Szymanski, *Data compression via textual substitution*,
-  JACM 29(4), 1982 — <https://dl.acm.org/doi/10.1145/322344.322346>
+  JACM 29(4), 1982 - <https://dl.acm.org/doi/10.1145/322344.322346>
 - L. M. S. Russo, G. Navarro, A. Correia, A. P. Francisco, *Approximating
-  Optimal Bidirectional Macro Schemes*, 2020 —
+  Optimal Bidirectional Macro Schemes*, 2020 -
   <https://arxiv.org/abs/2003.02336>
-- T. Nishimoto, Y. Tabei, *LZRR: LZ77 Parsing with Right Reference*, 2018 —
+- T. Nishimoto, Y. Tabei, *LZRR: LZ77 Parsing with Right Reference*, 2018 -
   <https://arxiv.org/abs/1812.04261>
-- LZ4, `lz4.h`: `LZ4_decompress_safe_usingDict` and streaming decompression —
+- LZ4, `lz4.h`: `LZ4_decompress_safe_usingDict` and streaming decompression -
   <https://raw.githubusercontent.com/lz4/lz4/dev/lib/lz4.h>, manual at
   <https://fossies.org/linux/lz4/doc/lz4_manual.html>
-- E. Saukas, ZX0 — <https://github.com/einar-saukas/ZX0>
-- Wikibooks, *Data Compression: dictionary compression* —
+- E. Saukas, ZX0 - <https://github.com/einar-saukas/ZX0>
+- Wikibooks, *Data Compression: dictionary compression* -
   <https://en.wikibooks.org/wiki/Data_Compression/Dictionary_compression>
-- encode.su, *LZ style compression with static dictionary* —
+- encode.su, *LZ style compression with static dictionary* -
   <https://encode.su/threads/2995-LZ-style-compression-with-static-Dictionary>
