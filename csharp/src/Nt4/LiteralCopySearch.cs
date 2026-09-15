@@ -33,12 +33,6 @@ public static class LiteralCopySearch
 {
     private const int None = int.MinValue;
 
-    private const byte Literals = 0;
-    private const byte Rep = 1;          // a ring match reusing the last offset
-    private const byte New = 2;          // a ring match at a new offset
-    private const byte Copy = 3;         // a copy from the literal stream
-    private const byte CopyRep = 4;      // a rep of the last copy, after literals
-
     /// <summary>Holes of up to this many units between dictionary runs are filled in the opening passes.</summary>
     private const int Hole = 3;
 
@@ -51,6 +45,15 @@ public static class LiteralCopySearch
 
     /// <summary>Steps without a new best before the search returns to the best.</summary>
     private const int Patience = 2000;
+
+    /// <summary>
+    /// The pool a collection allows against what it kept, the smallest pool
+    /// it collects at, and what stands in the forwarding table for a node it
+    /// keeps and has not moved yet.
+    /// </summary>
+    private const int PoolGrowth = 2;
+    private const int PoolFloor = 1 << 20;
+    private const int PoolMarked = -2;
 
     private static int EliasGammaBits(int value) =>
         2 * (31 - System.Numerics.BitOperations.LeadingZeroCount((uint)value)) + 1;
@@ -548,11 +551,13 @@ public static class LiteralCopySearch
         private readonly int reach;
 
         // Per state index: the best chain ending in a match or copy there,
-        // its cost, end and how to rebuild it, and its literal extension.
+        // its cost, end and how to rebuild it, and its literal extension. A
+        // state is a ring match at the last offset or at a new one, a copy
+        // from the literal stream, or a rep of the last copy after literals;
+        // what it is stands in the chain rather than in the state, since the
+        // parse weighs the four by their bits alone.
         private readonly int[] stateBits;
         private readonly int[] stateEnd;
-        private readonly byte[] stateKind;
-        private readonly int[] stateAux;
         private readonly int[] statePred;
         private readonly int[] stateNode;
         private readonly int[] litBits;
@@ -589,14 +594,22 @@ public static class LiteralCopySearch
         private int bestMatchIdx;
         private int bestLengthSize;
 
-        // The node pool.
-        private byte[] nodeKind = new byte[1024];
+        // The node pool, which keeps what the parse can still reach. A
+        // parse of 48,063 units at a window of 32,512 makes 108 million
+        // nodes and ends with 1.26 million of them reachable, and the
+        // opening passes reach 330 million against 6.4 million: the rest is
+        // a node each for a state the parse reached and left. A collection
+        // marks from the arrays that name a node, renumbers what it keeps
+        // into the front of the pool, and bounds the next collection at
+        // PoolGrowth times that. Ids move, and a parse decides on bits
+        // alone, so the bytes out are what they were.
         private int[] nodeEnd = new int[1024];
         private int[] nodeOffset = new int[1024];
-        private int[] nodeAux = new int[1024];
         private int[] nodePred = new int[1024];
         private int[] nodeBits = new int[1024];
         private int nodes;
+        private int limit = PoolFloor;             // the pool size a collection runs at
+        private int[] forward = Array.Empty<int>();  // in a collection: where a node moved
 
         // The literal channel: a min-tree by match end + 1 over bits - end*literalBits.
         private readonly int half;
@@ -615,8 +628,6 @@ public static class LiteralCopySearch
         private bool hasBase;
         private int poolTop;
         private int sharedUpTo;                    // checkpoints the parse under way shares
-        private bool fresh;                        // the parse under way started from scratch
-        private int fullNodes;                     // the nodes a parse from scratch takes
 
         internal Parser(int[] units, int unit, int window)
         {
@@ -628,8 +639,6 @@ public static class LiteralCopySearch
             int size = Math.Max(count, window) + 1;
             stateBits = new int[size];
             stateEnd = new int[size];
-            stateKind = new byte[size];
-            stateAux = new int[size];
             statePred = new int[size];
             stateNode = new int[size];
             litBits = new int[size];
@@ -681,8 +690,6 @@ public static class LiteralCopySearch
         {
             internal readonly int[] StateBits;
             internal readonly int[] StateEnd;
-            internal readonly byte[] StateKind;
-            internal readonly int[] StateAux;
             internal readonly int[] StatePred;
             internal readonly int[] StateNode;
             internal readonly int[] LitBits;
@@ -700,15 +707,13 @@ public static class LiteralCopySearch
             internal int ActivePrevCount;
             internal int ActiveCurCount;
             internal int RepableCount;
-            internal int Nodes;
+            internal int Position;
             internal bool Valid;
 
             internal Snapshot(int size, int count)
             {
                 StateBits = new int[size];
                 StateEnd = new int[size];
-                StateKind = new byte[size];
-                StateAux = new int[size];
                 StatePred = new int[size];
                 StateNode = new int[size];
                 LitBits = new int[size];
@@ -750,7 +755,6 @@ public static class LiteralCopySearch
                 slot--;
             }
             sharedUpTo = slot;
-            fresh = slot == 0;
             forced = dictionary;
             int start = slot * checkpoint;
             if (slot == 0)
@@ -768,6 +772,10 @@ public static class LiteralCopySearch
             var meter = new ProgressMeter(ProgressMeter.TotalSteps(count, start, window), progress);
             for (int index = start; index < count; index++)
             {
+                if (nodes > limit)
+                {
+                    Collect(index);
+                }
                 if (index > 0 && index % checkpoint == 0)
                 {
                     TakeSnapshot(proposal[index / checkpoint], index);
@@ -813,12 +821,12 @@ public static class LiteralCopySearch
                         {
                             if (matchLength[offset] == 0)
                             {
-                                litNode[offset] = NewNode(Literals, litEnd[offset], 0,
-                                    stateEnd[offset], Node(offset), litBits[offset]);
+                                litNode[offset] = NewNode(litEnd[offset], 0,
+                                    Node(offset), litBits[offset]);
                             }
                             int bits = litBits[offset] + 1
                                 + EliasGammaBits(index - litEnd[offset]);
-                            SetState(offset, bits, index, Rep, 0, litNode[offset]);
+                            SetState(offset, bits, index, litNode[offset]); // a ring rep
                             if (bits < bestMatch)
                             {
                                 bestMatch = bits;
@@ -835,7 +843,8 @@ public static class LiteralCopySearch
                                 + EliasGammaBits(length - 1);
                             if (stateEnd[offset] != index || stateBits[offset] > bits)
                             {
-                                SetState(offset, bits, index, New, length, winNode[index - length]);
+                                // A ring match at a new offset.
+                                SetState(offset, bits, index, winNode[index - length]);
                                 if (bits < bestMatch)
                                 {
                                     bestMatch = bits;
@@ -920,8 +929,7 @@ public static class LiteralCopySearch
                 {
                     Debug.Assert(litCand != int.MaxValue, "a literal run always reaches");
                     optimalBits[index] = litCand;
-                    winNode[index] = NewNode(Literals, index, 0, litE, matchNodeSlot[litE + 1],
-                        litCand);
+                    winNode[index] = NewNode(index, 0, matchNodeSlot[litE + 1], litCand);
                 }
                 if (bestMatch != int.MaxValue)
                 {
@@ -961,8 +969,7 @@ public static class LiteralCopySearch
                             + between * literalBits;
                         litBits[distance] = bits;
                         litEnd[distance] = index - 1;
-                        litNode[distance] = NewNode(Literals, index - 1, 0, end,
-                            Node(distance), bits);
+                        litNode[distance] = NewNode(index - 1, 0, Node(distance), bits);
                     }
                 }
             }
@@ -976,7 +983,7 @@ public static class LiteralCopySearch
             if (litNode[distance] >= 0)
             {
                 int bits = litBits[distance] + 1 + EliasGammaBits(run);
-                SetState(distance, bits, index, CopyRep, 0, litNode[distance]);
+                SetState(distance, bits, index, litNode[distance]); // a rep of a copy
                 if (bits < bestMatch)
                 {
                     bestMatch = bits;
@@ -1017,7 +1024,8 @@ public static class LiteralCopySearch
                 }
                 if (stateEnd[distance] != index || stateBits[distance] > bits)
                 {
-                    SetState(distance, bits, index, Copy, length, winNode[index - length]);
+                    // A copy from the literal stream.
+                    SetState(distance, bits, index, winNode[index - length]);
                     if (bits < bestMatch)
                     {
                         bestMatch = bits;
@@ -1030,22 +1038,13 @@ public static class LiteralCopySearch
         /// <summary>
         /// Makes the parse just made the base for the ones to come: its
         /// checkpoints stand, its nodes are kept, and the next parse is
-        /// compared against its dictionary.
+        /// compared against its dictionary. The tails every accepted parse
+        /// leaves in the pool are collected with the rest, in place of the
+        /// full re-parse that compacted them.
         /// </summary>
         internal void Accept()
         {
             Settle();
-            if (poolTop > 4L * fullNodes + 65536)
-            {
-                // The pool has the tails of every parse since the last full
-                // one; one full parse of the base compacts it. The limit is a
-                // multiple of what a full parse takes, so the compaction does
-                // not find the pool too big again.
-                hasBase = false;
-                poolTop = 0;
-                Parse(baseForced);
-                Settle();
-            }
         }
 
         /// <summary>The parse just made becomes the base.</summary>
@@ -1058,10 +1057,6 @@ public static class LiteralCopySearch
             }
             baseForced = (bool[])forced.Clone();
             hasBase = true;
-            if (fresh)
-            {
-                fullNodes = nodes - poolTop;
-            }
             poolTop = nodes;
         }
 
@@ -1069,8 +1064,6 @@ public static class LiteralCopySearch
         {
             Array.Copy(stateBits, into.StateBits, stateBits.Length);
             Array.Copy(stateEnd, into.StateEnd, stateEnd.Length);
-            Array.Copy(stateKind, into.StateKind, stateKind.Length);
-            Array.Copy(stateAux, into.StateAux, stateAux.Length);
             Array.Copy(statePred, into.StatePred, statePred.Length);
             Array.Copy(stateNode, into.StateNode, stateNode.Length);
             Array.Copy(litBits, into.LitBits, litBits.Length);
@@ -1088,7 +1081,7 @@ public static class LiteralCopySearch
             into.ActivePrevCount = activePrevCount;
             into.ActiveCurCount = activeCurCount;
             into.RepableCount = repableCount;
-            into.Nodes = nodes;
+            into.Position = position;
             into.Valid = true;
         }
 
@@ -1097,8 +1090,6 @@ public static class LiteralCopySearch
             nodes = poolTop;
             Array.Copy(from.StateBits, stateBits, stateBits.Length);
             Array.Copy(from.StateEnd, stateEnd, stateEnd.Length);
-            Array.Copy(from.StateKind, stateKind, stateKind.Length);
-            Array.Copy(from.StateAux, stateAux, stateAux.Length);
             Array.Copy(from.StatePred, statePred, statePred.Length);
             Array.Copy(from.StateNode, stateNode, stateNode.Length);
             Array.Copy(from.LitBits, litBits, litBits.Length);
@@ -1146,10 +1137,9 @@ public static class LiteralCopySearch
             nodes = poolTop;
             // The fake block every chain hangs from: one unit back, ending
             // before the stream, costing -1 so the first flag is free.
-            int root = NewNode(New, -1, Optimizer.InitialOffset, 0, -1, -1);
+            int root = NewNode(-1, Optimizer.InitialOffset, -1, -1);
             stateBits[Optimizer.InitialOffset] = -1;
             stateEnd[Optimizer.InitialOffset] = -1;
-            stateKind[Optimizer.InitialOffset] = New;
             stateNode[Optimizer.InitialOffset] = root;
             matchNodeSlot[0] = root;
             Update(0, (long)(literalBits - 1) << 32);
@@ -1186,12 +1176,10 @@ public static class LiteralCopySearch
             return size;
         }
 
-        private void SetState(int idx, int bits, int end, byte kind, int aux, int pred)
+        private void SetState(int idx, int bits, int end, int pred)
         {
             stateBits[idx] = bits;
             stateEnd[idx] = end;
-            stateKind[idx] = kind;
-            stateAux[idx] = aux;
             statePred[idx] = pred;
             stateNode[idx] = -1;
             if (idx > window && !inRepable[idx])
@@ -1206,31 +1194,213 @@ public static class LiteralCopySearch
         {
             if (stateNode[idx] < 0)
             {
-                stateNode[idx] = NewNode(stateKind[idx], stateEnd[idx],
-                    idx <= window ? idx : -idx, stateAux[idx], statePred[idx], stateBits[idx]);
+                stateNode[idx] = NewNode(stateEnd[idx], idx <= window ? idx : -idx,
+                    statePred[idx], stateBits[idx]);
             }
             return stateNode[idx];
         }
 
-        private int NewNode(byte kind, int end, int offset, int aux, int pred, int bits)
+        /// <summary>
+        /// Writes one block of a chain. A literal run stands at an offset of
+        /// zero and every match and copy at one that is not, so the rebuild
+        /// reads the kind off the offset and the pool does not keep it.
+        /// </summary>
+        private int NewNode(int end, int offset, int pred, int bits)
         {
-            if (nodes == nodeKind.Length)
+            if (nodes == nodeEnd.Length)
             {
                 int grown = nodes * 2;
-                Array.Resize(ref nodeKind, grown);
                 Array.Resize(ref nodeEnd, grown);
                 Array.Resize(ref nodeOffset, grown);
-                Array.Resize(ref nodeAux, grown);
                 Array.Resize(ref nodePred, grown);
                 Array.Resize(ref nodeBits, grown);
             }
-            nodeKind[nodes] = kind;
             nodeEnd[nodes] = end;
             nodeOffset[nodes] = offset;
-            nodeAux[nodes] = aux;
             nodePred[nodes] = pred;
             nodeBits[nodes] = bits;
             return nodes++;
+        }
+
+        /// <summary>
+        /// Keeps the nodes the parse can still reach, at index <paramref name="at"/>,
+        /// and moves them to the front of the pool. The roots are the arrays
+        /// that name a node: each state, its literal run and its
+        /// predecessor, the winner and the best match at every position the
+        /// parse has written, and the checkpoints of the base and of the
+        /// parse under way. A node's predecessor is a node made before it
+        /// and so stands below it, so one pass over the pool in order
+        /// renumbers a node after the predecessor it names.
+        /// </summary>
+        /// <remarks>
+        /// The base's nodes stand below <c>poolTop</c> and a restore drops
+        /// what is above, so the pass counts what it keeps from below it and
+        /// <c>poolTop</c> follows.
+        /// </remarks>
+        private void Collect(int at)
+        {
+            if (forward.Length < nodes)
+            {
+                forward = new int[nodes];
+            }
+            Array.Fill(forward, -1, 0, nodes);
+            MarkNodes(stateNode, stateNode.Length);
+            MarkRuns(matchLength, litNode);
+            MarkPreds(stateEnd, statePred);
+            MarkNodes(winNode, at);
+            MarkNodes(matchNodeSlot, at + 1);
+            foreach (Snapshot snapshot in baseline)
+            {
+                if (snapshot.Valid)
+                {
+                    MarkSnapshot(snapshot);
+                }
+            }
+            for (int k = sharedUpTo + 1; k <= at / checkpoint && k < proposal.Length; k++)
+            {
+                MarkSnapshot(proposal[k]);
+            }
+
+            int kept = 0;
+            int top = 0;
+            for (int n = 0; n < nodes; n++)
+            {
+                if (forward[n] != PoolMarked)
+                {
+                    forward[n] = -1;
+                    continue;
+                }
+                forward[n] = kept;
+                int pred = nodePred[n];
+                if (pred >= 0)
+                {
+                    pred = forward[pred];
+                }
+                nodeEnd[kept] = nodeEnd[n];
+                nodeOffset[kept] = nodeOffset[n];
+                nodePred[kept] = pred;
+                nodeBits[kept] = nodeBits[n];
+                kept++;
+                if (n < poolTop)
+                {
+                    top = kept;
+                }
+            }
+
+            MoveNodes(stateNode, stateNode.Length);
+            MoveNodes(litNode, litNode.Length);
+            MoveNodes(statePred, statePred.Length);
+            MoveNodes(winNode, winNode.Length);
+            MoveNodes(matchNodeSlot, matchNodeSlot.Length);
+            foreach (Snapshot snapshot in baseline)
+            {
+                if (snapshot.Valid)
+                {
+                    MoveSnapshot(snapshot);
+                }
+            }
+            for (int k = sharedUpTo + 1; k <= at / checkpoint && k < proposal.Length; k++)
+            {
+                MoveSnapshot(proposal[k]);
+            }
+            nodes = kept;
+            poolTop = top;
+            limit = Math.Max(PoolFloor, PoolGrowth * kept);
+            if (nodeEnd.Length > 2 * limit)
+            {
+                // The pool grew for a parse that kept far more than this
+                // one. The arrays come back to the bound, since what a run
+                // needs at its widest is what it asks the machine for.
+                Array.Resize(ref nodeEnd, limit);
+                Array.Resize(ref nodeOffset, limit);
+                Array.Resize(ref nodePred, limit);
+                Array.Resize(ref nodeBits, limit);
+                forward = Array.Empty<int>();
+            }
+        }
+
+        /// <summary>Keeps a node and every node below it in its chain.</summary>
+        private void Mark(int id)
+        {
+            for (int n = id; n >= 0 && n < nodes && forward[n] != PoolMarked; n = nodePred[n])
+            {
+                forward[n] = PoolMarked;
+            }
+        }
+
+        /// <summary>Keeps every chain the first <paramref name="upTo"/> slots of an array name.</summary>
+        private void MarkNodes(int[] ids, int upTo)
+        {
+            for (int i = 0; i < upTo; i++)
+            {
+                Mark(ids[i]);
+            }
+        }
+
+        /// <summary>
+        /// Keeps the literal run of every distance with a match run in
+        /// progress. A distance between runs names the run of an older one,
+        /// which the run it starts next replaces before anything reads it.
+        /// </summary>
+        private void MarkRuns(int[] lengths, int[] ids)
+        {
+            for (int idx = 0; idx < lengths.Length; idx++)
+            {
+                if (lengths[idx] > 0)
+                {
+                    Mark(ids[idx]);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Keeps the predecessor of every state that stands, which is a node
+        /// where the state itself has none yet.
+        /// </summary>
+        private void MarkPreds(int[] ends, int[] preds)
+        {
+            for (int idx = 0; idx < ends.Length; idx++)
+            {
+                if (ends[idx] != None)
+                {
+                    Mark(preds[idx]);
+                }
+            }
+        }
+
+        private void MarkSnapshot(Snapshot s)
+        {
+            MarkNodes(s.StateNode, s.StateNode.Length);
+            MarkRuns(s.MatchLength, s.LitNode);
+            MarkPreds(s.StateEnd, s.StatePred);
+            MarkNodes(s.WinNode, s.Position);
+            MarkNodes(s.MatchNodeSlot, s.Position + 1);
+        }
+
+        /// <summary>
+        /// Renumbers what a collection kept, and blanks what it dropped: a
+        /// slot past what a parse has written names a node from an older
+        /// parse, which is written again before it is read.
+        /// </summary>
+        private void MoveNodes(int[] ids, int upTo)
+        {
+            for (int i = 0; i < upTo; i++)
+            {
+                int id = ids[i];
+                if (id >= 0)
+                {
+                    ids[i] = id < forward.Length ? forward[id] : -1;
+                }
+            }
+        }
+
+        private void MoveSnapshot(Snapshot s)
+        {
+            MoveNodes(s.StateNode, s.StateNode.Length);
+            MoveNodes(s.LitNode, s.LitNode.Length);
+            MoveNodes(s.StatePred, s.StatePred.Length);
+            MoveNodes(s.WinNode, s.WinNode.Length);
+            MoveNodes(s.MatchNodeSlot, s.MatchNodeSlot.Length);
         }
 
         private Block Rebuild(int last)
@@ -1244,8 +1414,7 @@ public static class LiteralCopySearch
             for (int i = order.Count - 2; i >= 0; i--)
             {
                 int node = order[i];
-                chain = new Block(nodeBits[node], nodeEnd[node],
-                    nodeKind[node] == Literals ? 0 : nodeOffset[node], chain);
+                chain = new Block(nodeBits[node], nodeEnd[node], nodeOffset[node], chain);
             }
             return chain;
         }

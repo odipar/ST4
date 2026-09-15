@@ -31,12 +31,6 @@ import (
 const (
 	searchNone = math.MinInt32
 
-	ckLiterals byte = 0
-	ckRep      byte = 1 // a ring match reusing the last offset
-	ckNew      byte = 2 // a ring match at a new offset
-	ckCopy     byte = 3 // a copy from the literal stream
-	ckCopyRep  byte = 4 // a rep of the last copy, after literals
-
 	// searchHole is the widest hole between dictionary runs the opening
 	// passes fill, in units.
 	searchHole = 3
@@ -51,6 +45,15 @@ const (
 	// searchPatience is the steps without a new best before the search
 	// returns to the best.
 	searchPatience = 2000
+
+	// copyPoolGrowth is the pool a collection allows against what it kept,
+	// and copyPoolFloor the smallest pool it collects at.
+	copyPoolGrowth = 2
+	copyPoolFloor  = 1 << 20
+
+	// poolMarked stands in the forwarding table for a node a collection
+	// keeps and has not moved yet.
+	poolMarked = -2
 )
 
 func gammaBits(value int) int {
@@ -516,11 +519,13 @@ type copyParser struct {
 	reach       int
 
 	// Per state index: the best chain ending in a match or copy there, its
-	// cost, end and how to rebuild it, and its literal extension.
+	// cost, end and how to rebuild it, and its literal extension. A state is
+	// a ring match at the last offset or at a new one, a copy from the
+	// literal stream, or a rep of the last copy after literals; what it is
+	// stands in the chain rather than in the state, since the parse weighs
+	// the four by their bits alone.
 	stateBits   []int
 	stateEnd    []int
-	stateKind   []byte
-	stateAux    []int
 	statePred   []int
 	stateNode   []int
 	litBits     []int
@@ -563,13 +568,23 @@ type copyParser struct {
 	// trees spend four. Every value fits: an index and a length are bounded
 	// by the unit count, an offset by the window, and the bits by the
 	// output a 32-bit count already bounds.
-	nodeKind   []byte
+	//
+	// The pool keeps what the parse can still reach. A parse of 48,063 units
+	// at a window of 32,512 makes 108 million nodes and ends with 1.26
+	// million of them reachable, and the opening passes reach 330 million
+	// against 6.4 million: the rest is a node each for a state the parse
+	// reached and left. A collection marks from the arrays that name a node,
+	// renumbers what it keeps into the front of the pool, and bounds the
+	// next collection at copyPoolGrowth times that. Ids move, and a parse
+	// decides on bits alone, so the bytes out are what they were.
 	nodeEnd    []int32
 	nodeOffset []int32
-	nodeAux    []int32
 	nodePred   []int32
 	nodeBits   []int32
 	nodes      int
+	limit      int     // the pool size a collection runs at
+	forward    []int32 // in a collection: where a node moved, or -1, or
+	//                    poolMarked for one marked and not yet moved
 
 	// The literal channel: a min-tree by match end + 1 over bits -
 	// end*literalBits.
@@ -588,9 +603,7 @@ type copyParser struct {
 	baseForced []bool
 	hasBase    bool
 	poolTop    int
-	sharedUpTo int  // checkpoints the parse under way shares
-	fresh      bool // the parse under way started from scratch
-	fullNodes  int  // the nodes a parse from scratch takes
+	sharedUpTo int // checkpoints the parse under way shares
 }
 
 func newCopyParser(units []uint32, unit, window int) *copyParser {
@@ -604,8 +617,6 @@ func newCopyParser(units []uint32, unit, window int) *copyParser {
 		reach:         MaxOffsetUnits(unit),
 		stateBits:     make([]int, size),
 		stateEnd:      make([]int, size),
-		stateKind:     make([]byte, size),
-		stateAux:      make([]int, size),
 		statePred:     make([]int, size),
 		stateNode:     make([]int, size),
 		litBits:       make([]int, size),
@@ -623,10 +634,9 @@ func newCopyParser(units []uint32, unit, window int) *copyParser {
 		activeCur:     make([]int, size),
 		repable:       make([]int, size),
 		inRepable:     make([]bool, size),
-		nodeKind:      make([]byte, 0, 1024),
+		limit:         copyPoolFloor,
 		nodeEnd:       make([]int32, 0, 1024),
 		nodeOffset:    make([]int32, 0, 1024),
-		nodeAux:       make([]int32, 0, 1024),
 		nodePred:      make([]int32, 0, 1024),
 		nodeBits:      make([]int32, 0, 1024),
 	}
@@ -664,8 +674,6 @@ func newCopyParser(units []uint32, unit, window int) *copyParser {
 type copySnapshot struct {
 	stateBits       []int
 	stateEnd        []int
-	stateKind       []byte
-	stateAux        []int
 	statePred       []int
 	stateNode       []int
 	litBits         []int
@@ -683,7 +691,7 @@ type copySnapshot struct {
 	activePrevCount int
 	activeCurCount  int
 	repableCount    int
-	nodes           int
+	position        int
 	valid           bool
 }
 
@@ -691,8 +699,6 @@ func newCopySnapshot(size, count int) *copySnapshot {
 	return &copySnapshot{
 		stateBits:     make([]int, size),
 		stateEnd:      make([]int, size),
-		stateKind:     make([]byte, size),
-		stateAux:      make([]int, size),
 		statePred:     make([]int, size),
 		stateNode:     make([]int, size),
 		litBits:       make([]int, size),
@@ -731,7 +737,6 @@ func (p *copyParser) parseReporting(dictionary []bool, progress bool) *Block {
 		slot--
 	}
 	p.sharedUpTo = slot
-	p.fresh = slot == 0
 	p.forced = dictionary
 	start := slot * p.checkpoint
 	if slot == 0 {
@@ -747,6 +752,9 @@ func (p *copyParser) parseReporting(dictionary []bool, progress bool) *Block {
 	}
 	meter := NewMeter(TotalSteps(p.count, start, p.window), progress)
 	for index := start; index < p.count; index++ {
+		if p.nodes > p.limit {
+			p.collect(index)
+		}
 		if index > 0 && index%p.checkpoint == 0 {
 			p.snapshot(p.proposal[index/p.checkpoint], index)
 		}
@@ -783,13 +791,12 @@ func (p *copyParser) parseReporting(dictionary []bool, progress bool) *Block {
 			if !literalOnly && index != 0 && value == p.units[index-offset] {
 				if p.litEnd[offset] != searchNone {
 					if p.matchLength[offset] == 0 {
-						p.litNode[offset] = p.newNode(ckLiterals,
-							p.litEnd[offset], 0, p.stateEnd[offset],
+						p.litNode[offset] = p.newNode(p.litEnd[offset], 0,
 							p.node(offset), p.litBits[offset])
 					}
 					bits := p.litBits[offset] + 1 +
 						gammaBits(index-p.litEnd[offset])
-					p.setState(offset, bits, index, ckRep, 0, p.litNode[offset])
+					p.setState(offset, bits, index, p.litNode[offset]) // a ring rep
 					if bits < p.bestMatch {
 						p.bestMatch = bits
 						p.bestMatchIdx = offset
@@ -803,8 +810,8 @@ func (p *copyParser) parseReporting(dictionary []bool, progress bool) *Block {
 					bits := p.optimalBits[index-length] + 3 + offsetCost(offset) +
 						gammaBits(length-1)
 					if p.stateEnd[offset] != index || p.stateBits[offset] > bits {
-						p.setState(offset, bits, index, ckNew, length,
-							p.winNode[index-length])
+						// A ring match at a new offset.
+						p.setState(offset, bits, index, p.winNode[index-length])
 						if bits < p.bestMatch {
 							p.bestMatch = bits
 							p.bestMatchIdx = offset
@@ -874,7 +881,7 @@ func (p *copyParser) parseReporting(dictionary []bool, progress bool) *Block {
 				panic("a literal run always reaches")
 			}
 			p.optimalBits[index] = litCand
-			p.winNode[index] = p.newNode(ckLiterals, index, 0, litE,
+			p.winNode[index] = p.newNode(index, 0,
 				p.matchNodeSlot[litE+1], litCand)
 		}
 		if p.bestMatch != math.MaxInt32 {
@@ -906,7 +913,7 @@ func (p *copyParser) visit(index, distance int) {
 					between*p.literalBits
 				p.litBits[distance] = bits
 				p.litEnd[distance] = index - 1
-				p.litNode[distance] = p.newNode(ckLiterals, index-1, 0, end,
+				p.litNode[distance] = p.newNode(index-1, 0,
 					p.node(distance), bits)
 			}
 		}
@@ -919,7 +926,7 @@ func (p *copyParser) visit(index, distance int) {
 	run := p.matchLength[distance]
 	if p.litNode[distance] >= 0 {
 		bits := p.litBits[distance] + 1 + gammaBits(run)
-		p.setState(distance, bits, index, ckCopyRep, 0, p.litNode[distance])
+		p.setState(distance, bits, index, p.litNode[distance]) // a rep of a copy
 		if bits < p.bestMatch {
 			p.bestMatch = bits
 			p.bestMatchIdx = distance
@@ -951,8 +958,8 @@ func (p *copyParser) visit(index, distance int) {
 			}
 		}
 		if p.stateEnd[distance] != index || p.stateBits[distance] > bits {
-			p.setState(distance, bits, index, ckCopy, length,
-				p.winNode[index-length])
+			// A copy from the literal stream.
+			p.setState(distance, bits, index, p.winNode[index-length])
 			if bits < p.bestMatch {
 				p.bestMatch = bits
 				p.bestMatchIdx = distance
@@ -963,19 +970,11 @@ func (p *copyParser) visit(index, distance int) {
 
 // accept makes the parse just made the base for the ones to come: its
 // checkpoints stand, its nodes are kept, and the next parse is compared
-// against its dictionary.
+// against its dictionary. The tails every accepted parse leaves in the pool
+// are collected with the rest, in place of the full re-parse that
+// compacted them.
 func (p *copyParser) accept() {
 	p.settle()
-	if p.poolTop > 4*p.fullNodes+65536 {
-		// The pool has the tails of every parse since the last full one;
-		// one full parse of the base compacts it. The limit is a multiple of
-		// what a full parse takes, so the compaction does not find the pool
-		// too big again.
-		p.hasBase = false
-		p.poolTop = 0
-		p.parse(p.baseForced)
-		p.settle()
-	}
 }
 
 // settle makes the parse just made the base.
@@ -988,17 +987,12 @@ func (p *copyParser) settle() {
 	}
 	p.baseForced = append([]bool(nil), p.forced...)
 	p.hasBase = true
-	if p.fresh {
-		p.fullNodes = p.nodes - p.poolTop
-	}
 	p.poolTop = p.nodes
 }
 
 func (p *copyParser) snapshot(into *copySnapshot, position int) {
 	copy(into.stateBits, p.stateBits)
 	copy(into.stateEnd, p.stateEnd)
-	copy(into.stateKind, p.stateKind)
-	copy(into.stateAux, p.stateAux)
 	copy(into.statePred, p.statePred)
 	copy(into.stateNode, p.stateNode)
 	copy(into.litBits, p.litBits)
@@ -1016,7 +1010,7 @@ func (p *copyParser) snapshot(into *copySnapshot, position int) {
 	into.activePrevCount = p.activePrevCount
 	into.activeCurCount = p.activeCurCount
 	into.repableCount = p.repableCount
-	into.nodes = p.nodes
+	into.position = position
 	into.valid = true
 }
 
@@ -1024,8 +1018,6 @@ func (p *copyParser) restore(from *copySnapshot) {
 	p.nodes = p.poolTop
 	copy(p.stateBits, from.stateBits)
 	copy(p.stateEnd, from.stateEnd)
-	copy(p.stateKind, from.stateKind)
-	copy(p.stateAux, from.stateAux)
 	copy(p.statePred, from.statePred)
 	copy(p.stateNode, from.stateNode)
 	copy(p.litBits, from.litBits)
@@ -1075,10 +1067,9 @@ func (p *copyParser) prepare() {
 	p.nodes = p.poolTop
 	// The fake block every chain hangs from: one unit back, ending before
 	// the stream, costing -1 so the first flag is free.
-	root := p.newNode(ckNew, -1, InitialOffset, 0, -1, -1)
+	root := p.newNode(-1, InitialOffset, -1, -1)
 	p.stateBits[InitialOffset] = -1
 	p.stateEnd[InitialOffset] = -1
-	p.stateKind[InitialOffset] = ckNew
 	p.stateNode[InitialOffset] = root
 	p.matchNodeSlot[0] = root
 	p.update(0, int64(p.literalBits-1)<<32)
@@ -1111,11 +1102,9 @@ func (p *copyParser) extendBestLength(size, target, index int) int {
 	return size
 }
 
-func (p *copyParser) setState(idx, bits, end int, kind byte, aux, pred int) {
+func (p *copyParser) setState(idx, bits, end, pred int) {
 	p.stateBits[idx] = bits
 	p.stateEnd[idx] = end
-	p.stateKind[idx] = kind
-	p.stateAux[idx] = aux
 	p.statePred[idx] = pred
 	p.stateNode[idx] = -1
 	if idx > p.window && !p.inRepable[idx] {
@@ -1132,29 +1121,173 @@ func (p *copyParser) node(idx int) int {
 		if idx > p.window {
 			offset = -idx
 		}
-		p.stateNode[idx] = p.newNode(p.stateKind[idx], p.stateEnd[idx], offset,
-			p.stateAux[idx], p.statePred[idx], p.stateBits[idx])
+		p.stateNode[idx] = p.newNode(p.stateEnd[idx], offset,
+			p.statePred[idx], p.stateBits[idx])
 	}
 	return p.stateNode[idx]
 }
 
-func (p *copyParser) newNode(kind byte, end, offset, aux, pred, bits int) int {
-	if p.nodes == len(p.nodeKind) {
-		p.nodeKind = append(p.nodeKind, 0)
+// newNode writes one block of a chain. A literal run stands at an offset of
+// zero and every match and copy at one that is not, so the rebuild reads the
+// kind off the offset and the pool does not keep it.
+func (p *copyParser) newNode(end, offset, pred, bits int) int {
+	if p.nodes == len(p.nodeEnd) {
 		p.nodeEnd = append(p.nodeEnd, 0)
 		p.nodeOffset = append(p.nodeOffset, 0)
-		p.nodeAux = append(p.nodeAux, 0)
 		p.nodePred = append(p.nodePred, 0)
 		p.nodeBits = append(p.nodeBits, 0)
 	}
-	p.nodeKind[p.nodes] = kind
 	p.nodeEnd[p.nodes] = int32(end)
 	p.nodeOffset[p.nodes] = int32(offset)
-	p.nodeAux[p.nodes] = int32(aux)
 	p.nodePred[p.nodes] = int32(pred)
 	p.nodeBits[p.nodes] = int32(bits)
 	p.nodes++
 	return p.nodes - 1
+}
+
+// collect keeps the nodes the parse can still reach, at index at, and moves
+// them to the front of the pool. The roots are the arrays that name a node:
+// each state, its literal run and its predecessor, the winner and the best
+// match at every position the parse has written, and the checkpoints of the
+// base and of the parse under way. A node's predecessor is a node made
+// before it and so stands below it, so one pass over the pool in order
+// renumbers a node after the predecessor it names.
+//
+// The base's nodes stand below poolTop and a restore drops what is above,
+// so the pass counts what it keeps from below it and poolTop follows.
+func (p *copyParser) collect(at int) {
+	if len(p.forward) < p.nodes {
+		p.forward = make([]int32, p.nodes)
+	}
+	for i := 0; i < p.nodes; i++ {
+		p.forward[i] = -1
+	}
+	p.markNodes(p.stateNode)
+	p.markRuns(p.matchLength, p.litNode)
+	p.markPreds(p.stateEnd, p.statePred)
+	p.markNodes(p.winNode[:at])
+	p.markNodes(p.matchNodeSlot[:at+1])
+	for _, snapshot := range p.base {
+		if snapshot.valid {
+			p.markSnapshot(snapshot)
+		}
+	}
+	for k := p.sharedUpTo + 1; k <= at/p.checkpoint && k < len(p.proposal); k++ {
+		p.markSnapshot(p.proposal[k])
+	}
+
+	kept := 0
+	top := 0
+	for n := 0; n < p.nodes; n++ {
+		if p.forward[n] != poolMarked {
+			p.forward[n] = -1
+			continue
+		}
+		p.forward[n] = int32(kept)
+		pred := p.nodePred[n]
+		if pred >= 0 {
+			pred = p.forward[pred]
+		}
+		p.nodeEnd[kept] = p.nodeEnd[n]
+		p.nodeOffset[kept] = p.nodeOffset[n]
+		p.nodePred[kept] = pred
+		p.nodeBits[kept] = p.nodeBits[n]
+		kept++
+		if n < p.poolTop {
+			top = kept
+		}
+	}
+
+	p.moveNodes(p.stateNode)
+	p.moveNodes(p.litNode)
+	p.moveNodes(p.statePred)
+	p.moveNodes(p.winNode)
+	p.moveNodes(p.matchNodeSlot)
+	for _, s := range p.base {
+		if s.valid {
+			p.moveSnapshot(s)
+		}
+	}
+	for k := p.sharedUpTo + 1; k <= at/p.checkpoint && k < len(p.proposal); k++ {
+		p.moveSnapshot(p.proposal[k])
+	}
+	p.nodes = kept
+	p.poolTop = top
+	p.limit = max(copyPoolFloor, copyPoolGrowth*kept)
+	if cap(p.nodeEnd) > 2*p.limit {
+		// The pool grew for a parse that kept far more than this one. The
+		// arrays come back to the bound, since what a run needs at its
+		// widest is what it asks the operating system for.
+		p.nodeEnd = append(make([]int32, 0, p.limit), p.nodeEnd[:kept]...)
+		p.nodeOffset = append(make([]int32, 0, p.limit), p.nodeOffset[:kept]...)
+		p.nodePred = append(make([]int32, 0, p.limit), p.nodePred[:kept]...)
+		p.nodeBits = append(make([]int32, 0, p.limit), p.nodeBits[:kept]...)
+		p.forward = nil
+	}
+}
+
+// mark keeps a node and every node below it in its chain.
+func (p *copyParser) mark(id int) {
+	for n := id; n >= 0 && n < p.nodes && p.forward[n] != poolMarked; n = int(p.nodePred[n]) {
+		p.forward[n] = poolMarked
+	}
+}
+
+// markNodes keeps every chain an array names.
+func (p *copyParser) markNodes(ids []int) {
+	for _, id := range ids {
+		p.mark(id)
+	}
+}
+
+// markRuns keeps the literal run of every distance with a match run in
+// progress. A distance between runs names the run of an older one, which
+// the run it starts next replaces before anything reads it.
+func (p *copyParser) markRuns(lengths, ids []int) {
+	for idx, length := range lengths {
+		if length > 0 {
+			p.mark(ids[idx])
+		}
+	}
+}
+
+// markPreds keeps the predecessor of every state that stands, which is a
+// node where the state itself has none yet.
+func (p *copyParser) markPreds(ends, preds []int) {
+	for idx, end := range ends {
+		if end != searchNone {
+			p.mark(preds[idx])
+		}
+	}
+}
+
+func (p *copyParser) markSnapshot(s *copySnapshot) {
+	p.markNodes(s.stateNode)
+	p.markRuns(s.matchLength, s.litNode)
+	p.markPreds(s.stateEnd, s.statePred)
+	p.markNodes(s.winNode[:s.position])
+	p.markNodes(s.matchNodeSlot[:s.position+1])
+}
+
+// moveNodes renumbers what a collection kept, and blanks what it dropped:
+// a slot past what a parse has written names a node from an older parse,
+// which is written again before it is read.
+func (p *copyParser) moveNodes(ids []int) {
+	for i, id := range ids {
+		if id >= 0 && id < len(p.forward) {
+			ids[i] = int(p.forward[id])
+		} else if id >= 0 {
+			ids[i] = -1
+		}
+	}
+}
+
+func (p *copyParser) moveSnapshot(s *copySnapshot) {
+	p.moveNodes(s.stateNode)
+	p.moveNodes(s.litNode)
+	p.moveNodes(s.statePred)
+	p.moveNodes(s.winNode)
+	p.moveNodes(s.matchNodeSlot)
 }
 
 func (p *copyParser) rebuild(last int) *Block {
@@ -1165,12 +1298,8 @@ func (p *copyParser) rebuild(last int) *Block {
 	chain := &Block{Bits: -1, Index: -1, Offset: InitialOffset}
 	for i := len(order) - 2; i >= 0; i-- {
 		node := order[i]
-		offset := int(p.nodeOffset[node])
-		if p.nodeKind[node] == ckLiterals {
-			offset = 0
-		}
 		chain = &Block{Bits: int(p.nodeBits[node]), Index: int(p.nodeEnd[node]),
-			Offset: offset, Chain: chain}
+			Offset: int(p.nodeOffset[node]), Chain: chain}
 	}
 	return chain
 }

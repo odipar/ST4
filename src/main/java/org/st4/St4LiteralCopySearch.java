@@ -32,12 +32,6 @@ public final class St4LiteralCopySearch {
 
     private static final int NONE = Integer.MIN_VALUE;
 
-    private static final byte LITERALS = 0;
-    private static final byte REP = 1;          // a ring match reusing the last offset
-    private static final byte NEW = 2;          // a ring match at a new offset
-    private static final byte COPY = 3;         // a copy from the literal stream
-    private static final byte COPYREP = 4;      // a rep of the last copy, after literals
-
     /**
      * Holes of up to this many units between dictionary runs are filled in
      * the opening passes.
@@ -53,6 +47,15 @@ public final class St4LiteralCopySearch {
 
     /** Steps without a new best before the search returns to the best. */
     private static final int PATIENCE = 2000;
+
+    /**
+     * The pool a collection allows against what it kept, the smallest pool
+     * it collects at, and what stands in the forwarding table for a node it
+     * keeps and has not moved yet.
+     */
+    private static final int POOL_GROWTH = 2;
+    private static final int POOL_FLOOR = 1 << 20;
+    private static final int POOL_MARKED = -2;
 
     private St4LiteralCopySearch() {}
 
@@ -480,11 +483,13 @@ public final class St4LiteralCopySearch {
         private final int reach;
 
         // Per state index: the best chain ending in a match or copy there,
-        // its cost, end and how to rebuild it, and its literal extension.
+        // its cost, end and how to rebuild it, and its literal extension. A
+        // state is a ring match at the last offset or at a new one, a copy
+        // from the literal stream, or a rep of the last copy after literals;
+        // what it is stands in the chain rather than in the state, since the
+        // parse weighs the four by their bits alone.
         private final int[] stateBits;
         private final int[] stateEnd;
-        private final byte[] stateKind;
-        private final int[] stateAux;
         private final int[] statePred;
         private final int[] stateNode;
         private final int[] litBits;
@@ -521,14 +526,22 @@ public final class St4LiteralCopySearch {
         private int bestMatchIdx;
         private int bestLengthSize;
 
-        // The node pool.
-        private byte[] nodeKind = new byte[1024];
+        // The node pool, which keeps what the parse can still reach. A
+        // parse of 48,063 units at a window of 32,512 makes 108 million
+        // nodes and ends with 1.26 million of them reachable, and the
+        // opening passes reach 330 million against 6.4 million: the rest is
+        // a node each for a state the parse reached and left. A collection
+        // marks from the arrays that name a node, renumbers what it keeps
+        // into the front of the pool, and bounds the next collection at
+        // POOL_GROWTH times that. Ids move, and a parse decides on bits
+        // alone, so the bytes out are what they were.
         private int[] nodeEnd = new int[1024];
         private int[] nodeOffset = new int[1024];
-        private int[] nodeAux = new int[1024];
         private int[] nodePred = new int[1024];
         private int[] nodeBits = new int[1024];
         private int nodes;
+        private int limit = POOL_FLOOR;         // the pool size a collection runs at
+        private int[] forward = new int[0];     // in a collection: where a node moved
 
         // The literal channel: a min-tree by match end + 1 over bits - end*literalBits.
         private final int half;
@@ -547,8 +560,6 @@ public final class St4LiteralCopySearch {
         private boolean hasBase;
         private int poolTop;
         private int sharedUpTo;                    // checkpoints the parse under way shares
-        private boolean fresh;                     // the parse under way started from scratch
-        private int fullNodes;                     // the nodes a parse from scratch takes
 
         Parser(int[] units, int unit, int window) {
             this.units = units;
@@ -559,8 +570,6 @@ public final class St4LiteralCopySearch {
             int size = Math.max(count, window) + 1;
             stateBits = new int[size];
             stateEnd = new int[size];
-            stateKind = new byte[size];
-            stateAux = new int[size];
             statePred = new int[size];
             stateNode = new int[size];
             litBits = new int[size];
@@ -607,8 +616,6 @@ public final class St4LiteralCopySearch {
         private static final class Snapshot {
             final int[] stateBits;
             final int[] stateEnd;
-            final byte[] stateKind;
-            final int[] stateAux;
             final int[] statePred;
             final int[] stateNode;
             final int[] litBits;
@@ -626,14 +633,12 @@ public final class St4LiteralCopySearch {
             int activePrevCount;
             int activeCurCount;
             int repableCount;
-            int nodes;
+            int position;
             boolean valid;
 
             Snapshot(int size, int count) {
                 stateBits = new int[size];
                 stateEnd = new int[size];
-                stateKind = new byte[size];
-                stateAux = new int[size];
                 statePred = new int[size];
                 stateNode = new int[size];
                 litBits = new int[size];
@@ -672,7 +677,6 @@ public final class St4LiteralCopySearch {
                 slot--;
             }
             sharedUpTo = slot;
-            fresh = slot == 0;
             forced = dictionary;
             int start = slot * checkpoint;
             if (slot == 0) {
@@ -686,6 +690,9 @@ public final class St4LiteralCopySearch {
             var meter = new ProgressMeter(ProgressMeter.totalSteps(count, start, window),
                     progress);
             for (int index = start; index < count; index++) {
+                if (nodes > limit) {
+                    collect(index);
+                }
                 if (index > 0 && index % checkpoint == 0) {
                     snapshot(proposal[index / checkpoint], index);
                 }
@@ -722,12 +729,12 @@ public final class St4LiteralCopySearch {
                     if (!literalOnly && index != 0 && value == units[index - offset]) {
                         if (litEnd[offset] != NONE) {
                             if (matchLength[offset] == 0) {
-                                litNode[offset] = newNode(LITERALS, litEnd[offset], 0,
-                                        stateEnd[offset], node(offset), litBits[offset]);
+                                litNode[offset] = newNode(litEnd[offset], 0,
+                                        node(offset), litBits[offset]);
                             }
                             int bits = litBits[offset] + 1
                                     + eliasGammaBits(index - litEnd[offset]);
-                            setState(offset, bits, index, REP, 0, litNode[offset]);
+                            setState(offset, bits, index, litNode[offset]); // a ring rep
                             if (bits < bestMatch) {
                                 bestMatch = bits;
                                 bestMatchIdx = offset;
@@ -741,7 +748,8 @@ public final class St4LiteralCopySearch {
                                     + (offset > St4Format.BYTE_OFFSET_LIMIT ? 16 : 8)
                                     + eliasGammaBits(length - 1);
                             if (stateEnd[offset] != index || stateBits[offset] > bits) {
-                                setState(offset, bits, index, NEW, length, winNode[index - length]);
+                                // A ring match at a new offset.
+                                setState(offset, bits, index, winNode[index - length]);
                                 if (bits < bestMatch) {
                                     bestMatch = bits;
                                     bestMatchIdx = offset;
@@ -811,7 +819,7 @@ public final class St4LiteralCopySearch {
                 } else {
                     assert litCand != Integer.MAX_VALUE : "a literal run always reaches";
                     optimalBits[index] = litCand;
-                    winNode[index] = newNode(LITERALS, index, 0, litE, matchNodeSlot[litE + 1],
+                    winNode[index] = newNode(index, 0, matchNodeSlot[litE + 1],
                             litCand);
                 }
                 if (bestMatch != Integer.MAX_VALUE) {
@@ -846,7 +854,7 @@ public final class St4LiteralCopySearch {
                                 + between * literalBits;
                         litBits[distance] = bits;
                         litEnd[distance] = index - 1;
-                        litNode[distance] = newNode(LITERALS, index - 1, 0, end,
+                        litNode[distance] = newNode(index - 1, 0,
                                 node(distance), bits);
                     }
                 }
@@ -858,7 +866,7 @@ public final class St4LiteralCopySearch {
             int run = matchLength[distance];
             if (litNode[distance] >= 0) {
                 int bits = litBits[distance] + 1 + eliasGammaBits(run);
-                setState(distance, bits, index, COPYREP, 0, litNode[distance]);
+                setState(distance, bits, index, litNode[distance]); // a rep of a copy
                 if (bits < bestMatch) {
                     bestMatch = bits;
                     bestMatchIdx = distance;
@@ -893,7 +901,8 @@ public final class St4LiteralCopySearch {
                     }
                 }
                 if (stateEnd[distance] != index || stateBits[distance] > bits) {
-                    setState(distance, bits, index, COPY, length, winNode[index - length]);
+                    // A copy from the literal stream.
+                    setState(distance, bits, index, winNode[index - length]);
                     if (bits < bestMatch) {
                         bestMatch = bits;
                         bestMatchIdx = distance;
@@ -905,20 +914,12 @@ public final class St4LiteralCopySearch {
         /**
          * Makes the parse just made the base for the ones to come: its
          * checkpoints stand, its nodes are kept, and the next parse is
-         * compared against its dictionary.
+         * compared against its dictionary. The tails every accepted parse
+         * leaves in the pool are collected with the rest, in place of the
+         * full re-parse that compacted them.
          */
         void accept() {
             settle();
-            if (poolTop > 4L * fullNodes + 65536) {
-                // The pool has the tails of every parse since the last full
-                // one; one full parse of the base compacts it. The limit is a
-                // multiple of what a full parse takes, so the compaction does
-                // not find the pool too big again.
-                hasBase = false;
-                poolTop = 0;
-                parse(baseForced);
-                settle();
-            }
         }
 
         /** The parse just made becomes the base. */
@@ -931,17 +932,12 @@ public final class St4LiteralCopySearch {
             }
             baseForced = forced.clone();
             hasBase = true;
-            if (fresh) {
-                fullNodes = nodes - poolTop;
-            }
             poolTop = nodes;
         }
 
         private void snapshot(Snapshot into, int position) {
             System.arraycopy(stateBits, 0, into.stateBits, 0, stateBits.length);
             System.arraycopy(stateEnd, 0, into.stateEnd, 0, stateEnd.length);
-            System.arraycopy(stateKind, 0, into.stateKind, 0, stateKind.length);
-            System.arraycopy(stateAux, 0, into.stateAux, 0, stateAux.length);
             System.arraycopy(statePred, 0, into.statePred, 0, statePred.length);
             System.arraycopy(stateNode, 0, into.stateNode, 0, stateNode.length);
             System.arraycopy(litBits, 0, into.litBits, 0, litBits.length);
@@ -959,7 +955,7 @@ public final class St4LiteralCopySearch {
             into.activePrevCount = activePrevCount;
             into.activeCurCount = activeCurCount;
             into.repableCount = repableCount;
-            into.nodes = nodes;
+            into.position = position;
             into.valid = true;
         }
 
@@ -967,8 +963,6 @@ public final class St4LiteralCopySearch {
             nodes = poolTop;
             System.arraycopy(from.stateBits, 0, stateBits, 0, stateBits.length);
             System.arraycopy(from.stateEnd, 0, stateEnd, 0, stateEnd.length);
-            System.arraycopy(from.stateKind, 0, stateKind, 0, stateKind.length);
-            System.arraycopy(from.stateAux, 0, stateAux, 0, stateAux.length);
             System.arraycopy(from.statePred, 0, statePred, 0, statePred.length);
             System.arraycopy(from.stateNode, 0, stateNode, 0, stateNode.length);
             System.arraycopy(from.litBits, 0, litBits, 0, litBits.length);
@@ -1012,10 +1006,9 @@ public final class St4LiteralCopySearch {
             nodes = poolTop;
             // The fake block every chain hangs from: one unit back, ending
             // before the stream, costing -1 so the first flag is free.
-            int root = newNode(NEW, -1, St4Optimizer.INITIAL_OFFSET, 0, -1, -1);
+            int root = newNode(-1, St4Optimizer.INITIAL_OFFSET, -1, -1);
             stateBits[St4Optimizer.INITIAL_OFFSET] = -1;
             stateEnd[St4Optimizer.INITIAL_OFFSET] = -1;
-            stateKind[St4Optimizer.INITIAL_OFFSET] = NEW;
             stateNode[St4Optimizer.INITIAL_OFFSET] = root;
             matchNodeSlot[0] = root;
             update(0, ((long) (literalBits - 1) << 32));
@@ -1044,11 +1037,9 @@ public final class St4LiteralCopySearch {
             return size;
         }
 
-        private void setState(int idx, int bits, int end, byte kind, int aux, int pred) {
+        private void setState(int idx, int bits, int end, int pred) {
             stateBits[idx] = bits;
             stateEnd[idx] = end;
-            stateKind[idx] = kind;
-            stateAux[idx] = aux;
             statePred[idx] = pred;
             stateNode[idx] = -1;
             if (idx > window && !inRepable[idx]) {
@@ -1060,29 +1051,183 @@ public final class St4LiteralCopySearch {
         /** The state's node, made when first needed. */
         private int node(int idx) {
             if (stateNode[idx] < 0) {
-                stateNode[idx] = newNode(stateKind[idx], stateEnd[idx],
-                        idx <= window ? idx : -idx, stateAux[idx], statePred[idx], stateBits[idx]);
+                stateNode[idx] = newNode(stateEnd[idx], idx <= window ? idx : -idx,
+                        statePred[idx], stateBits[idx]);
             }
             return stateNode[idx];
         }
 
-        private int newNode(byte kind, int end, int offset, int aux, int pred, int bits) {
-            if (nodes == nodeKind.length) {
+        /**
+         * Writes one block of a chain. A literal run stands at an offset of
+         * zero and every match and copy at one that is not, so the rebuild
+         * reads the kind off the offset and the pool does not keep it.
+         */
+        private int newNode(int end, int offset, int pred, int bits) {
+            if (nodes == nodeEnd.length) {
                 int grown = nodes * 2;
-                nodeKind = Arrays.copyOf(nodeKind, grown);
                 nodeEnd = Arrays.copyOf(nodeEnd, grown);
                 nodeOffset = Arrays.copyOf(nodeOffset, grown);
-                nodeAux = Arrays.copyOf(nodeAux, grown);
                 nodePred = Arrays.copyOf(nodePred, grown);
                 nodeBits = Arrays.copyOf(nodeBits, grown);
             }
-            nodeKind[nodes] = kind;
             nodeEnd[nodes] = end;
             nodeOffset[nodes] = offset;
-            nodeAux[nodes] = aux;
             nodePred[nodes] = pred;
             nodeBits[nodes] = bits;
             return nodes++;
+        }
+
+        /**
+         * Keeps the nodes the parse can still reach, at index {@code at},
+         * and moves them to the front of the pool. The roots are the arrays
+         * that name a node: each state, its literal run and its predecessor,
+         * the winner and the best match at every position the parse has
+         * written, and the checkpoints of the base and of the parse under
+         * way. A node's predecessor is a node made before it and so stands
+         * below it, so one pass over the pool in order renumbers a node
+         * after the predecessor it names.
+         *
+         * <p>The base's nodes stand below {@code poolTop} and a restore
+         * drops what is above, so the pass counts what it keeps from below
+         * it and {@code poolTop} follows.
+         */
+        private void collect(int at) {
+            if (forward.length < nodes) {
+                forward = new int[nodes];
+            }
+            Arrays.fill(forward, 0, nodes, -1);
+            markNodes(stateNode, stateNode.length);
+            markRuns(matchLength, litNode);
+            markPreds(stateEnd, statePred);
+            markNodes(winNode, at);
+            markNodes(matchNodeSlot, at + 1);
+            for (Snapshot snapshot : base) {
+                if (snapshot.valid) {
+                    markSnapshot(snapshot);
+                }
+            }
+            for (int k = sharedUpTo + 1; k <= at / checkpoint && k < proposal.length; k++) {
+                markSnapshot(proposal[k]);
+            }
+
+            int kept = 0;
+            int top = 0;
+            for (int n = 0; n < nodes; n++) {
+                if (forward[n] != POOL_MARKED) {
+                    forward[n] = -1;
+                    continue;
+                }
+                forward[n] = kept;
+                int pred = nodePred[n];
+                if (pred >= 0) {
+                    pred = forward[pred];
+                }
+                nodeEnd[kept] = nodeEnd[n];
+                nodeOffset[kept] = nodeOffset[n];
+                nodePred[kept] = pred;
+                nodeBits[kept] = nodeBits[n];
+                kept++;
+                if (n < poolTop) {
+                    top = kept;
+                }
+            }
+
+            moveNodes(stateNode, stateNode.length);
+            moveNodes(litNode, litNode.length);
+            moveNodes(statePred, statePred.length);
+            moveNodes(winNode, winNode.length);
+            moveNodes(matchNodeSlot, matchNodeSlot.length);
+            for (Snapshot snapshot : base) {
+                if (snapshot.valid) {
+                    moveSnapshot(snapshot);
+                }
+            }
+            for (int k = sharedUpTo + 1; k <= at / checkpoint && k < proposal.length; k++) {
+                moveSnapshot(proposal[k]);
+            }
+            nodes = kept;
+            poolTop = top;
+            limit = Math.max(POOL_FLOOR, POOL_GROWTH * kept);
+            if (nodeEnd.length > 2 * limit) {
+                // The pool grew for a parse that kept far more than this
+                // one. The arrays come back to the bound, since what a run
+                // needs at its widest is what it asks the machine for.
+                nodeEnd = Arrays.copyOf(nodeEnd, limit);
+                nodeOffset = Arrays.copyOf(nodeOffset, limit);
+                nodePred = Arrays.copyOf(nodePred, limit);
+                nodeBits = Arrays.copyOf(nodeBits, limit);
+                forward = new int[0];
+            }
+        }
+
+        /** Keeps a node and every node below it in its chain. */
+        private void mark(int id) {
+            for (int n = id; n >= 0 && n < nodes && forward[n] != POOL_MARKED;
+                    n = nodePred[n]) {
+                forward[n] = POOL_MARKED;
+            }
+        }
+
+        /** Keeps every chain the first {@code upTo} slots of an array name. */
+        private void markNodes(int[] ids, int upTo) {
+            for (int i = 0; i < upTo; i++) {
+                mark(ids[i]);
+            }
+        }
+
+        /**
+         * Keeps the literal run of every distance with a match run in
+         * progress. A distance between runs names the run of an older one,
+         * which the run it starts next replaces before anything reads it.
+         */
+        private void markRuns(int[] lengths, int[] ids) {
+            for (int idx = 0; idx < lengths.length; idx++) {
+                if (lengths[idx] > 0) {
+                    mark(ids[idx]);
+                }
+            }
+        }
+
+        /**
+         * Keeps the predecessor of every state that stands, which is a node
+         * where the state itself has none yet.
+         */
+        private void markPreds(int[] ends, int[] preds) {
+            for (int idx = 0; idx < ends.length; idx++) {
+                if (ends[idx] != NONE) {
+                    mark(preds[idx]);
+                }
+            }
+        }
+
+        private void markSnapshot(Snapshot s) {
+            markNodes(s.stateNode, s.stateNode.length);
+            markRuns(s.matchLength, s.litNode);
+            markPreds(s.stateEnd, s.statePred);
+            markNodes(s.winNode, s.position);
+            markNodes(s.matchNodeSlot, s.position + 1);
+        }
+
+        /**
+         * Renumbers what a collection kept, and blanks what it dropped: a
+         * slot past what a parse has written names a node from an older
+         * parse, which is written again before it is read.
+         */
+        private void moveNodes(int[] ids, int upTo) {
+            for (int i = 0; i < upTo; i++) {
+                int id = ids[i];
+                if (id >= 0) {
+                    ids[i] = id < forward.length ? forward[id] : -1;
+                }
+            }
+        }
+
+        private void moveSnapshot(Snapshot s) {
+            moveNodes(s.stateNode, s.stateNode.length);
+            moveNodes(s.litNode, s.litNode.length);
+            moveNodes(s.statePred, s.statePred.length);
+            moveNodes(s.winNode, s.winNode.length);
+            moveNodes(s.matchNodeSlot, s.matchNodeSlot.length);
         }
 
         private St4Block rebuild(int last) {
@@ -1093,8 +1238,7 @@ public final class St4LiteralCopySearch {
             St4Block chain = new St4Block(-1, -1, St4Optimizer.INITIAL_OFFSET, null);
             for (int i = order.size() - 2; i >= 0; i--) {
                 int node = order.get(i);
-                chain = new St4Block(nodeBits[node], nodeEnd[node],
-                        nodeKind[node] == LITERALS ? 0 : nodeOffset[node], chain);
+                chain = new St4Block(nodeBits[node], nodeEnd[node], nodeOffset[node], chain);
             }
             return chain;
         }

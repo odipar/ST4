@@ -694,11 +694,12 @@ records what the memory is spent on, since the first two answers were wrong.
 
 ## Verdict
 
-The search is sound and keeps almost none of it: after it returns, the
-heap has 1 MB. What it spends is churn. Packing `doc/research.md`, 41,743
-bytes, at `-k1 -c` allocates **33 GB** in total and asks the operating
-system for 15 GB, against a live set of about 5 GB. 98.2 per cent of every
-byte allocated is one function, `newNode`.
+The search is sound and keeps almost none of it: after it returns, the heap
+has 1 MB. What it spends is churn. The section below prices the pool itself
+and collects it: 6,472 MB becomes 1,386 MB, at the same bytes. Packing
+`doc/research.md`, 41,743 bytes, at `-k1 -c` allocates **33 GB** in total
+and asks the operating system for 15 GB, against a live set of about 5 GB.
+98.2 per cent of every byte allocated is one function, `newNode`.
 
 Java ends in `OutOfMemoryError` because the JVM caps the heap at a quarter
 of the machine, 4 GB of 16; Go has no cap and reaches 6.2 GB. The two write
@@ -762,14 +763,69 @@ at a ring of 960 bytes and a YMXR tune at 256. The unbounded case is a large
 input that compresses badly at the widest window the format has, which is
 outside what the search is for.
 
-## What is left to do
+## What the pool keeps
 
-The representation is what costs: a node a state against a winner a
-position. The two parsers beside it show the second works, and
-`rebuilder.resolveState` in optimize.go is what re-derives a state on
-demand, at 422 MB of the 31 GB. Bringing the copies search to it is a
-redesign of the parse, the checkpoints and the rebuild together, written to
-the same bytes out. It is not written here.
+The reading above priced the representation and left the pool alone. The
+pool was then measured: of the nodes one parse makes, almost none are
+reachable when it ends. This document at 48,063 units, `-k1 -c` at the
+default window, makes **108,501,869 nodes and ends with 1,262,957
+reachable**, 1.16 per cent; the opening passes make 330,000,707 and end
+with 6,394,183, 1.94 per cent. The pool grew for every one of them.
+
+So the pool collects. A collection marks from the arrays that name a node -
+each state, its literal run and its predecessor, the winner and the best
+match at every position the parse has written, and the checkpoints of the
+base and of the parse under way - renumbers what it marked into the front
+of the pool, and bounds the next collection at twice that. A node's
+predecessor is a node made before it, so one pass over the pool in order
+renumbers a node after the predecessor it names; the base's nodes stand
+below the top a restore drops to, and the pass counts them so the top
+follows.
+
+Ids move, and a parse weighs its candidates by their bits alone, so the
+bytes out are what they were. The node lost two of its six fields with the
+collection: the kind, which the rebuild reads off the offset, since a
+literal run stands at zero and a match or a copy never does, and the
+length, which the rebuild never reads. The two per-state arrays that fed
+them went with them.
+
+On this document, at `-k1 -c`:
+
+| | peak | seconds | bytes out |
+|---|---|---|---|
+| the pool as it was | 6,472 MB | 29.5 | 20,292 |
+| the pool collected | **1,386 MB** | **18.1** | 20,292 |
+
+The Java tools are where the reading began, and the heap they need is the
+figure that moved:
+
+| | the smallest -Xmx that packs it | seconds at -Xmx12g |
+|---|---|---|
+| the pool as it was | above 8 GB, packing at 12 GB | 34.8 |
+| the pool collected | **1 GB** | 29.9 |
+
+A search rather than the opening passes alone reads the same way: `-c20` at
+the default window reaches the same 21,328 bytes at a peak of 1,088 MB
+where it reached them at 5,869.
+
+Checked byte for byte: 88 runs over eight inputs and eleven flag settings
+against the packer before the change, 50 round trips through the
+decompressor, and the three trees against each other over the same matrix.
+
+## What is left, and where it stands
+
+A collection keeps 10.4 million nodes at its widest. **0.9 million of them
+are the parse's and 9.5 million the eight checkpoints'**: a checkpoint
+keeps the chain of every state a restart from it reads. Fewer checkpoints
+trade that against how far a parse re-runs, and the pool bound trades it
+against time - at 1.5 times what a collection keeps the peak is 1,191 MB
+and the run 20.9 seconds.
+
+The representation is what those chains are: a node a state against a
+winner a position. Re-deriving a state on demand, as optimize.go's
+`rebuilder.resolveState` does for the two parsers beside it, is still the
+way to be rid of them, and is still a redesign of the parse, the
+checkpoints and the rebuild together. It is not written here.
 
 # Is there a better algorithm at a ring of 256 bytes?
 
