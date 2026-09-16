@@ -122,7 +122,9 @@ Packed size in bytes and as a share of the input, the way the packers report
 it: smaller is better. Only ring decoders are compared - a stream that stays
 in one buffer has the whole window already. "Ring alone" is the
 parse at that ring size without copies, "with copies" the same ring with
-copies from the literal stream.
+copies from the literal stream. The prose corpus is README.md at 15,732
+bytes, which is what it ran to when this was measured; the file is shorter
+since its documents moved into doc/.
 
 At k = 1:
 
