@@ -206,7 +206,7 @@ literal_source:
 copy_slow:                              ; any n; the subs are already done
         moveq   #15,d5                  ; d5 = n&15, partial-pass dispatch
         and.w   d4,d5
-        lsr.w   #4,d4                   ; d4 = n>>4 full passes
+        sub.w   d5,d4                   ; d4 = 16 * the full passes
         add.w   d5,d5
         neg.w   d5                      ; index = -2*(n&15)
         jmp     ladder_end(pc,d5.w)     ; pc-relative dispatch, no base register
@@ -216,10 +216,10 @@ ladder:
         ST4_MOVE
         .endr
 ladder_end:
-        subq.w  #1,d4                   ; full 16-unit passes; the fall-through
-        bcc.s   ladder                  ; costs 12 where dbf paid 14, and still
-        tst.w   d2                      ; leaves d4.w = $ffff for byte_offset
-        bmi.s   match_copied            ; an n>=17 match rejoins its epilogue
+        sub.w   #16,d4                  ; the passes counted in units, so the
+        bcc.s   ladder                  ; dispatch above needs no shift: four
+        tst.w   d2                      ; cycles a pass against ten a segment,
+        bmi.s   match_copied            ; and $fff0 is the $ffxx byte_offset reads
         movea.l a3,a2                   ; literals advance stream B
         tst.w   d1
         bne.s   resume_return           ; literals stop only on the budget
@@ -291,7 +291,7 @@ class_refill:
 
 byte_offset:
 ; The copy paths leave d4.w = $ffxx, the fast ladder's -2n dispatch index or
-; the counted terminator's $ffff, so one move.b makes $ff00 + (256-offset),
+; the counted terminator's $fff0, so one move.b makes $ff00 + (256-offset),
 ; which is -offset as a word. The bank bit moves it 256 units further.
         move.b  (a4)+,d4
         add.w   d0,d0                   ; class bit 2: the 256-unit bank

@@ -1552,51 +1552,69 @@ figure on this page and what 704 more bytes of RAM buy.
 - Wikipedia, *LZ77 and LZ78* -
   <https://en.wikipedia.org/wiki/LZ77_and_LZ78>
 
-# What ST4 at k = 1 is worth against ZX1
+# What ST4 is worth against ZX1
 
 ST4 keeps ZX1's three block types, so at `k` of 1 the two parse the same
-shape and what separates them is the encoding. The README said ST4 packs
-"to within a per cent of ZX1", which had no measurement behind it. This is
-the measurement.
+shape and what separates them is the encoding and the reach. The README
+said ST4 packs "to within a per cent of ZX1", which had no measurement
+behind it. This is the measurement, on the data ST4 ships.
+
+## The corpus
+
+The 120 chiptune columns of *What a ring is worth*: the three tone-period
+low bytes of real tunes, 898,830 bytes raw, which is what a DTX2 column is
+and what a YMXR tune reaches the chips through. The packer is zx1 v1.5,
+built from einar-saukas/ZX1's `src`, and the ST4 figure is the four streams
+as `st4` reports them, without the 28-byte header. Neither tool has copies
+here: ZX1 has none, so `st4 -c` would compare two different formats.
+
+An earlier version of this section measured eight files of this repository,
+three of them the decoders. Every decoder edit then moved the corpus and
+the section went stale; the columns do not move when the code does.
 
 ## The two windows
 
 ZX1 reaches 511 bytes back: `MAX_OFFSET_ZX1` in its `zx1.c`. ST4 at `-k1`
-alone reaches 32,512 (SPEC.md 4.3), sixty-four times further, so the two
-default settings compare windows rather than formats. `st4 -k1 -m511` is
-the comparison at one window.
+alone reaches 32,512 (SPEC.md 4.3), sixty-four times further. zx1 writes
+105,742 bytes over the corpus, and `st4 -k1 -mN` walks the curve past it:
 
-The packer is zx1 v1.5, built from einar-saukas/ZX1's `src`. The ST4 figure
-is the four streams as `st4` reports it, without the 28-byte header.
+| `st4 -k1 -mN` | the 120 columns | against zx1 |
+|---|---:|---:|
+| `-m128` | 171,418 | +62.1% |
+| `-m256` | 136,916 | +29.5% |
+| `-m448` | 108,970 | +3.1% |
+| `-m511`, where ZX1 stands | 105,908 | **+0.2%** |
+| `-m512` | 99,679 | -5.7% |
+| `-m1024` | 80,659 | -23.7% |
+| `-m2048` | 73,124 | -30.8% |
+| `-m4096` | 67,197 | -36.5% |
+| `-m8192` | 62,666 | -40.7% |
+| `-m32512`, the format's furthest | 61,900 | **-41.5%** |
 
-## The corpus
+**At ZX1's window the two are level**: 105,908 against 105,742, a sixth of
+a per cent apart. On this data the encoding ST4 changed is worth about what
+it costs, and the 41.5 per cent at the default setting is reach alone. ZX1
+is a 511-byte compressor.
 
-Eight files of this repository: the format, the three decoders, and the
-compressor and the copies search in each of the three trees. Prose, 68000
-assembly, Java, Go and C#. Three of them are sources this repository edits,
-so the raw column moves when they do and the section is measured again.
-None of them records a figure of this section,
-so writing the result down does not change what it was measured on, and the
-raw column is what `ConsistencyTest` reads back, so an input edited since
-fails the build rather than standing.
+## The cliff at 512
 
-| input | raw | zx1 | `-m511` | against zx1 |
-|---|---:|---:|---:|---:|
-| doc/SPEC.md | 8,103 | 4,542 | 4,279 | -5.8% |
-| 68k/ST4.S | 17,385 | 9,224 | 8,731 | -5.3% |
-| 68k/ST4_wrap.S | 16,527 | 8,885 | 8,368 | -5.8% |
-| 68k/ST4_ring.S | 19,530 | 10,127 | 9,551 | -5.7% |
-| src/main/java/org/st4/St4Compressor.java | 15,284 | 6,816 | 6,488 | -4.8% |
-| src/main/java/org/st4/St4LiteralCopySearch.java | 58,155 | 23,424 | 22,378 | -4.5% |
-| go/st4/literalcopy.go | 42,185 | 21,300 | 20,405 | -4.2% |
-| csharp/src/Nt4/LiteralCopySearch.cs | 61,730 | 24,677 | 23,568 | -4.5% |
-| the eight | 238,899 | 108,995 | **103,768** | **-4.8%** |
+One unit of reach is worth 6,229 bytes here, 5.9 per cent of the total:
 
-**At ZX1's window ST4 writes 4.8 per cent fewer bytes**, and no input is
-outside 4.2 to 5.8. Counting the 28-byte header and the padding between the
-streams, the eight containers are 104,016 bytes, 4.6 per cent below zx1.
+| window | the 120 columns | step |
+|---|---:|---:|
+| 509 | 105,921 | -14 |
+| 510 | 105,915 | -6 |
+| 511 | 105,908 | -7 |
+| 512 | **99,679** | **-6,229** |
+| 513 | 99,670 | -9 |
 
-## Where the 4.8 per cent comes from
+These columns repeat at a distance of exactly 512, so a window of 511
+misses the repeat and a window of 512 catches every one of them. It is the
+same knee *What a ring is worth* found from the other side, where 512 bytes
+reaches three quarters of what 960 does. A ring is chosen at 512 or above
+for this data, and ZX1 cannot be.
+
+## Where the encoding shows
 
 The two spend their bits on a new offset like this, read out of ZX1's
 `compress.c` and SPEC.md 3.5. ZX1's offset byte encodes the width along
@@ -1609,100 +1627,41 @@ byte after it.
 | 129 to 511 | flag, two bytes: 17 bits | flag, two class bits, one byte of C: 11 bits |
 
 ST4 pays two bits on every new offset and is repaid six on every one past
-128, so where the offsets fall decides it. Confined to the reach ZX1
-encodes in a single byte, `st4 -k1 -m128` writes 136,477 bytes over the
-eight, 25.2 per cent above zx1: most of the matches fall in the band from
-129 to 511, which is the band where ZX1 spends a second byte.
-
-## The window curve, and where ZX1 sits on it
-
-ZX1 stands at one point of this curve, since 511 bytes is the furthest it
-reaches. ST4 at `-mN` walks it:
-
-| `st4 -k1 -mN` | the eight inputs | against zx1 |
-|---|---:|---:|
-| `-m128` | 136,477 | +25.2% |
-| `-m256` | 119,720 | +9.8% |
-| `-m400` | 109,347 | +0.3% |
-| `-m416` | 108,443 | -0.5% |
-| `-m511`, where ZX1 stands | 103,768 | **-4.8%** |
-| `-m1024` | 95,358 | -12.5% |
-| `-m2048` | 87,487 | -19.7% |
-| `-m4096` | 80,321 | -26.3% |
-| `-m8192` | 75,641 | -30.6% |
-| `-m16384` | 72,683 | -33.3% |
-| `-m32512`, the format's furthest | 70,793 | **-35.0%** |
-
-**The curve is the whole of the 35 per cent.** ST4 at its widest against
-ZX1 compares a 32 KB window with a 511-byte one, and the 30 percentage
-points between `-m511` and `-m32512` are repeats further back than half a
-kilobyte: a name used fifty lines later, a paragraph reused a page later.
-ZX1 writes those as literals because it cannot reach them.
-
-**The encoding is worth about a fifth of the window.** ST4 breaks even with
-ZX1 between `-m400` and `-m416`, so it reaches the ratio ZX1 needs 511
-bytes for with about 405, which is the two class bits paid on every offset
-set against the byte that covers the whole 512-unit reach.
-
-Below 129 the trade runs the other way, and `-m128` is the one row where
-ST4 writes more: there every offset fits the single byte ZX1 spends, so
-ST4's two class bits are two bits a match on top of the same byte.
+128, so where the offsets fall decides it. On these columns the two balance,
+the repeat at 512 putting most offsets out of reach of either format at
+this window. On prose and source text, where offsets spread through the
+129 to 511 band, ST4 came out about five per cent ahead at the same window.
 
 ## The curve at a unit of 2 and 4
 
 ZX1 has no unit size, so at `k` of 2 or 4 the comparison is what ST4 pays
-for a decoder that runs half or a quarter as many operations. The same
-eight inputs, the window in bytes so the three lines meet, and the margin
-against zx1's 109,162 beside each:
+for a decoder that runs half or a quarter as many operations. The same 120
+columns, the window in bytes so the three lines meet, and the margin
+against zx1's 105,742 beside each:
 
 | window | `k` = 1 | `k` = 2 | `k` = 4 |
 |---|---:|---:|---:|
-| 128 bytes | 136,477 (+25.2%) | 173,207 (+58.9%) | 199,378 (+82.9%) |
-| 256 bytes | 119,720 (+9.8%) | 160,093 (+46.9%) | 192,584 (+76.7%) |
-| 512 bytes | 103,723 (-4.8%) | 146,268 (+34.2%) | 185,444 (+70.1%) |
-| 1,024 bytes | 95,358 (-12.5%) | 131,581 (+20.7%) | 177,577 (+62.9%) |
-| 2,048 bytes | 87,487 (-19.7%) | 120,171 (+10.3%) | 168,695 (+54.8%) |
-| 4,096 bytes | 80,321 (-26.3%) | 109,311 (+0.3%) | 161,701 (+48.4%) |
-| 8,192 bytes | 75,641 (-30.6%) | 101,332 (-7.0%) | 155,421 (+42.6%) |
-| 16,384 bytes | 72,683 (-33.3%) | 95,737 (-12.2%) | 151,016 (+38.6%) |
-| 32,512 bytes | 70,793 (-35.0%) | 92,550 (-15.1%) | 148,066 (+35.8%) |
+| 128 bytes | 171,418 (+62.1%) | 218,534 (+106.7%) | 312,500 (+195.5%) |
+| 256 bytes | 136,916 (+29.5%) | 176,931 (+67.3%) | 257,955 (+143.9%) |
+| 512 bytes | 99,679 (-5.7%) | 132,787 (+25.6%) | 197,242 (+86.5%) |
+| 1,024 bytes | 80,659 (-23.7%) | 109,981 (+4.0%) | 163,607 (+54.7%) |
+| 2,048 bytes | 73,124 (-30.8%) | 95,983 (-9.2%) | 147,518 (+39.5%) |
+| 4,096 bytes | 67,197 (-36.5%) | 88,423 (-16.4%) | 134,344 (+27.0%) |
+| 8,192 bytes | 62,666 (-40.7%) | 82,840 (-21.7%) | 125,268 (+18.5%) |
+| 32,512 bytes | 61,900 (-41.5%) | 81,883 (-22.6%) | 123,643 (+16.9%) |
 
-**The three curves are the same shape, displaced.** Each doubling of the
-window is worth about the same fraction at every unit size, so the unit is
-a multiplier on the whole curve rather than a change in what the window is
-worth. A unit of 2 needs 4,096 bytes of window to reach what ZX1 reaches
-with 511, and a unit of 4 reaches it at no window the format allows.
-
-**What the unit costs, at the widest window**: 30.8 per cent over `k` of 1
-for a unit of 2, and 109 per cent for a unit of 4. That is the trade
-SPEC.md 1.3 defines, and this corpus is prose and source text, which is the
-shape it costs most on. Two others for the range, at a window of 1,024
-bytes:
-
-| corpus | `k` = 2 over `k` = 1 | `k` = 4 over `k` = 1 |
-|---|---:|---:|
-| 256 KB of text | +36.1% | +76.5% |
-| 256 KB of arm64 code, four bytes an instruction | +15.5% | +41.6% |
-| the 120 chiptune columns, at 32,512 bytes | +32.3% | +99.7% |
-
-Machine code of one instruction width is where a unit costs least, and it
-halves the figure rather than turning it around: a unit above 1 writes more
-bytes on every corpus measured here, and buys operations rather than
-bytes. The arm64 slice is a build product of this repository's Go tree, so
-its exact bytes follow the toolchain that built it.
-
-**Where a wider unit does write less**, the input is one long repeat and the
-saving is in the lengths rather than the offsets: 100 KB of one byte packs
-to 12 bytes at `k` of 1 and 8 at `k` of 2, and a 128-byte period repeated to
-100 KB packs to 142 bytes at `k` of 1 and 135 at `k` of 4. Fewer units make
-every length smaller, and a gamma is shorter for it. An asset with that
-little in it is below the size where the choice of `k` decides anything.
+At the widest window a unit of 2 writes 32.3 per cent more bytes than a
+unit of 1 and a unit of 4 writes 99.7 per cent more. A unit above 1 buys
+operations rather than bytes (SPEC.md 1.3), and a column is byte-shaped, so
+it is the shape a wider unit costs most on. DTX2 packs a column at `k` of 2
+against a decode budget rather than a size target.
 
 ## What this does not measure
 
-One unit size, and a corpus of one repository's prose and code. A margin on
-a set of chiptune columns, which is what ships, would be a separate
-measurement, and at `k` of 2 or 4 there is no ZX1 to compare with.
+One kind of data, and no copies on either side: ZX1 has none, so `st4 -c`
+would compare two different formats rather than two encodings of one. What
+the copies search reaches for a small ring is *Can the search find better
+parses at a ring of 256 bytes?*
 
 `St4RoundTripTest` keeps the bound the recorded jx1 sizes support rather
 than this one: at `k` of 1 no input packs more than five per cent and eight
