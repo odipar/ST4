@@ -1689,6 +1689,13 @@ bytes on every corpus measured here, and buys operations rather than
 bytes. The arm64 slice is a build product of this repository's Go tree, so
 its exact bytes follow the toolchain that built it.
 
+**Where a wider unit does write less**, the input is one long repeat and the
+saving is in the lengths rather than the offsets: 100 KB of one byte packs
+to 12 bytes at `k` of 1 and 8 at `k` of 2, and a 128-byte period repeated to
+100 KB packs to 142 bytes at `k` of 1 and 135 at `k` of 4. Fewer units make
+every length smaller, and a gamma is shorter for it. An asset with that
+little in it is below the size where the choice of `k` decides anything.
+
 ## What this does not measure
 
 One unit size, and a corpus of one repository's prose and code. A margin on

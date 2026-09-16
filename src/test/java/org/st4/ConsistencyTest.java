@@ -127,6 +127,17 @@ final class ConsistencyTest {
                 }
             }
         }
+        // SPEC.md points at the clauses of this document by number alone, in brackets
+        Matcher inside = Pattern.compile("\\((\\d+\\.\\d+)(?:, (\\d+\\.\\d+))?"
+                + "(?:, (\\d+\\.\\d+))?\\)").matcher(read(SPEC));
+        while (inside.find()) {
+            for (int g = 1; g <= inside.groupCount(); g++) {
+                String cited = inside.group(g);
+                if (cited != null && !clauses.contains(cited)) {
+                    dangling.add("SPEC.md points at " + cited);
+                }
+            }
+        }
         assertTrue(dangling.isEmpty(), () -> String.join("\n", dangling)
                 + "\nSPEC.md numbers " + clauses);
     }

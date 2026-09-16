@@ -21,7 +21,7 @@ reader of the output reads it back.
 **1.3** The unit is a trade rather than a property of the data: an offset
 or a length that is not a multiple of `k` cannot be stored, so `k` of 2 or
 4 pays compression for speed. A file records the `k` it was packed at
-(1.6).
+(2.1).
 
 ## 2. The container
 
