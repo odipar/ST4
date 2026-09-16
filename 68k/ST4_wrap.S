@@ -112,64 +112,11 @@ ST4_WINDOW      equ     0
         .endif
         .endm
 
-; Jump table: bra.w keeps 4-byte slots (base+0/4). A counted ring has no
-; one-shot entry; the caller drains it through ST4_resume.
+; Jump table: slot 0 branches to ST4_init, which a stream needs once, and
+; slot 1 is ST4_resume itself, so a call lands on its first instruction
+; rather than on a branch to it. A counted ring has no one-shot entry; the
+; caller drains it through ST4_resume.
                 bra.w   ST4_init
-                bra.w   ST4_resume
-
-; ST4_init: a0 = A, a1 = first ring byte, a2 = B, a4 = C, a5 = D,
-; d3.w = N. Packs -ring_start.low and N above the common state; writes no
-; memory.
-ST4_init:
-        moveq   #0,d1
-        sub.w   a1,d1                   ; -ring_start.low, exact modulo 65536
-        swap    d1                      ; pack it high; remaining = 0
-; The initial offset lands in the low word after the swap, so it starts in the
-; high half: moveq would put -1 there at any unit size, a byte short at
-; k=2 and three at k=4, which shows on a stream whose first match reuses the
-; initial offset.
-        move.l  #(-ST4_UNIT)<<16,d2
-        move.w  d3,d2                   ; N lives below it for now
-        swap    d2                      ; N above, -INITIAL_OFFSET*UNIT below
-; One virtual 0 flag, then the empty sentinel. The first resume call runs a
-; zero-unit match segment through the normal path, remaining being zero, and
-; lands in match_transition, which shifts $4000 into $8000: the flag reads as
-; "begin literals" and the queue is the empty sentinel. So ST4_resume has no
-; first-call test.
-        move.w  #$4000,d0
-        .if ST4_WINDOW
-        lea     window_lea+2(pc),a3
-        move.w  d3,(a3)                 ; the copy source's displacement: N
-        neg.w   d3
-        lea     window_cmp+2(pc),a3
-        move.w  d3,(a3)                 ; the compare's immediate: -N
-        .endif
-        rts
-
-source_wrapped:
-        move.l  d2,d5
-        clr.w   d5
-        swap    d5                      ; zero-extend N from d2.high
-        adda.l  d5,a3                   ; raw source + N, back into the ring
-        bra.s   copy
-
-        .if ST4_WINDOW
-copy_source:                            ; the offset is beyond the window, so
-; the source is stream B, offset-M units behind the read pointer, which stays
-; where it is. Stream B never wraps, so none of the ring arithmetic applies.
-; The offset advances by what this segment copies: a copy the budget or the
-; ring end cuts continues where it stopped, and a rep after it starts past
-; it. It stays beyond the window, since a copy is shorter than its distance.
-window_lea:
-        lea     1024(a2),a3             ; patched by ST4_init to M*UNIT(a2),a3
-        adda.w  d2,a3                   ; + -offset*UNIT
-        .rept   ST4_UNIT
-        add.w   d4,d2                   ; -offset*UNIT += n*UNIT
-        .endr
-        bra.s   copy
-        .endif
-
-; ST4_resume: the state and d3.w = this call's budget in units. A call emits
 ; d3 units, the final call fewer, as O says; [old a1 .. new a1) is new output.
 ST4_resume:
         move.w  d3,d4                   ; seed n from the budget; a fresh state
@@ -205,7 +152,11 @@ window_cmp:
         cmp.w   d4,d5                   ; source units before the ring end
         bcc.s   source_wrapped
         move.w  d5,d4                   ; stop this segment at the source wrap
-        bra.s   source_wrapped
+source_wrapped:
+        move.l  d2,d5
+        clr.w   d5
+        swap    d5                      ; zero-extend N from d2.high
+        adda.l  d5,a3                   ; raw source + N, back into the ring
 
 copy:                                   ; MATCH copies only reach this entry
         sub.w   d4,d1                   ; subtract n from the operation
@@ -215,6 +166,24 @@ copy:                                   ; MATCH copies only reach this entry
         add.w   d4,d4
         neg.w   d4                      ; d4 = -2n is the dispatch index itself,
         jmp     fast_end(pc,d4.w)       ; and $ffxx for byte_offset afterwards
+
+        .if ST4_WINDOW
+copy_source:                            ; the offset is beyond the window, so
+; the source is stream B, offset-M units behind the read pointer, which stays
+; where it is. Stream B never wraps, so none of the ring arithmetic applies.
+; The offset advances by what this segment copies: a copy the budget or the
+; ring end cuts continues where it stopped, and a rep after it starts past
+; it. It stays beyond the window, since a copy is shorter than its distance.
+window_lea:
+        lea     1024(a2),a3             ; patched by ST4_init to M*UNIT(a2),a3
+        adda.w  d2,a3                   ; + -offset*UNIT
+        .rept   ST4_UNIT
+        add.w   d4,d2                   ; -offset*UNIT += n*UNIT
+        .endr
+        bra.s   copy
+        .endif
+
+; ST4_resume: the state and d3.w = this call's budget in units. A call emits
 fast_ladder:
 ; Sixteen unit moves: entry at fast_end-2k copies k units.
         .rept   16
@@ -258,16 +227,8 @@ ladder_end:
 literals_transition:
         add.w   d0,d0                   ; the flag after literals, no refill
         bcs.s   new_offset              ; 1: new offset
-        neg.w   d2                      ; a rep reuses the negated offset
-        bra.s   gamma_seed0
-
-match_next:                             ; a 0 flag after a match means literals
-        bne.s   begin_literals          ; - unless the queue reads zero, which
-        subq.w  #1,d1                   ; only a pinned one does: the repeat
-        bra.s   resume_fresh            ; re-arms 65535 units, budget willing
-
 begin_literals:
-        neg.w   d2                      ; positive lastOffset = literals
+        neg.w   d2                      ; switch between literals and a rep
 gamma_seed0:
         moveq   #0,d4                   ; remaining = gamma + 0; fall through
 
@@ -275,16 +236,22 @@ gamma_seed0:
 ; A gamma has an odd number of bits and one flag bit follows it, so a gamma
 ; starts at an even position and the queue, which empties every 16 bits, runs
 ; out only on a continuation bit. Data and flag reads need no refill check.
+; An empty queue sets carry, so a clear carry ends the gamma before the refill
+; test.
 get_gamma:
         addq.w  #1,d1
         add.w   d0,d0                   ; first continuation bit
-        beq.s   gamma_refill
         bcc.s   gamma_done
+        beq.s   gamma_refill
 gamma_loop:
         add.w   d0,d0                   ; data bit: never a refill
         addx.w  d1,d1                   ; value = value*2 + bit
         add.w   d0,d0                   ; continuation bit
-        beq.s   gamma_refill
+        bcc.s   gamma_done
+        bne.s   gamma_loop
+gamma_refill:
+        move.w  (a0)+,d0
+        addx.w  d0,d0
         bcs.s   gamma_loop
 gamma_done:
         add.w   d4,d1                   ; +1 only for a new-offset match
@@ -292,15 +259,13 @@ gamma_done:
         bne.w   segment                 ; the parse exit costs one branch
 parse_done:
         rts
-gamma_refill:
-        move.w  (a0)+,d0
-        addx.w  d0,d0
-        bcs.s   gamma_loop
-        bra.s   gamma_done
 
 match_transition:                       ; remaining == 0: parse after a match
         add.w   d0,d0                   ; the flag after a match, no refill
-        bcc.s   match_next              ; 0: literals, or the repeat's re-arm
+        bcs.s   new_offset
+        bne.s   begin_literals          ; 0: literals unless the queue is pinned
+        subq.w  #1,d1                   ; a repeat re-arms 65535 units
+        bra.s   resume_fresh
 
 new_offset:
 ; Two class bits: byte or word, then a byte offset's 256-unit bank or, for a
@@ -365,3 +330,28 @@ end_refill:
         move.w  (a0)+,d0
         addx.w  d0,d0
         bra.s   end_read
+
+; ST4_init: a0 = A, a1 = first ring byte, a2 = B, a4 = C, a5 = D,
+; d3.w = N. Packs -ring_start.low and N above the common state.
+ST4_init:
+        moveq   #0,d1
+        sub.w   a1,d1                   ; -ring_start.low, exact modulo 65536
+        swap    d1                      ; pack it high; remaining = 0
+; Pack N above the initial signed byte offset.
+        move.w  d3,d2
+        swap    d2
+        move.w  #-ST4_UNIT,d2
+; One virtual 0 flag, then the empty sentinel. The first resume call runs a
+; zero-unit match segment through the normal path, remaining being zero, and
+; lands in match_transition, which shifts $4000 into $8000: the flag reads as
+; "begin literals" and the queue is the empty sentinel. So ST4_resume has no
+; first-call test.
+        move.w  #$4000,d0
+        .if ST4_WINDOW
+        lea     window_lea+2(pc),a3
+        move.w  d3,(a3)                 ; the copy source's displacement: N
+        neg.w   d3
+        lea     window_cmp+2(pc),a3
+        move.w  d3,(a3)                 ; the compare's immediate: -N
+        .endif
+        rts

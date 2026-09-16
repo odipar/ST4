@@ -151,39 +151,11 @@ ST4_WINDOW      equ     0
         .endif
         .endm
 
-; Jump table: bra.w keeps the slots 4 bytes (base+0/4/8).
+; Jump table: slots 0 and 4 branch to ST4_init and ST4_decompress, which a
+; stream needs once each. Slot 8 is ST4_resume itself, so a call lands on
+; its first instruction rather than on a branch to it.
                 bra.w   ST4_init
                 bra.w   ST4_decompress
-                bra.w   ST4_resume
-
-; ST4_init: a0 = stream A, a1 = destination, a2 = stream B, a4 = stream C,
-; a5 = stream D, and in a build with ST4_WINDOW d3.w = the window in bytes,
-; M*ST4_UNIT; seeds d0/d1/d2.
-ST4_init:
-        moveq   #-ST4_UNIT,d2           ; -lastOffset*UNIT, INITIAL_OFFSET = 1
-        moveq   #0,d1                   ; remaining = 0
-        move.w  #$8000,d0               ; an empty bit queue: $8000 is the sentinel
-        .if ST4_WINDOW
-        lea     window_lea+2(pc),a3
-        move.w  d3,(a3)                 ; the copy source's displacement: M*UNIT
-        neg.w   d3
-        lea     window_cmp+2(pc),a3
-        move.w  d3,(a3)                 ; the compare's immediate: -M*UNIT
-        .endif
-        rts
-
-; ST4_decompress: a0/a1/a2/a4/a5 = streams A, destination, B, C and D, and
-; d3.w = the window in bytes in a build with ST4_WINDOW. Decodes until done
-; and returns with a1 at the end of the output. A repeating stream is never
-; done, so this call would never return.
-ST4_decompress:
-        bsr.s   ST4_init
-.drain:
-        moveq   #-1,d3                  ; budget = 65535 units; refill for more
-        bsr.s   ST4_resume
-        tst.w   d1
-        bne.s   .drain
-        rts
 
 ; ST4_resume: the state in a0/a1/a2/a4/a5/d0/d1/d2 and d3.w = this call's
 ; budget in units. Emits at most d3 units; d1.w = 0 means done.
@@ -381,3 +353,32 @@ arm_repeat:
         moveq   #0,d0
         subq.w  #1,d1                   ; remaining = 65535, from zero
         bra.w   resume_op               ; the budget may already be spent
+
+; ST4_init: a0 = stream A, a1 = destination, a2 = stream B, a4 = stream C,
+; a5 = stream D, and in a build with ST4_WINDOW d3.w = the window in bytes,
+; M*ST4_UNIT; seeds d0/d1/d2.
+ST4_init:
+        moveq   #-ST4_UNIT,d2           ; -lastOffset*UNIT, INITIAL_OFFSET = 1
+        moveq   #0,d1                   ; remaining = 0
+        move.w  #$8000,d0               ; an empty bit queue: $8000 is the sentinel
+        .if ST4_WINDOW
+        lea     window_lea+2(pc),a3
+        move.w  d3,(a3)                 ; the copy source's displacement: M*UNIT
+        neg.w   d3
+        lea     window_cmp+2(pc),a3
+        move.w  d3,(a3)                 ; the compare's immediate: -M*UNIT
+        .endif
+        rts
+
+; ST4_decompress: a0/a1/a2/a4/a5 = streams A, destination, B, C and D, and
+; d3.w = the window in bytes in a build with ST4_WINDOW. Decodes until done
+; and returns with a1 at the end of the output. A repeating stream is never
+; done, so this call would never return.
+ST4_decompress:
+        bsr.s   ST4_init
+.drain:
+        moveq   #-1,d3                  ; budget = 65535 units; refill for more
+        bsr.w   ST4_resume
+        tst.w   d1
+        bne.s   .drain
+        rts
