@@ -44,6 +44,37 @@ plain `vN.0` means the format.
 
 ## Published
 
+### go/v0.1.5, 2026-09-16
+
+<https://github.com/odipar/ST4/releases/tag/go/v0.1.5>, built from the
+commit tagged `go/v0.1.5`.
+
+Two of the three 68000 decoders enter on an instruction rather than on a
+branch, and ST4_wrap's shape is tightened further. The tools write the
+bytes v0.1.4 wrote: the Go module is v0.1.4's, no packer having changed.
+
+- The jump table keeps its slot addresses and changes what lives at the
+  last one. `ST4_resume`'s body starts where a `bra.w` to it stood, and
+  `ST4_init` is reached through slot 0. A caller's `jsr base+4`, or `+8`
+  under ST4.S, behaves as it did.
+- ST4.S is 5.86 per cent fewer cycles at a unit a call and ST4_wrap 5.73,
+  over the rig corpora at `k` of 2 through a 256-byte ring. ST4_ring is
+  left alone: freeing its slot pushes five per-segment branches out of
+  short range, and that costs more a segment than the slot saves a call.
+- ST4_wrap also packs `ST4_init`'s d2 in three instructions rather than
+  four, falls through where two `bra.s` stood, tests the gamma's end before
+  its refill, folds `match_next` into `match_transition`, and counts the
+  counted ladder's full passes in units.
+- Sizes: ST4.S 306, 308 and 310 bytes becomes 304, 306 and 308, and
+  ST4_wrap.S 324, 328 and 330 becomes 310, 314 and 316.
+
+`bench_decode.py` is new: it packs a corpus, assembles both builds of a
+decoder and counts every instruction on an MC68000 model, so decoders.md's
+figures are measured rather than recalled. research.md's ZX1 comparison
+measures the 120 chiptune columns now rather than eight files of this
+repository, three of them the decoders, which moved the corpus whenever the
+code moved.
+
 ### go/v0.1.4, 2026-09-16
 
 <https://github.com/odipar/ST4/releases/tag/go/v0.1.4>, built from the
