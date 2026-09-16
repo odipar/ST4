@@ -405,13 +405,15 @@ func (s *copySearch) seed(dictionary []bool) {
 	fill(dictionary, start, start+size, true)
 }
 
-// extend grows a literal run past its end by a few units.
+// extend grows a literal run past its end, by one to twenty units. Twenty
+// because a copy reads a source as long as itself: at eight the search
+// reaches the same parse and is slower over it (doc/research.md).
 func (s *copySearch) extend(dictionary []bool) {
 	run, ok := s.pickRun()
 	if !ok {
 		return
 	}
-	size := 1 + s.random.nextInt(8)
+	size := 1 + s.random.nextInt(20)
 	if s.random.nextBoolean() {
 		fill(dictionary, run[1]+1, min(s.count, run[1]+1+size), true)
 	} else {

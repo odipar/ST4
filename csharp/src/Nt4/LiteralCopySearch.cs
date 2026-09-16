@@ -448,7 +448,12 @@ public static class LiteralCopySearch
             Array.Fill(dictionary, true, start, size);
         }
 
-        /// <summary>Grows a literal run past its end by a few units.</summary>
+        /// <summary>
+        /// Grows a literal run past its end, by one to twenty units. Twenty
+        /// because a copy reads a source as long as itself: at eight the
+        /// search reaches the same parse and is slower over it
+        /// (doc/research.md).
+        /// </summary>
         private void Extend(bool[] dictionary)
         {
             int[]? run = PickRun();
@@ -456,7 +461,7 @@ public static class LiteralCopySearch
             {
                 return;
             }
-            int size = 1 + random.NextInt(8);
+            int size = 1 + random.NextInt(20);
             if (random.NextBoolean())
             {
                 int to = Math.Min(count, run[1] + 1 + size);
