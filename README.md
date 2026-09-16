@@ -30,14 +30,21 @@ stream refills a word at a time, and literals copy with `move.w` or
 them. Units make one operation move 2 or 4 bytes, so there are half or a
 quarter as many operations.
 
-The unit size `k` is a trade. An offset or length that is not a multiple of
-`k` cannot be stored, so `k` of 2 or 4 pays some compression for speed: a
-good trade on data that is itself word- or long-shaped - 68000 code, word
-tables, speedcode, register streams - and a bad one elsewhere, so `k` is
-chosen per asset and recorded in the header. At `k` of 1 and the 511-byte
-window ZX1 reaches, ST4 writes 4.8 per cent fewer bytes over eight inputs
-of prose and code ([research.md](doc/research.md), What ST4 at k = 1 is
-worth against ZX1).
+The unit size `k` buys operations with bytes. An offset or a length that is
+not a multiple of `k` cannot be stored, so a wider unit leaves the parse
+fewer matches to choose from and the file grows; in exchange the decoder
+runs half or a quarter as many operations. How much it grows follows the
+shape of the data: at a window of 1,024 bytes, over 256 KB of text `k` of 2
+writes 36 per cent more than `k` of 1 and `k` of 4 writes 77 per cent more,
+and over machine code of four bytes an instruction, 16 and 42 per cent.
+Word- and long-shaped data is where a wider unit costs least, not where it
+pays for itself. So `k` is chosen per asset, against a decode budget rather
+than a size target, and recorded in the header
+([research.md](doc/research.md), The curve at a unit of 2 and 4).
+
+At `k` of 1 and the 511-byte window ZX1 reaches, ST4 writes 4.8 per cent
+fewer bytes over eight inputs of prose and code
+([research.md](doc/research.md), What ST4 at k = 1 is worth against ZX1).
 
 A stream can loop: packed with a loop point, it plays its intro once and
 its loop forever through a ring far smaller than itself. And a stream
