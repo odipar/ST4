@@ -683,6 +683,33 @@ The floor is flat from free at two, seed at three to six, extend at ten to
 thirteen. At 300 steps the same odds are 0.66 per cent better and at 3,000
 they are 2.2, so what the weighting buys grows with the budget.
 
+## How far an extend reaches
+
+Extend grew a run by one to eight units. It is the move that lands the
+bits, so how far it reaches is the next figure to read:
+
+| extend grows by one plus a number below | bytes, 1,000 steps, 24 columns |
+|---|---|
+| 4 | 22,368 |
+| 8 (as it was) | 21,590 |
+| 12 | 21,586 |
+| 16 | 21,334 |
+| **20** | **21,296** |
+| 24 | 21,376 |
+| 32 | 21,558 |
+
+Over the whole corpus, twenty against eight: 118,458 bytes against 119,158
+at 1,000 steps a column, 0.59 per cent, and 120,442 against 121,188 at 300
+steps, 0.62. At 3,000 steps a column the two meet, 21,090 against 21,108
+over the subset, so what the reach buys is the same parse sooner rather
+than a parse the search would otherwise miss.
+
+Two moves beside it read flat. A sweep that grows every run as well as
+freeing and trimming it is worse, 21,568 against 21,296, since the steps it
+spends the random extend spends better. The size of a seed reads the same
+from 6 to 24 units, within four bytes over the subset, seed being four of
+twenty now and rarely accepted.
+
 ## Seeding by what copying wants does not pay
 
 The parse that lets a source be free names what copying would read from

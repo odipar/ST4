@@ -402,13 +402,18 @@ public final class St4LiteralCopySearch {
             Arrays.fill(dictionary, start, start + size, true);
         }
 
-        /** Grows a literal run past its end by a few units. */
+        /**
+         * Grows a literal run past its end, by one to twenty units. Twenty
+         * because a copy reads a source as long as itself: at eight the
+         * search reaches the same parse and is slower over it
+         * (doc/research.md).
+         */
         private void extend(boolean[] dictionary) {
             int[] run = pickRun();
             if (run == null) {
                 return;
             }
-            int size = 1 + random.nextInt(8);
+            int size = 1 + random.nextInt(20);
             if (random.nextBoolean()) {
                 Arrays.fill(dictionary, run[1] + 1, Math.min(count, run[1] + 1 + size), true);
             } else {
