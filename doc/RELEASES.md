@@ -44,6 +44,38 @@ plain `vN.0` means the format.
 
 ## Published
 
+### go/v0.1.4, 2026-09-16
+
+<https://github.com/odipar/ST4/releases/tag/go/v0.1.4>, built from the
+commit tagged `go/v0.1.4`.
+
+Two moves that read the parse for where to act, and an extend that reaches
+further. `st4 -c` without seconds writes the bytes v0.1.3 wrote; a search
+with seconds writes smaller files for the same seconds.
+
+- **source** grows the dictionary where a copy reads from. The parse names
+  the distance, so the move reads where to act rather than searching for
+  it. **merge** fills the gap between a literal run and the one after it,
+  up to 24 units, which a move that grows one run closes only by drawing
+  the whole gap at once.
+- The odds are now two, four, four, one, four and four of twenty - free,
+  seed, extend, trim, merge, source - with one for freeing and seeding
+  together, and an extend reaches twenty units where it reached eight.
+- 120 columns at a second a column through a ring of 256 bytes: 122,914
+  bytes against 124,404, 1.20 per cent smaller. Over 24 of them at three
+  seconds a column, 2.77 per cent.
+- Neither move pays alone (research.md, What the two are worth): a copy
+  reads further when its source is longer, and the source is longer when
+  the gap before it is closed.
+- Fifty runs of five inputs at ten flag settings write the bytes v0.1.3
+  wrote, the timed search apart.
+
+The repository around the tools took the shape DTX, YMXS and YMXR share:
+requirements, a specification, a glossary and this document, and a test
+that reads the figures and the pointers of each back out of the tree. It
+found that the differential rigs could not run from a clean checkout, and
+that the ZX1 comparison in the README had no measurement behind it.
+
 ### go/v0.1.3, 2026-09-16
 
 <https://github.com/odipar/ST4/releases/tag/go/v0.1.3>, built from
