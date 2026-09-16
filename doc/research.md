@@ -467,11 +467,28 @@ about 16 of them: seven percent.
 
 ### Why it was left alone
 
-Seven percent of a decode that is itself a small part of a frame. One column
-is refilled per row, and at a ring of 120 a refill parses 0.66 operations on
-average, so a 50 Hz frame of 160,000 cycles spends about 153 of them in ST4.
-The change would save about 11. The costliest frame parses eight operations
-and would save 128.
+Seven percent of a decode that is itself a small part of a frame. DTX2
+refills one column a row over a period of P rows, so a frame runs one
+refill of P times the width over `k` units (DTX's abi.md 4). At the rings
+a column is packed for, 960 bytes ordinarily and 256 at the least, and a
+tune of 25 to 32 columns, that budget is 15 or 16 units.
+
+The operations a refill parses were read right: over the 120 columns at a
+ring of 960 a 15-unit refill parses 0.69 of them, 21.7 units to an
+operation. What a refill costs was read as 153 cycles, which is the parse
+of those operations and leaves out the fifteen units the refill copies and
+the prologue it runs a segment. `bench_decode.py` counts the whole of it:
+
+| ring | a refill | mean | median | p99 | worst |
+|---|---|---:|---:|---:|---:|
+| 256 bytes | 16 units | 730 | 522 | 1,914 | 2,722 |
+| 512 bytes | 16 units | 639 | 406 | 1,912 | 2,718 |
+| 960 bytes | 15 units | **566** | 394 | 1,754 | **2,530** |
+
+So a 50 Hz frame of 160,000 cycles spends about 566 of them in ST4 at the
+ordinary ring, a third of a per cent, and 2,530 in the costliest, 1.6 per
+cent. Seven per cent of those is 40 cycles a frame and 177 in the worst,
+where this section first read 11 and 128.
 
 In bytes, the change lands on a resident total the ring change has already
 cut. A tune with its rings goes from 43,528 bytes at a ring of 960 to 24,456
