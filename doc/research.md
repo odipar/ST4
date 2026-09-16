@@ -1569,23 +1569,37 @@ the comparison at one window.
 The packer is zx1 v1.5, built from einar-saukas/ZX1's `src`. The ST4 figure
 is the four streams as `st4` reports it, without the 28-byte header.
 
-| input | raw | zx1 | `-m511` | against zx1 | `-k1` alone |
-|---|---:|---:|---:|---:|---:|
-| README.md | 5,474 | 3,537 | 3,367 | -4.8% | 2,890 |
-| doc/SPEC.md | 8,103 | 4,542 | 4,279 | -5.8% | 3,686 |
-| doc/research.md | 74,822 | 44,746 | 42,326 | -5.4% | 30,460 |
-| 68k/ST4.S | 17,274 | 9,120 | 8,630 | -5.4% | 6,398 |
-| St4Compressor.java | 15,284 | 6,816 | 6,488 | -4.8% | 4,655 |
-| the five | 120,957 | 68,761 | **65,090** | **-5.3%** | **48,089** |
+## The corpus
 
-**At ZX1's window ST4 writes 5.3 per cent fewer bytes**, and no input is
-outside 4.8 to 5.8. At its default window it writes 30.1 per cent fewer,
-which is the window and not the format.
+Eight files of this repository: the format, the three decoders, and the
+compressor and the copies search in each of the three trees. Prose, 68000
+assembly, Java, Go and C#. None of them records a figure of this section,
+so writing the result down does not change what it was measured on, and the
+raw column is what `ConsistencyTest` reads back, so an input edited since
+fails the build rather than standing.
 
-## Where the 5.3 per cent comes from
+| input | raw | zx1 | `-m511` | against zx1 |
+|---|---:|---:|---:|---:|
+| doc/SPEC.md | 8,103 | 4,542 | 4,279 | -5.8% |
+| 68k/ST4.S | 17,274 | 9,120 | 8,630 | -5.4% |
+| 68k/ST4_wrap.S | 17,043 | 9,156 | 8,615 | -5.9% |
+| 68k/ST4_ring.S | 19,530 | 10,127 | 9,551 | -5.7% |
+| src/main/java/org/st4/St4Compressor.java | 15,284 | 6,816 | 6,488 | -4.8% |
+| src/main/java/org/st4/St4LiteralCopySearch.java | 58,155 | 23,424 | 22,378 | -4.5% |
+| go/st4/literalcopy.go | 42,185 | 21,300 | 20,405 | -4.2% |
+| csharp/src/Nt4/LiteralCopySearch.cs | 61,730 | 24,677 | 23,568 | -4.5% |
+| the eight | 239,304 | 109,162 | **103,914** | **-4.8%** |
+
+**At ZX1's window ST4 writes 4.8 per cent fewer bytes**, and no input is
+outside 4.2 to 5.9. Counting the 28-byte header and the padding between the
+streams, the eight containers are 104,168 bytes, 4.6 per cent below zx1.
+
+## Where the 4.8 per cent comes from
 
 The two spend their bits on a new offset like this, read out of ZX1's
-`compress.c` and SPEC.md 3.5:
+`compress.c` and SPEC.md 3.5. ZX1's offset byte encodes the width along
+with the offset: an even byte is the whole of it, an odd one has a second
+byte after it.
 
 | offset | zx1 | ST4 |
 |---|---|---|
@@ -1593,21 +1607,49 @@ The two spend their bits on a new offset like this, read out of ZX1's
 | 129 to 511 | flag, two bytes: 17 bits | flag, two class bits, one byte of C: 11 bits |
 
 ST4 pays two bits on every new offset and is repaid six on every one past
-128. The crossover is where the parse spends most of its offsets: confined
-to the reach ZX1 encodes in a single byte, `st4 -k1 -m128` writes 83,797
-bytes over the five, 21.9 per cent above zx1. The step from 128 to 511 is
-worth more to both than the two class bits cost.
+128, so where the offsets fall decides it. Confined to the reach ZX1
+encodes in a single byte, `st4 -k1 -m128` writes 136,699 bytes over the
+eight, 25.2 per cent above zx1: most of the matches fall in the band from
+129 to 511, which is the band where ZX1 spends a second byte.
 
-| ST4 at `k` = 1 | the five inputs | against zx1 |
+## The window curve, and where ZX1 sits on it
+
+ZX1 stands at one point of this curve, since 511 bytes is the furthest it
+reaches. ST4 at `-mN` walks it:
+
+| `st4 -k1 -mN` | the eight inputs | against zx1 |
 |---|---:|---:|
-| `-m128` | 83,797 | +21.9% |
-| `-m511` | 65,090 | -5.3% |
-| no `-m` | 48,089 | -30.1% |
+| `-m128` | 136,699 | +25.2% |
+| `-m256` | 119,906 | +9.8% |
+| `-m400` | 109,534 | +0.3% |
+| `-m416` | 108,625 | -0.5% |
+| `-m511`, where ZX1 stands | 103,914 | **-4.8%** |
+| `-m1024` | 95,422 | -12.6% |
+| `-m2048` | 87,490 | -19.9% |
+| `-m4096` | 80,323 | -26.4% |
+| `-m8192` | 75,682 | -30.7% |
+| `-m16384` | 72,818 | -33.3% |
+| `-m32512`, the format's furthest | 70,928 | **-35.0%** |
+
+**The curve is the whole of the 35 per cent.** ST4 at its widest against
+ZX1 compares a 32 KB window with a 511-byte one, and the 30 percentage
+points between `-m511` and `-m32512` are repeats further back than half a
+kilobyte: a name used fifty lines later, a paragraph reused a page later.
+ZX1 writes those as literals because it cannot reach them.
+
+**The encoding is worth about a fifth of the window.** ST4 breaks even with
+ZX1 between `-m400` and `-m416`, so it reaches the ratio ZX1 needs 511
+bytes for with about 405, which is the two class bits paid on every offset
+set against the byte that covers the whole 512-unit reach.
+
+Below 129 the trade runs the other way, and `-m128` is the one row where
+ST4 writes more: there every offset fits the single byte ZX1 spends, so
+ST4's two class bits are two bits a match on top of the same byte.
 
 ## What this does not measure
 
-Five inputs of prose, 68000 assembly and Java, at one unit size. A margin
-on a set of chiptune columns, which is what ships, would be a separate
+One unit size, and a corpus of one repository's prose and code. A margin on
+a set of chiptune columns, which is what ships, would be a separate
 measurement, and at `k` of 2 or 4 there is no ZX1 to compare with.
 
 `St4RoundTripTest` keeps the bound the recorded jx1 sizes support rather
