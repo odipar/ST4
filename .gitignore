@@ -15,9 +15,8 @@ target/
 csharp/**/bin/
 csharp/**/obj/
 
-### The Go tree and the releases it builds ###
+### The releases the Go tree builds ###
 dist/
-go/st4/**/data/*.bin
 
 ### The rigs under 68k/test/emu ###
 # the differential rigs cache packed corpora here
