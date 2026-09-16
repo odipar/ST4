@@ -622,6 +622,66 @@ beat the unpenalised optimum.
 - encode.su, *LZ style compression with static dictionary* -
   <https://encode.su/threads/2995-LZ-style-compression-with-static-Dictionary>
 
+# What a ring is worth, in bytes and in RAM
+
+The ring is how far back a match reads in the decoder's buffer, and it is
+the figure an asset chooses. This prices it over the corpus of 120 chiptune
+columns, 898,830 bytes raw, packed a column at a time at `-k2`. The bytes
+are the ST4 payload, without its 28-byte header.
+
+| ring | no copies | with copies | with copies, against 256 bytes |
+|---|---|---|---|
+| 256 bytes | 177,356 | 124,220 | - |
+| 384 bytes | 154,444 | 114,812 | -7.6% |
+| 512 bytes | 133,224 | **105,580** | **-15.0%** |
+| 640 bytes | 124,700 | 102,824 | -17.2% |
+| 960 bytes | 112,972 | 98,400 | -20.8% |
+| 2,048 bytes | 96,446 | 90,172 | -27.4% |
+
+**The curve is steep early.** Half the step from 256 bytes to 960 is there
+at 512, and three quarters of what 960 reaches. What a larger ring finds is
+a repeat further back than the ring before it could read: a chiptune column
+repeats at the scale of a pattern, tens to hundreds of frames.
+
+**Copies are worth more the smaller the ring**, which is what they are for:
+30 per cent at 256 bytes, 12.9 at 960, 6.5 at 2,048. A copy reaches past
+the ring into the literal stream, so it stands in for the ring the asset
+did not pay for.
+
+## What it costs
+
+Under DTX2 every column decodes through a ring of its own, so a tune of 30
+columns - 14 registers and four effects of four columns - pays the ring
+thirty times:
+
+| ring | the rings in RAM | over 256 bytes | the music |
+|---|---|---|---|
+| 256 bytes | 7.7 KB | - | - |
+| 384 bytes | 11.3 KB | 3.8 KB | -7.6% |
+| 512 bytes | 15.0 KB | 7.7 KB | -15.0% |
+| 640 bytes | 18.8 KB | 11.3 KB | -17.2% |
+| 960 bytes | 28.1 KB | 21.1 KB | -20.8% |
+
+Cycles a byte are the same at every ring: the decode is a block at a time,
+and a wider ring is memory rather than work.
+
+## Where it pays
+
+The rings are one workspace, which a set of tunes shares (BINARIES.md),
+while the saving is on every byte of music in the set. So the ring pays for
+itself at the size of the set rather than of a tune:
+
+| ring | the set it pays for itself at |
+|---|---|
+| 384 bytes | 51 KB packed |
+| 512 bytes | 51 KB |
+| 640 bytes | 67 KB |
+| 960 bytes | 102 KB |
+
+A single 6 KB tune at a 512-byte ring saves 0.9 KB of data and spends 7.7
+KB of rings. Ten of them behind one core save 9 KB for the same 7.7, and
+past twenty tunes the 960-byte ring is ahead of the 512.
+
 # Which of the search's moves pay
 
 The search proposes a move at fixed odds: free a literal run or part of
