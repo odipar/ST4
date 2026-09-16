@@ -44,7 +44,7 @@ loop is.
 | [`csharp/`](../csharp/README.md) | `nt4`, a .NET 10 port of the same classes and options |
 
 The three write the same bytes for the same input and flags, which
-`GoParityTest` reads back over three inputs at ten flag settings, and the
+`GoParityTest` reads back over four inputs at ten flag settings, and the
 C# suite over its corpora.
 
 ```sh
@@ -68,20 +68,27 @@ check the three against each other:
 - **St4Optimizer**, the readable reference. It tries every choice at every
   position and keeps the cheapest.
 - **St4FastOptimizer**, the same choices on plain arrays: the same bytes
-  out, measured 4 to 7 times faster.
+  out, measured 4 to 7 times faster on data that repeats at range, and no
+  faster on data that does not.
 - **St4EventOptimizer**, the default. It only works where a repeated
   stretch of data starts or ends, which on repetitive data happens
   thousands of times less often than the positions the others visit. Same
   packed size, not always the same bytes; it falls back to the fast one
   where the data repeats in stretches too short to profit.
 
-Measured on the optimizer alone:
+Measured on the optimizer alone, on corpora outside this repository:
 
 | corpus | reference | fast | event-driven |
 |---|---:|---:|---:|
 | 880 KB disk image, `-m1024`, k = 4 | 163 s | 37 s | 0.4 s |
 | 300 KB slice, full window, k = 4 | 24 s | 5.7 s | 0.12 s |
 | 32 KB of 68000 code, k = 1 | 9.8 s | 1.5 s | falls back to fast |
+
+The repetition separates the three, not the size.
+[research.md](research.md) measures them again on two corpora made from this
+repository: over 900 KB of its sources the three are within 12 per cent of
+one another, and over one 4 KB block repeated to the same length the event
+optimizer is 246 times the reference.
 
 ## The search
 
@@ -97,15 +104,19 @@ full-window parse, holes of a few units filled, shrunk to what is copied
 from, up to four times.
 
 `-cS` then searches over dictionaries for S seconds: a greedy sweep frees
-and trims every literal run, keeping what packs smaller, and moves free,
-seed, extend, trim, merge two runs or grow a run where a copy reads from,
-accepted when they pack smaller and by annealing when they do not, every
-step scored by what the compressor writes.
+and trims every literal run, keeping what packs smaller, and then steps at
+odds of two, four, four, one, four and four of twenty - free a run, seed
+literals, extend a run, trim a run, merge two runs, grow a run where a copy
+reads from - with one left for freeing and seeding together. A step is
+accepted when it packs smaller and by annealing when it does not, and every
+step is scored by what the compressor writes.
 
 **St4LiteralCopyOracle** tries every parse on inputs of a dozen units;
-against it the opening passes are within a per cent of the optimum and the
-search reaches it on 59 of 60. [research.md](research.md) reads what the
-search leaves, what each move is worth, and what a ring costs.
+against it the opening passes are 0.8 per cent above the optimum and the
+search 0.4 per cent, reaching it on 56 of 60. `ConsistencyTest` measures
+those three again and reads this sentence for them.
+[research.md](research.md) reads what the search leaves, what each move is
+worth, and what a ring costs.
 
 ## The tests
 
@@ -119,6 +130,8 @@ python3 68k/test/emu/test_st4_repeat.py   # streams that loop by themselves, pas
 python3 68k/test/emu/test_st4_rewind.py   # loops longer than the ring, replayed by rewind
 python3 68k/test/emu/test_st4_copies.py   # copies from the literal stream, on window builds
 python3 68k/test/emu/bench_bits.py        # why the lengths are Elias gamma
+python3 68k/test/emu/bench_offset.py      # why the class bits select the stream
+python3 68k/test/emu/bench_decode.py      # cycles a unit, plain build against window
 ```
 
 The Python rigs need `mvn compile`, [rmac](http://rmac.is-slick.com) and

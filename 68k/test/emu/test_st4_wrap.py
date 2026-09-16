@@ -4,8 +4,9 @@
 Drives the counted ring as its caller must: from a known output size,
 T = ceil(O/C) calls, resetting the write pointer after every F = N/(C*UNIT)
 calls, and never polling for a done state it does not have. Checks every byte
-of every returned span, that all four streams are consumed exactly, that
-nothing is written outside the ring, and that the state's high words survive.
+of every returned span, that all four streams are read to the end exactly,
+that every write lands inside the ring, and that the state's high words
+survive.
 
     python3 68k/test/emu/test_st4_wrap.py [--quick]
 """
@@ -120,7 +121,7 @@ def run(control, literal, byte_offsets, word_offsets, expected, unit, code, ring
             ('B', UC_M68K_REG_A2, st4.LITERAL, literal),
             ('C', UC_M68K_REG_A4, st4.BYTE_OFFSETS, byte_offsets),
             ('D', UC_M68K_REG_A5, st4.WORD_OFFSETS, word_offsets)):
-        problem = st4.consumed(name, uc.reg_read(register) - base, stream)
+        problem = st4.read_fully(name, uc.reg_read(register) - base, stream)
         if problem:
             return problem
     return ''

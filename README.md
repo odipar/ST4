@@ -34,8 +34,10 @@ The unit size `k` is a trade. An offset or length that is not a multiple of
 `k` cannot be stored, so `k` of 2 or 4 pays some compression for speed: a
 good trade on data that is itself word- or long-shaped - 68000 code, word
 tables, speedcode, register streams - and a bad one elsewhere, so `k` is
-chosen per asset and recorded in the header. At `k` of 1 ST4 packs to
-within a per cent of ZX1.
+chosen per asset and recorded in the header. At `k` of 1 and the 511-byte
+window ZX1 reaches, ST4 writes 5.3 per cent fewer bytes over five inputs of
+prose and code ([research.md](doc/research.md), What ST4 at k = 1 is worth
+against ZX1).
 
 A stream can loop: packed with a loop point, it plays its intro once and
 its loop forever through a ring far smaller than itself. And a stream
@@ -60,6 +62,7 @@ the chips through both.
 | [tools.md](doc/tools.md) | the tools and their flags, the three trees, the optimizers, the search, the tests |
 | [glossary.md](doc/glossary.md) | every term, and the document that explains it |
 | [research.md](doc/research.md) | what was measured: rings, algorithms, the search, the memory |
+| [RELEASES.md](doc/RELEASES.md) | what a release contains, and every one published |
 | [near-offset.md](doc/near-offset.md) | a fifth class code, priced and parked |
 
 ## Usage
@@ -79,7 +82,7 @@ off. [tools.md](doc/tools.md) defines every flag, and
 
 ## Building and the tests
 
-Java 23 and Maven for the reference tree, Go 1.26 for the port, .NET 10 for
+Java 23 and Maven for the reference tree, Go 1.24 for the port, .NET 10 for
 the C# one, and for the 68000 rigs [rmac](http://rmac.is-slick.com) and
 `pip install unicorn`.
 

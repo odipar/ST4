@@ -30,8 +30,8 @@ the new one.
 
 **The end code is the one to grow.** It stands once a stream where a word
 offset stands 698 times over the 120 columns of the corpus, so the bits the
-third class bit costs are 120 against 698. Measured on the packer's own
-parse:
+third class bit costs are 120 against 698. Measured on the parse the
+packer writes:
 
 | the code that grows | four bits of offset | five | six |
 |---|---|---|---|
@@ -86,8 +86,8 @@ under the new costs.
 ## What building it touches
 
 - **ST4**: the cost model, the compressor, the decompressor and the copies
-  search's costing of a copy, in the Go, Java and C# trees; SPEC.md and
-  README.md; the format version, 7 to 8.
+  search's costing of a copy, in the Go, Java and C# trees; SPEC.md,
+  glossary.md and decoders.md; the format version, 7 to 8.
 - **The 68000 decoders**: `ST4.S`, `ST4_ring.S` and `ST4_wrap.S`, each
   gaining a third class bit on the end path and a five-bit read on the near
   path, then their sizes and cycles measured again and the emulation rig's

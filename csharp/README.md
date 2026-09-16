@@ -3,8 +3,8 @@
 `nt4` is a .NET 10 port of the Java `st4` tools: the same library classes,
 the same optimizers, the same options, and the same tests, corpus for corpus.
 
-This port is not necessary. The Java tools are the reference and complete on
-their own; the port follows them when that is worth the work, and may lag
+This port is not necessary. The Java tools are the reference and complete in
+themselves; the port follows them when that is worth the work, and may lag
 behind them.
 
 ## Build and test
@@ -26,7 +26,7 @@ dotnet run --project csharp/src/Nt4.Cli -- [-f] [-c[S]] [-kK] [-mN] [-lN] [-rR] 
 dotnet run --project csharp/src/Dnt4.Cli -- [-f] [-rN] input.st4 [output]
 ```
 
-The arguments are the [Java tools'](../README.md), and the containers are
+The arguments are the [Java tools'](../doc/tools.md), and the containers are
 interchangeable: what `st4` packs, `dnt4` unpacks, and the other way round.
 To build executables named `nt4` and `dnt4`:
 

@@ -11,7 +11,7 @@
 ; the bits, so the queue refills a word at a time; stream B the literal units;
 ; stream C the byte offsets; stream D the word offsets, stored as the decoder
 ; keeps them. Lengths and offsets count units. A stream can loop, and an
-; offset beyond the window M copies from stream B. README.md has the format.
+; offset beyond the window M copies from stream B. doc/SPEC.md is the format.
 ;
 ; ST4_UNIT, the unit size, is a build-time constant: set it before including
 ; this file.

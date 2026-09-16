@@ -26,7 +26,7 @@ sha() {
     echo "ST4 tools - release $VERSION"
     echo "source commit $COMMIT"
     echo "The format is 7, which the tools print; this version is the tools'"
-    echo "and the Go module's. README.md is the format, doc/research.md what"
+    echo "and the Go module's. doc/SPEC.md is the format, doc/research.md what"
     echo "was measured."
     echo
     echo "the zips"

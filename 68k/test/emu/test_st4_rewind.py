@@ -2,14 +2,14 @@
 """Differential test for the rewind: loops longer than the ring, all three decoders.
 
 A stream packed with -rR whose loop [R,O) is longer than the window cannot
-loop by itself, since no match reaches that far back, so the header gives a
+loop by itself, since no match reaches that far back, so the header records a
 rewind point and the caller replays the stream: it saves the decoder's
 registers when the output reaches R and restores them, all but the write
 pointer, when it reaches O, every pass. This packs corpora that way with the
 packer at unit sizes 1, 2 and 4, drives ST4.S, ST4_wrap.S and ST4_ring.S
 through rings smaller than the loop with that protocol under Unicorn as a
 plain 68000, and checks every byte of more than two passes against
-[0,R)[R,O)*, that the pass consumed every stream exactly, and that the
+[0,R)[R,O)*, that the pass read every stream to the end exactly, and that the
 decoder was done when the caller first rewound it.
 
     python3 68k/test/emu/test_st4_rewind.py [--quick]
@@ -135,7 +135,7 @@ def drained(uc, control, literal, byte_offsets, word_offsets) -> str:
             ('B', UC_M68K_REG_A2, st4.LITERAL, literal),
             ('C', UC_M68K_REG_A4, st4.BYTE_OFFSETS, byte_offsets),
             ('D', UC_M68K_REG_A5, st4.WORD_OFFSETS, word_offsets)):
-        problem = st4.consumed(name, uc.reg_read(register) - base, stream)
+        problem = st4.read_fully(name, uc.reg_read(register) - base, stream)
         if problem:
             return problem
     return ''
@@ -278,7 +278,7 @@ def run_ring(control, literal, byte_offsets, word_offsets, expected, unit,
 def played(file: bytes, data: bytes, unit: int, index: int, target: int) -> str:
     """dst4 -rN on the container, for enough passes to cover target bytes: a
     rewind loop is replayed by the caller, and the unpacker's replay must
-    obey the recurrence the decoders are held to, and reach at least as far."""
+    obey the recurrence the decoders follow, and reach at least as far."""
     padded = len(data) + (-len(data) % unit)
     period = padded - index * unit
     times = 1 + max(0, -(-(target - padded) // period))

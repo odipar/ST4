@@ -4,7 +4,7 @@
 Packs each corpus with the packer at unit sizes 1, 2 and 4, assembles ST4.S
 once per unit size, and decodes under Unicorn as a plain 68000, in one call
 and resumed in chunks, checking every output byte, that all four streams are
-consumed exactly, and that the caller's registers survive.
+read to the end exactly, and that the caller's registers survive.
 
     python3 68k/test/emu/test_st4.py [--quick]
 """
@@ -69,15 +69,15 @@ def pack_file(data: bytes, unit: int, window: int, repeat: int | None = None,
                    + (f'-at{repeat}' if repeat is not None else '')
                    + ('-c' if copies else '') + '.st4')
     if not key.exists():
-        with tempfile.TemporaryDirectory() as directory:
-            source = Path(directory) / 'in'
-            source.write_bytes(data)
-            subprocess.run(['java', '-ea', '-cp', str(CLASSES), 'org.st4.St4', '-f',
-                            f'-k{unit}', f'-m{window}', '-l65535']
-                           + ([f'-r{repeat}'] if repeat is not None else [])
-                           + (['-c'] if copies else [])
-                           + [str(source), str(key)],
-                           check=True, capture_output=True)
+        # the tools read standard input and write standard output, so the
+        # container comes back on the pipe and the report goes nowhere
+        run = subprocess.run(['java', '-ea', '-cp', str(CLASSES), 'org.st4.St4',
+                              f'-k{unit}', f'-m{window}', '-l65535', '-silent']
+                             + ([f'-r{repeat}'] if repeat is not None else [])
+                             + (['-c'] if copies else []),
+                             input=data, check=True, stdout=subprocess.PIPE,
+                             stderr=subprocess.PIPE)
+        key.write_bytes(run.stdout)
     return key.read_bytes()
 
 
@@ -88,12 +88,11 @@ def unpack_file(file: bytes, times: int) -> bytes:
     CACHE.mkdir(exist_ok=True)
     key = CACHE / f'{hashlib.sha1(file).hexdigest()[:16]}-r{times}.bin'
     if not key.exists():
-        with tempfile.TemporaryDirectory() as directory:
-            source = Path(directory) / 'in.st4'
-            source.write_bytes(file)
-            subprocess.run(['java', '-ea', '-cp', str(CLASSES), 'org.st4.Dst4', '-f',
-                            f'-r{times}', str(source), str(key)],
-                           check=True, capture_output=True)
+        run = subprocess.run(['java', '-ea', '-cp', str(CLASSES), 'org.st4.Dst4',
+                              f'-r{times}', '-silent'],
+                             input=file, check=True, stdout=subprocess.PIPE,
+                             stderr=subprocess.PIPE)
+        key.write_bytes(run.stdout)
     return key.read_bytes()
 
 def streams(file: bytes, unit: int) -> tuple:
@@ -122,15 +121,15 @@ def pack(data: bytes, unit: int, window: int, repeat: int | None = None) -> tupl
     return streams(pack_file(data, unit, window, repeat), unit)[:5]
 
 
-def consumed(name: str, count: int, stream: bytes) -> str:
-    """A stream must be read to its end, give or take its alignment padding.
+def read_fully(name: str, count: int, stream: bytes) -> str:
+    """A stream must be read to its end, apart from its alignment padding.
 
-    No length is stored, so a slice runs to where the next stream begins and can
-    carry up to three bytes the packer never wrote. A decoder that stopped short
-    by more than that, or read past the end, has lost its place.
+    No length is stored, so a slice runs to where the next stream begins and
+    may have up to three bytes in it the packer never wrote. A decoder that
+    stopped short by more than that, or read past the end, has lost its place.
     """
     if not 0 <= len(stream) - count < 4:
-        return f'stream {name}: consumed {count} of {len(stream)}'
+        return f'stream {name}: read {count} of {len(stream)}'
     return ''
 
 
@@ -179,7 +178,7 @@ def run(control: bytes, literal: bytes, byte_offsets: bytes, word_offsets: bytes
             ('B', UC_M68K_REG_A2, LITERAL, literal),
             ('C', UC_M68K_REG_A4, BYTE_OFFSETS, byte_offsets),
             ('D', UC_M68K_REG_A5, WORD_OFFSETS, word_offsets)):
-        problem = consumed(name, uc.reg_read(register) - base, stream)
+        problem = read_fully(name, uc.reg_read(register) - base, stream)
         if problem:
             return problem
     for register, canary in PRESERVED.items():

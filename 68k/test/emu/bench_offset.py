@@ -14,7 +14,7 @@ it is and the class bits go:
 The paths are the ones in ST4_wrap.S, driven over the references a real tune
 packs to, and counted instruction by instruction on an MC68000 model.
 
-Each input is packed with the packer at the -k and -m given, its references
+Each input is packed with the packer at the -k and -m named, its references
 are read back out of the container, and the two paths decode them.
 
     python3 68k/test/emu/bench_offset.py [-kK] [-mN] input [...]
@@ -43,22 +43,6 @@ CODE, STREAM_A, STREAM_C, STREAM_D, STACK = 0x1000, 0x40000, 0x60000, 0x80000, 0
 UNIT = 2
 
 
-def cycles_of(instruction):
-    root = instruction.mnemonic.split('.')[0]
-    long = instruction.mnemonic.endswith('.l')
-    operands = instruction.operands
-    if root in {'move', 'movea'}:
-        source, destination = operands.rsplit(',', 1)
-        if source.startswith('#') and re.fullmatch(r'[ad]\d', destination):
-            return 12 if long else 8
-    if root == 'lea':
-        if re.fullmatch(r'\w+\(pc\),a\d', operands):
-            return 8
-        if re.fullmatch(r'\$[0-9a-f]+,a\d', operands):
-            return 12 if instruction.size == 6 else 8
-    return cm.fixed_cycles(instruction)
-
-
 class Counter:
     """Exact MC68000 cycles, a conditional branch costed by what it did."""
 
@@ -81,7 +65,7 @@ class Counter:
         if instruction.mnemonic.split('.')[0] in cm.CONDITIONALS:
             self.pending = (address, instruction)
         else:
-            spent = cycles_of(instruction)
+            spent = cm.cycles_of(instruction)
             self.cycles += spent
             self.at[address - self.base] = self.at.get(address - self.base, 0) + spent
 
@@ -276,20 +260,19 @@ def container_refs(blob):
 
 def pack(path, k, window):
     """The packer's container for one file, with copies at that window."""
-    with tempfile.TemporaryDirectory() as directory:
-        out = Path(directory) / 'x.st4'
-        result = subprocess.run(
-            ['java', '-cp', str(HERE.parents[2] / 'target' / 'classes'), 'org.st4.St4',
-             '-f', '-c', '-k%d' % k, '-m%d' % window, str(path), str(out)],
-            capture_output=True, text=True)
-        if result.returncode:
-            raise SystemExit(result.stdout + result.stderr)
-        return out.read_bytes()
+    result = subprocess.run(
+        ['java', '-cp', str(HERE.parents[2] / 'target' / 'classes'), 'org.st4.St4',
+         '-c', '-k%d' % k, '-m%d' % window, '-silent'],
+        input=Path(path).read_bytes(), stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE)
+    if result.returncode:
+        raise SystemExit(result.stderr.decode())
+    return result.stdout
 
 
 def refill_cycles(counter, symbols):
     """Cycles spent in the class-bit refill, which the real decoder reaches at
-    its own rate rather than this benchmark's."""
+    a rate this benchmark does not set."""
     start = symbols.get('class_refill')
     if start is None:
         return 0

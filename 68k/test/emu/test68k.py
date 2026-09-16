@@ -37,7 +37,7 @@ def _binary(name):
     Deliberately not "use the .bin if one is lying around": those files are
     gitignored build products, so that rule turns an ordinary edit-and-rerun
     into silently testing the previous binary. Assembly costs milliseconds.
-    Pass --binary to test a supplied file on purpose.
+    Pass --binary to test a supplied file instead.
     """
     if name in _ASSEMBLED:
         return _ASSEMBLED[name]
@@ -129,7 +129,7 @@ def java_compress(data: bytes, m: int | None) -> bytes:
     return out                     # compressor: both invalidate on any change
 
 def context_size(name: str) -> int:
-    """The decoder's own ctx_size, so guards cannot drift from the source."""
+    """The decoder's ctx_size, so guards cannot drift from the source."""
     src = (SCRATCH.parent.parent / (Path(name).stem + '.S')).read_text()
     return int(re.search(r'^ctx_size\s+equ\s+(\d+)', src, re.M).group(1))
 
@@ -148,9 +148,9 @@ def track_source_reads(uc: Uc, src_at: int) -> list[int]:
     """Records how far into the compressed stream the decoder reads.
 
     Stronger than reading ctx_src afterwards, and independent of it: the field
-    is only guaranteed while a stream is suspended, whereas the last byte
-    actually fetched pins both "consumed everything" and "read nothing past the
-    end" - and the end marker is the last thing any stream contains.
+    is defined only while a stream is suspended, where the last byte fetched
+    pins both "read the whole stream" and "stopped at the end marker", which
+    is the last thing any stream contains.
     """
     high = [src_at]
     uc.hook_add(UC_HOOK_MEM_READ,

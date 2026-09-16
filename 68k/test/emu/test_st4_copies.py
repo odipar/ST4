@@ -9,8 +9,8 @@ its code. This packs corpora that way at unit sizes 1, 2 and 4 and windows
 of 16, 64 and 256 units, builds the three decoders once per unit size, and
 decodes under Unicorn as a plain 68000, into one buffer with ST4.S, through
 a ring the size of the window with ST4_wrap.S, and with ST4_ring.S in both
-wrap modes, checking every output byte, that all four streams are consumed
-exactly, and that nothing is written outside the ring. The same builds
+wrap modes, checking every output byte, that all four streams are read to
+the end exactly, and that every write lands inside the ring. The same builds
 decode streams packed without copies as the plain build does.
 
     python3 68k/test/emu/test_st4_copies.py [--quick]
@@ -76,7 +76,7 @@ def drained(uc, control, literal, byte_offsets, word_offsets) -> str:
             ('B', UC_M68K_REG_A2, st4.LITERAL, literal),
             ('C', UC_M68K_REG_A4, st4.BYTE_OFFSETS, byte_offsets),
             ('D', UC_M68K_REG_A5, st4.WORD_OFFSETS, word_offsets)):
-        problem = st4.consumed(name, uc.reg_read(register) - base, stream)
+        problem = st4.read_fully(name, uc.reg_read(register) - base, stream)
         if problem:
             return problem
     return ''

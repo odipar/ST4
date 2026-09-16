@@ -30,13 +30,15 @@ final class GoParityTest {
     private static Path built;
 
     /** The inputs: prose, 68000 assembly and Java, so the parse meets runs,
-     *  short matches and long ones. */
-    private static final List<String> INPUTS =
-            List.of("README.md", "68k/ST4.S", "src/main/java/org/st4/St4Compressor.java");
+     *  short matches and long ones. ConsistencyTest reads how many there are
+     *  against what tools.md reports. */
+    static final List<String> INPUTS =
+            List.of("README.md", "doc/SPEC.md", "68k/ST4.S",
+                    "src/main/java/org/st4/St4Compressor.java");
 
     /** Flags that reach every branch of the parse: the three units, a small
      *  window, copies, a penalty and an operation limit. */
-    private static final List<List<String>> FLAGS = List.of(
+    static final List<List<String>> FLAGS = List.of(
             List.of("-k1"), List.of("-k2"), List.of("-k4"),
             List.of("-k1", "-m256"), List.of("-k2", "-m960"),
             List.of("-k2", "-c"), List.of("-k1", "-p8"), List.of("-k2", "-p16"),

@@ -7,7 +7,8 @@ packs every corpus with the packer at unit sizes 1, 2 and 4, decodes beyond
 two passes under Unicorn as a plain 68000, resumed into one buffer with
 ST4.S, through a counted ring with ST4_wrap.S, and through the general ring
 with ST4_ring.S in both wrap modes, and checks every output byte against the
-recurrence, that all four streams are consumed exactly, the loop word in D
+recurrence, that all four streams are read to the end exactly, the loop word
+in D
 included, and that no decoder reports done.
 
     python3 68k/test/emu/test_st4_repeat.py [--quick]
@@ -81,7 +82,7 @@ def drained(uc, control, literal, byte_offsets, word_offsets) -> str:
             ('B', UC_M68K_REG_A2, st4.LITERAL, literal),
             ('C', UC_M68K_REG_A4, st4.BYTE_OFFSETS, byte_offsets),
             ('D', UC_M68K_REG_A5, st4.WORD_OFFSETS, word_offsets)):
-        problem = st4.consumed(name, uc.reg_read(register) - base, stream)
+        problem = st4.read_fully(name, uc.reg_read(register) - base, stream)
         if problem:
             return problem
     return ''
@@ -213,7 +214,7 @@ def run_ring(control, literal, byte_offsets, word_offsets, expected, unit,
 
 def played(file: bytes, data: bytes, unit: int, index: int, target: int) -> str:
     """dst4 -rN on the container, for enough passes to cover target bytes: it
-    must obey the recurrence the decoders are held to - so the unpacker's
+    must obey the recurrence the decoders follow - so the unpacker's
     repeats are the decoders' - and reach at least as far."""
     padded = len(data) + (-len(data) % unit)
     period = padded - index * unit

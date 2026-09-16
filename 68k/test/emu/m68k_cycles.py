@@ -17,8 +17,11 @@ class Instruction:
 
 def parse_listing(path: Path) -> tuple[dict[int, Instruction], dict[str, int]]:
     instructions: dict[int, Instruction] = {}
+    # rmac marks a macro expansion with "#" and a repeat with "@" between the
+    # encoding and the mnemonic, and writes the source line number beside the
+    # first of a run alone, so both the marker and the number are optional
     instruction_re = re.compile(
-        r"^\s*\d+\s+([0-9A-F]{8})\s+([0-9A-Fx]+)\s+"
+        r"^\s*(?:\d+\s+)?([0-9A-F]{8})\s+([0-9A-Fx]+)\s+(?:[#@]\s+)?"
         r"(\S+)(?:\s+([^;\s]+))?"
     )
     symbol_re = re.compile(r"^\s*(\S+)\s+([0-9A-F]{16})\s+[atdb]\s*$")
@@ -103,3 +106,28 @@ def fixed_cycles(instruction: Instruction) -> int | None:
             return 6 + 2 * int(match.group(1))
         raise KeyError(instruction)
     raise KeyError(instruction)
+
+
+def cycles_of(instruction: Instruction) -> int | None:
+    """MC68000 cycles for one instruction, or None for a conditional branch.
+
+    The forms below are the ones the decoders use that fixed_cycles leaves to
+    the caller: an immediate into a register, a register into memory, and the
+    two program-counter-relative lea forms.
+    """
+    root = instruction.mnemonic.split(".")[0]
+    long = instruction.mnemonic.endswith(".l")
+    operands = instruction.operands
+    if root in {"move", "movea"} and "," in operands:
+        source, destination = operands.rsplit(",", 1)
+        if source.startswith("#") and re.fullmatch(r"[ad]\d", destination):
+            return 12 if long else 8
+        if (re.fullmatch(r"[ad]\d", source)
+                and re.fullmatch(r"\(a\d\)", destination)):
+            return 12 if long else 8
+    if root == "lea":
+        if re.fullmatch(r"[^,]+\(pc\),a\d", operands):
+            return 8
+        if re.fullmatch(r"\$[0-9a-f]+,a\d", operands):
+            return 12 if instruction.size == 6 else 8
+    return fixed_cycles(instruction)
