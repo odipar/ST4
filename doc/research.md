@@ -1573,7 +1573,9 @@ is the four streams as `st4` reports it, without the 28-byte header.
 
 Eight files of this repository: the format, the three decoders, and the
 compressor and the copies search in each of the three trees. Prose, 68000
-assembly, Java, Go and C#. None of them records a figure of this section,
+assembly, Java, Go and C#. Three of them are sources this repository edits,
+so the raw column moves when they do and the section is measured again.
+None of them records a figure of this section,
 so writing the result down does not change what it was measured on, and the
 raw column is what `ConsistencyTest` reads back, so an input edited since
 fails the build rather than standing.
@@ -1581,18 +1583,18 @@ fails the build rather than standing.
 | input | raw | zx1 | `-m511` | against zx1 |
 |---|---:|---:|---:|---:|
 | doc/SPEC.md | 8,103 | 4,542 | 4,279 | -5.8% |
-| 68k/ST4.S | 17,274 | 9,120 | 8,630 | -5.4% |
-| 68k/ST4_wrap.S | 17,043 | 9,156 | 8,615 | -5.9% |
+| 68k/ST4.S | 17,385 | 9,224 | 8,731 | -5.3% |
+| 68k/ST4_wrap.S | 16,527 | 8,885 | 8,368 | -5.8% |
 | 68k/ST4_ring.S | 19,530 | 10,127 | 9,551 | -5.7% |
 | src/main/java/org/st4/St4Compressor.java | 15,284 | 6,816 | 6,488 | -4.8% |
 | src/main/java/org/st4/St4LiteralCopySearch.java | 58,155 | 23,424 | 22,378 | -4.5% |
 | go/st4/literalcopy.go | 42,185 | 21,300 | 20,405 | -4.2% |
 | csharp/src/Nt4/LiteralCopySearch.cs | 61,730 | 24,677 | 23,568 | -4.5% |
-| the eight | 239,304 | 109,162 | **103,914** | **-4.8%** |
+| the eight | 238,899 | 108,995 | **103,768** | **-4.8%** |
 
 **At ZX1's window ST4 writes 4.8 per cent fewer bytes**, and no input is
-outside 4.2 to 5.9. Counting the 28-byte header and the padding between the
-streams, the eight containers are 104,168 bytes, 4.6 per cent below zx1.
+outside 4.2 to 5.8. Counting the 28-byte header and the padding between the
+streams, the eight containers are 104,016 bytes, 4.6 per cent below zx1.
 
 ## Where the 4.8 per cent comes from
 
@@ -1608,7 +1610,7 @@ byte after it.
 
 ST4 pays two bits on every new offset and is repaid six on every one past
 128, so where the offsets fall decides it. Confined to the reach ZX1
-encodes in a single byte, `st4 -k1 -m128` writes 136,699 bytes over the
+encodes in a single byte, `st4 -k1 -m128` writes 136,477 bytes over the
 eight, 25.2 per cent above zx1: most of the matches fall in the band from
 129 to 511, which is the band where ZX1 spends a second byte.
 
@@ -1619,17 +1621,17 @@ reaches. ST4 at `-mN` walks it:
 
 | `st4 -k1 -mN` | the eight inputs | against zx1 |
 |---|---:|---:|
-| `-m128` | 136,699 | +25.2% |
-| `-m256` | 119,906 | +9.8% |
-| `-m400` | 109,534 | +0.3% |
-| `-m416` | 108,625 | -0.5% |
-| `-m511`, where ZX1 stands | 103,914 | **-4.8%** |
-| `-m1024` | 95,422 | -12.6% |
-| `-m2048` | 87,490 | -19.9% |
-| `-m4096` | 80,323 | -26.4% |
-| `-m8192` | 75,682 | -30.7% |
-| `-m16384` | 72,818 | -33.3% |
-| `-m32512`, the format's furthest | 70,928 | **-35.0%** |
+| `-m128` | 136,477 | +25.2% |
+| `-m256` | 119,720 | +9.8% |
+| `-m400` | 109,347 | +0.3% |
+| `-m416` | 108,443 | -0.5% |
+| `-m511`, where ZX1 stands | 103,768 | **-4.8%** |
+| `-m1024` | 95,358 | -12.5% |
+| `-m2048` | 87,487 | -19.7% |
+| `-m4096` | 80,321 | -26.3% |
+| `-m8192` | 75,641 | -30.6% |
+| `-m16384` | 72,683 | -33.3% |
+| `-m32512`, the format's furthest | 70,793 | **-35.0%** |
 
 **The curve is the whole of the 35 per cent.** ST4 at its widest against
 ZX1 compares a 32 KB window with a 511-byte one, and the 30 percentage
@@ -1655,15 +1657,15 @@ against zx1's 109,162 beside each:
 
 | window | `k` = 1 | `k` = 2 | `k` = 4 |
 |---|---:|---:|---:|
-| 128 bytes | 136,699 (+25.2%) | 173,488 (+58.9%) | 199,648 (+82.9%) |
-| 256 bytes | 119,906 (+9.8%) | 160,366 (+46.9%) | 192,861 (+76.7%) |
-| 512 bytes | 103,871 (-4.8%) | 146,434 (+34.1%) | 185,634 (+70.1%) |
-| 1,024 bytes | 95,422 (-12.6%) | 131,703 (+20.6%) | 177,707 (+62.8%) |
-| 2,048 bytes | 87,490 (-19.9%) | 120,274 (+10.2%) | 168,784 (+54.6%) |
-| 4,096 bytes | 80,323 (-26.4%) | 109,381 (+0.2%) | 161,830 (+48.2%) |
-| 8,192 bytes | 75,682 (-30.7%) | 101,416 (-7.1%) | 155,454 (+42.4%) |
-| 16,384 bytes | 72,818 (-33.3%) | 95,978 (-12.1%) | 151,167 (+38.5%) |
-| 32,512 bytes | 70,928 (-35.0%) | 92,790 (-15.0%) | 148,217 (+35.8%) |
+| 128 bytes | 136,477 (+25.2%) | 173,207 (+58.9%) | 199,378 (+82.9%) |
+| 256 bytes | 119,720 (+9.8%) | 160,093 (+46.9%) | 192,584 (+76.7%) |
+| 512 bytes | 103,723 (-4.8%) | 146,268 (+34.2%) | 185,444 (+70.1%) |
+| 1,024 bytes | 95,358 (-12.5%) | 131,581 (+20.7%) | 177,577 (+62.9%) |
+| 2,048 bytes | 87,487 (-19.7%) | 120,171 (+10.3%) | 168,695 (+54.8%) |
+| 4,096 bytes | 80,321 (-26.3%) | 109,311 (+0.3%) | 161,701 (+48.4%) |
+| 8,192 bytes | 75,641 (-30.6%) | 101,332 (-7.0%) | 155,421 (+42.6%) |
+| 16,384 bytes | 72,683 (-33.3%) | 95,737 (-12.2%) | 151,016 (+38.6%) |
+| 32,512 bytes | 70,793 (-35.0%) | 92,550 (-15.1%) | 148,066 (+35.8%) |
 
 **The three curves are the same shape, displaced.** Each doubling of the
 window is worth about the same fraction at every unit size, so the unit is
