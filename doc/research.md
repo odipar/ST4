@@ -710,6 +710,44 @@ spends the random extend spends better. The size of a seed reads the same
 from 6 to 24 units, within four bytes over the subset, seed being four of
 twenty now and rarely accepted.
 
+## Two moves the parse aims
+
+Every move the search had changed one literal run, chosen at random: free
+it, trim it, grow it, or seed literals inside a block. Two moves that read
+the parse for where to act were added to them.
+
+**source** grows the dictionary where a copy reads from. A copy at distance
+d covering the output from a to b reads the units from a-d to b-d, so
+lengthening the run there is what lets that copy, or the next at the same
+distance, read further. The parse names d, so the move reads where to act
+rather than searching for it.
+
+**merge** fills the gap between a literal run and the one after it. A move
+that grows one run closes a gap of twenty units only by drawing twenty at
+once, and the gap is the thing a copy reading across it needs closed.
+
+## What the two are worth
+
+At odds of two, four, four, one, four and four of twenty - free, seed,
+extend, trim, merge, source - with one left for freeing and seeding
+together, over 1,000 steps a column:
+
+| seed | the five moves | the seven |
+|---|---|---|
+| 1 | 21,296 | 21,064 |
+| 2 | 21,318 | 21,152 |
+| 3 | 21,402 | 21,064 |
+
+Every seed, and the corpus with them: **117,028 bytes against 118,458 at
+the same steps, 1.21 per cent**. A step is cheaper as well, the runs being
+40 seconds shorter over 24 columns, so at a clock the two read further
+apart: **21,032 against 21,658 at three seconds a column, 2.9 per cent**.
+
+Neither pays alone. Source by itself reads 21,416 against the 21,296 of
+the five moves, and merge by itself 21,338; together they read 21,216 at
+the same odds. A copy reads further when its source is longer, and the
+source is longer when the gap before it is closed.
+
 ## The annealing schedule reads flat
 
 The schedule is 10 bits hot, 0.3 cold over the budget, and a patience of

@@ -88,7 +88,7 @@ type copySearch struct {
 	chain  *Block
 	bits   int
 	runs   [][3]int // literal runs {start, end, referenced}
-	copies [][3]int // copies and matches {start, end, isCopy}
+	copies [][4]int // copies and matches {start, end, isCopy, distance}
 
 	best     *Block
 	bestBits int
@@ -184,11 +184,11 @@ func (s *copySearch) adopt(parsed *Block) {
 			}
 			s.runs = append(s.runs, [3]int{start, block.Index, used})
 		} else {
-			isCopy := 0
+			isCopy, distance := 0, block.Offset
 			if block.Offset < 0 {
-				isCopy = 1
+				isCopy, distance = 1, -block.Offset
 			}
-			s.copies = append(s.copies, [3]int{start, block.Index, isCopy})
+			s.copies = append(s.copies, [4]int{start, block.Index, isCopy, distance})
 		}
 		previous = block.Index
 	}
@@ -324,11 +324,12 @@ func (s *copySearch) report(move string) {
 }
 
 // propose changes the dictionary in place, and says how. The odds follow
-// what each move saved when it was accepted, read over 24 columns: extend
-// saved 4,528 bits over 203 moves where free saved 892 over 4,889, most of
-// them the sideways and uphill moves the annealing accepts. Weighted this
-// way the search writes 0.72 per cent fewer bytes at the same steps, and
-// more as the budget grows (doc/research.md).
+// what each move saved when it was accepted: a move that changes one run
+// at random is the walk the annealing makes, and the moves the parse aims
+// - a run grown where a copy reads from, a gap between two runs filled -
+// are what lands the bits. Weighted this way the search writes 1.08 per
+// cent fewer bytes at the same steps over the corpus, on every seed tried
+// (doc/research.md).
 func (s *copySearch) propose(dictionary []bool) string {
 	kind := s.random.nextInt(20)
 	switch {
@@ -338,17 +339,60 @@ func (s *copySearch) propose(dictionary []bool) string {
 	case kind < 6:
 		s.seed(dictionary)
 		return "seed"
-	case kind < 18:
+	case kind < 10:
 		s.extend(dictionary)
 		return "extend"
-	case kind < 19:
+	case kind < 11:
 		s.trim(dictionary)
 		return "trim"
+	case kind < 15:
+		s.merge(dictionary)
+		return "merge"
+	case kind < 19:
+		s.source(dictionary)
+		return "source"
 	default:
 		s.free(dictionary)
 		s.seed(dictionary)
 		return "free+seed"
 	}
+}
+
+// merge fills the gap between a literal run and the one after it. A move
+// that grows one run reaches a gap of twenty units only by drawing its
+// whole length at once; this one closes what stands between two runs.
+func (s *copySearch) merge(dictionary []bool) {
+	if len(s.runs) < 2 {
+		return
+	}
+	at := s.random.nextInt(len(s.runs) - 1)
+	gap := s.runs[at+1][0] - s.runs[at][1] - 1
+	if gap <= 0 || gap > 24 {
+		return
+	}
+	fill(dictionary, s.runs[at][1]+1, s.runs[at+1][0], true)
+}
+
+// source grows the dictionary where a copy reads from, so that the copy
+// may read further: the literals a copy needs stand at its source, and the
+// parse names where that is.
+func (s *copySearch) source(dictionary []bool) {
+	if len(s.copies) == 0 {
+		return
+	}
+	op := s.copies[s.random.nextInt(len(s.copies))]
+	for attempt := 0; attempt < 4 && op[2] == 0; attempt++ {
+		op = s.copies[s.random.nextInt(len(s.copies))]
+	}
+	if op[2] == 0 {
+		return
+	}
+	size := 1 + s.random.nextInt(20)
+	from := op[1] - op[3] + 1
+	if !s.random.nextBoolean() {
+		from = op[0] - op[3] - size
+	}
+	fill(dictionary, clampIndex(from, 0, s.count), clampIndex(from+size, 0, s.count), true)
 }
 
 // pickRun is a literal run, unreferenced ones four times as likely, or none.

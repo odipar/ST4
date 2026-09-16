@@ -108,7 +108,7 @@ public final class St4LiteralCopySearch {
         private St4Block chain;
         private int bits;
         private List<int[]> runs = List.of();         // literal runs {start, end, referenced}
-        private List<int[]> copies = List.of();       // copies and matches {start, end, isCopy}
+        private List<int[]> copies = List.of();       // {start, end, isCopy, distance}
 
         private St4Block best;
         private int bestBits;
@@ -196,7 +196,8 @@ public final class St4LiteralCopySearch {
                     }
                     runs.add(new int[] {start, block.index(), used});
                 } else {
-                    copies.add(new int[] {start, block.index(), block.offset() < 0 ? 1 : 0});
+                    copies.add(new int[] {start, block.index(), block.offset() < 0 ? 1 : 0,
+                            Math.abs(block.offset())});
                 }
                 previous = block.index();
             }
@@ -329,12 +330,12 @@ public final class St4LiteralCopySearch {
 
         /**
          * Changes the dictionary in place, and says how. The odds follow
-         * what each move saved when it was accepted, read over 24 columns:
-         * extend saved 4,528 bits over 203 moves where free saved 892 over
-         * 4,889, most of them the sideways and uphill moves the annealing
-         * accepts. Weighted this way the search writes 0.72 per cent fewer
-         * bytes at the same steps, and more as the budget grows
-         * (doc/research.md).
+         * what each move saved when it was accepted: a move that changes
+         * one run at random is the walk the annealing makes, and the moves
+         * the parse aims - a run grown where a copy reads from, a gap
+         * between two runs filled - are what lands the bits. Weighted this
+         * way the search writes 1.08 per cent fewer bytes at the same steps
+         * over the corpus, on every seed tried (doc/research.md).
          */
         private String propose(boolean[] dictionary) {
             int kind = random.nextInt(20);
@@ -344,16 +345,65 @@ public final class St4LiteralCopySearch {
             } else if (kind < 6) {
                 seed(dictionary);
                 return "seed";
-            } else if (kind < 18) {
+            } else if (kind < 10) {
                 extend(dictionary);
                 return "extend";
-            } else if (kind < 19) {
+            } else if (kind < 11) {
                 trim(dictionary);
                 return "trim";
+            } else if (kind < 15) {
+                merge(dictionary);
+                return "merge";
+            } else if (kind < 19) {
+                source(dictionary);
+                return "source";
             } else {
                 free(dictionary);
                 seed(dictionary);
                 return "free+seed";
+            }
+        }
+
+        /**
+         * Fills the gap between a literal run and the one after it. A move
+         * that grows one run reaches a gap of twenty units only by drawing
+         * its whole length at once; this one closes what stands between two
+         * runs.
+         */
+        private void merge(boolean[] dictionary) {
+            if (runs.size() < 2) {
+                return;
+            }
+            int at = random.nextInt(runs.size() - 1);
+            int gap = runs.get(at + 1)[0] - runs.get(at)[1] - 1;
+            if (gap <= 0 || gap > 24) {
+                return;
+            }
+            Arrays.fill(dictionary, runs.get(at)[1] + 1, runs.get(at + 1)[0], true);
+        }
+
+        /**
+         * Grows the dictionary where a copy reads from, so that the copy may
+         * read further: the literals a copy needs stand at its source, and
+         * the parse names where that is.
+         */
+        private void source(boolean[] dictionary) {
+            if (copies.isEmpty()) {
+                return;
+            }
+            int[] op = copies.get(random.nextInt(copies.size()));
+            for (int attempt = 0; attempt < 4 && op[2] == 0; attempt++) {
+                op = copies.get(random.nextInt(copies.size()));
+            }
+            if (op[2] == 0) {
+                return;
+            }
+            int size = 1 + random.nextInt(20);
+            int from = random.nextBoolean() ? op[1] - op[3] + 1 : op[0] - op[3] - size;
+            int lo = (int) Math.clamp(from, 0, count);
+            int hi = (int) Math.clamp((long) from + size, 0, count);
+            if (lo < hi) {
+                Arrays.fill(dictionary, lo, hi, true);
             }
         }
 
