@@ -8,7 +8,7 @@ they share and how a caller chooses between them. The format they read is
 | decoder | k = 1 | k = 2 | k = 4 | calls |
 |---|---:|---:|---:|---|
 | [ST4.S](../68k/ST4.S) | 304 B | 306 B | 308 B | `ST4_init`, `ST4_decompress`, `ST4_resume` |
-| [ST4_wrap.S](../68k/ST4_wrap.S) | 308 B | 312 B | 314 B | `ST4_init`, `ST4_resume` |
+| [ST4_wrap.S](../68k/ST4_wrap.S) | 310 B | 314 B | 316 B | `ST4_init`, `ST4_resume` |
 | [ST4_ring.S](../68k/ST4_ring.S) | 386 B | 394 B | 396 B | `ST4_init`, `ST4_resume` |
 
 ## Which one

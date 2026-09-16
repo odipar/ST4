@@ -42,9 +42,10 @@ pays for itself. So `k` is chosen per asset, against a decode budget rather
 than a size target, and recorded in the header
 ([research.md](doc/research.md), The curve at a unit of 2 and 4).
 
-At `k` of 1 and the 511-byte window ZX1 reaches, ST4 writes 4.8 per cent
-fewer bytes over eight inputs of prose and code
-([research.md](doc/research.md), What ST4 at k = 1 is worth against ZX1).
+Against ZX1 at the 511 bytes ZX1 reaches, ST4 at `k` of 1 is level on the
+chiptune columns it ships: 105,908 bytes against 105,742. What the format
+adds is reach, and at the 32,512 bytes it allows it writes 41.5 per cent
+fewer ([research.md](doc/research.md), What ST4 is worth against ZX1).
 
 A stream can loop: packed with a loop point, it plays its intro once and
 its loop forever through a ring far smaller than itself. And a stream
