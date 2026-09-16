@@ -39,7 +39,7 @@ final class St4RoundTripTest {
 
     /**
      * Packs a stream that loops by rewind: the intro and the loop from unit
-     * {@code index} parsed on their own, as the packer does when the loop is
+     * {@code index} parsed separately, as the packer does when the loop is
      * longer than the window.
      */
     private static St4Compressor.Result packRewinding(byte[] input, int unit, int window,
@@ -189,7 +189,7 @@ final class St4RoundTripTest {
 
     @Test
     void aRewindStreamDecodesToItsPassAndNeverReachesBeforeTheLoop() {
-        // The loop is parsed on its own, so replaying it from the state saved
+        // The loop is parsed separately, so replaying it from the state saved
         // at the loop point sees the same history every pass. The reference
         // checks a stream against that: from the rewind point on, no match may reach
         // before it - and the pass must still be the input.

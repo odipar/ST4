@@ -108,7 +108,7 @@ public final class St4 {
             if (repeatIndex >= 0 && units.length - repeatIndex > offsetLimit) {
                 // The loop is longer than the window, so no match reaches across
                 // it and the caller replays the stream from the state it saved at
-                // the loop point. The loop is parsed on its own, so every pass
+                // the loop point. The loop is parsed separately, so every pass
                 // sees the same history.
                 int[] intro = Arrays.copyOfRange(units, 0, repeatIndex);
                 int[] loop = Arrays.copyOfRange(units, repeatIndex, units.length);

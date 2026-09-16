@@ -114,6 +114,9 @@ final class HouseStyleTest {
             "nothing",
             " own ",
             " own.",
+            " own,",
+            " own;",
+            " own:",
             "written down",
             "write down",
             "writes down",
@@ -134,7 +137,8 @@ final class HouseStyleTest {
             "no other step",
             "would rather");
 
-    private static List<Path> documents() throws IOException {
+    /** Every Markdown file of the tree, which ConsistencyTest reads too. */
+    static List<Path> documents() throws IOException {
         try (Stream<Path> tree = Files.walk(Path.of("."))) {
             return tree.filter(Files::isRegularFile)
                     .filter(path -> path.toString().endsWith(".md"))
@@ -178,7 +182,40 @@ final class HouseStyleTest {
         if (named.endsWith(".S")) {
             return opener(lines, ";");
         }
-        return opener(lines, "#");
+        return python(lines);
+    }
+
+    /**
+     * Python comments: the lines a {@code #} opens, and the docstrings, which
+     * are where these files write most of their prose.
+     */
+    private static List<String[]> python(List<String> lines) {
+        List<String[]> out = new ArrayList<>(opener(lines, "#"));
+        boolean inside = false;
+        for (int i = 0; i < lines.size(); i++) {
+            String line = lines.get(i);
+            while (true) {
+                int mark = line.indexOf("\"\"\"");
+                if (inside) {
+                    String text = mark < 0 ? line : line.substring(0, mark);
+                    if (!text.strip().isEmpty()) {
+                        out.add(new String[] {String.valueOf(i + 1), text.strip()});
+                    }
+                    if (mark < 0) {
+                        break;
+                    }
+                    inside = false;
+                    line = line.substring(mark + 3);
+                } else {
+                    if (mark < 0) {
+                        break;
+                    }
+                    inside = true;
+                    line = line.substring(mark + 3);
+                }
+            }
+        }
+        return out;
     }
 
     /** A comment opened by {@code //} or run between {@code /*} and its close. */

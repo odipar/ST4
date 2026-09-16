@@ -23,8 +23,11 @@ each call at the ring end, for callers with variable call sizes.
 Each decoder runs two copy ladders: match runs of at most sixteen units, on
 measured streams four of every five, run a counter-free ladder that falls
 straight into what comes next; literals and longer runs run a counted one.
-Measured on real streams, ST4_wrap spends 12 to 14% fewer cycles in a
-small-budget streaming loop and 3 to 5% fewer in bulk, with no case slower.
+The second ladder was worth 12 to 14% of the cycles in a small-budget
+streaming loop and 3 to 5% in bulk, with no case slower, measured against
+the single-ladder decoder at the release that made the change
+([RELEASES.md](RELEASES.md), v0.5). That decoder is not in this tree, so
+`bench_decode.py` cannot count it again.
 
 ## The state
 
@@ -76,11 +79,12 @@ A stream that loops by itself (SPEC.md 6.2) arms its endless match at the
 end code and re-arms it 65535 units at a time: the bit queue is set to
 zero, a value no read leaves it at, so the transition that would parse the
 next block re-arms instead. That adds one branch to a match-to-literals
-transition and one checked bit to the end code: streams that end pay 0.05
-to 0.4% more cycles than decoders without loop code, and the loop itself
-runs at or below the rate of the pass, since it only copies. Such a stream
-never reaches DONE; drive it through `ST4_resume` with budgets and stop
-when you have enough, since `ST4_decompress` drains until DONE.
+transition and one checked bit to the end code: streams that end paid 0.05
+to 0.4% more cycles than the decoders before the loop code, measured at the
+release that added it ([RELEASES.md](RELEASES.md), v7.0), and the loop
+itself runs at or below the rate of the pass, since it only copies. Such a
+stream never reaches DONE; drive it through `ST4_resume` with budgets and
+stop when you have enough, since `ST4_decompress` drains until DONE.
 
 A loop the caller replays (SPEC.md 6.3) needs no decoder code: when the
 output reaches the rewind point, save `a0`, `a2`, `a4`, `a5`, `d0`, `d1`
@@ -109,13 +113,20 @@ One build a unit size serves every window, and the decoder keeps no state
 for it: the window is in its code. So the decoder is code in RAM, and a
 68030 caller flushes the instruction cache after `ST4_init`. A window build
 is 30 to 40 bytes larger, and a build without `ST4_WINDOW` is byte for byte
-the decoder above. Measured on the test corpora, streams without copies pay
-2.0 to 4.0% more cycles on a window build than on a plain one, and a stream
-with copies runs at the rate its operation count sets: word-soup at `k` of
-1 packed with copies for a 16-unit ring decodes in ST4_wrap at 66.5 cycles
-a unit, where the same data packed without them for a 256-unit ring costs
-64.8, and for the 16-unit ring, nearly all of it literals, 42.0 for three
-times the bytes.
+the decoder above.
+
+`bench_decode.py` runs both builds over the same streams and counts every
+instruction on an MC68000 model. Over the whole corpus at `k` of 1, 2 and
+4, a stream without copies costs 2.0 to 2.6 per cent more cycles a unit on
+a window build of ST4_wrap through a 256-byte ring, and 0.3 to 0.7 on a
+window build of ST4.S. The compare runs once a match segment, and a ring
+splits a match at every wrap where ST4.S has one segment an operation. A
+stream with copies
+runs at the rate its operation count sets: word-soup at `k` of 1 packed
+with copies for a 16-unit ring decodes in ST4_wrap at 66.5 cycles a unit,
+where the same data packed without them for a 256-unit ring costs 64.8, and
+for the 16-unit ring, nearly all of it literals, 42.0 for 2.9 times the
+bytes. [research.md](research.md) has the tables.
 
 ## What to feed them
 

@@ -211,6 +211,7 @@ repositories of the family and the rows below it struck here.
 | `each decoder carries its own copy` | `each decoder has a separate copy` |
 | `-r asks for more of it` | `-r extends it` |
 | `a stream decodes with any window at least its own` | `with any window at least as wide` |
+| `a ring of its own`, `the packer's own parse`, `the stream's own literals`, `complete on their own` | `a separate ring`, `the parse the packer writes`, `the literals of the stream itself`, `complete in themselves`; the possessive is struck before a comma or a semicolon as before a space |
 
 ## A specification defines operations
 

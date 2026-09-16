@@ -48,8 +48,8 @@ It references the original text, not the literal payload.
 
 **LZ4 and ZX0 prefix dictionaries.** `LZ4_decompress_safe_usingDict` treats
 a separate buffer as the history before the block, and ZX0 decompresses with
-prefix data the same way. External data, backward only, never the stream's
-own literals.
+prefix data the same way. External data, backward only, never the literals
+of the stream itself.
 
 **Static dictionaries** decoupled from the window are the ordinary mental
 model for what the literal stream becomes.
@@ -88,7 +88,7 @@ thousand up.
 ## The experiment
 
 The packer, on the test corpora plus an earlier README of 15732 bytes and
-a Java class file. The numbers below are the packer's own: `st4 -mN` for
+a Java class file. The numbers below are the packer's: `st4 -mN` for
 the ring alone and `st4 -c120 -mN` for the ring with copies - the one-shot
 passes of `St4LiteralCopySearch` and then two minutes of its search per
 cell, which on the larger corpora is still
@@ -652,7 +652,7 @@ did not pay for.
 
 ## What it costs
 
-Under DTX2 every column decodes through a ring of its own, so a tune of 30
+Under DTX2 every column decodes through a separate ring, so a tune of 30
 columns - 14 registers and four effects of four columns - pays the ring
 thirty times:
 
@@ -669,9 +669,9 @@ and a wider ring is memory rather than work.
 
 ## Where it pays
 
-The rings are one workspace, which a set of tunes shares (BINARIES.md),
-while the saving is on every byte of music in the set. So the ring pays for
-itself at the size of the set rather than of a tune:
+The rings are one workspace, which a set of tunes shares (DTX's
+BINARIES.md), while the saving is on every byte of music in the set. So the
+ring pays for itself at the size of the set rather than of a tune:
 
 | ring | the set it pays for itself at |
 |---|---|
@@ -882,8 +882,7 @@ parse wants do not repay it.
 The opening passes name 5,193 units over the subset. The best dictionary
 after 1,000 steps keeps 4,961 of them, 96 per cent, and names 335 the
 opening passes did not, 6.3 per cent of the 5,296 it names. So the search
-trims
-and frees most of what it is handed and adds a few units of its own, found
+trims and frees most of what it is handed and adds a few units more, found
 by seeding where the parse already matches or copies - not by what a
 free-source parse would read from.
 
@@ -1552,3 +1551,162 @@ figure on this page and what 704 more bytes of RAM buy.
   (Re-Pair), 1999 - <https://ieeexplore.ieee.org/document/755679>
 - Wikipedia, *LZ77 and LZ78* -
   <https://en.wikipedia.org/wiki/LZ77_and_LZ78>
+
+# What ST4 at k = 1 is worth against ZX1
+
+ST4 keeps ZX1's three block types, so at `k` of 1 the two parse the same
+shape and what separates them is the encoding. The README said ST4 packs
+"to within a per cent of ZX1", which had no measurement behind it. This is
+the measurement.
+
+## The two windows
+
+ZX1 reaches 511 bytes back: `MAX_OFFSET_ZX1` in its `zx1.c`. ST4 at `-k1`
+alone reaches 32,512 (SPEC.md 4.3), sixty-four times further, so the two
+default settings compare windows rather than formats. `st4 -k1 -m511` is
+the comparison at one window.
+
+The packer is zx1 v1.5, built from einar-saukas/ZX1's `src`. The ST4 figure
+is the four streams as `st4` reports it, without the 28-byte header.
+
+| input | raw | zx1 | `-m511` | against zx1 | `-k1` alone |
+|---|---:|---:|---:|---:|---:|
+| README.md | 5,474 | 3,537 | 3,367 | -4.8% | 2,890 |
+| doc/SPEC.md | 8,103 | 4,542 | 4,279 | -5.8% | 3,686 |
+| doc/research.md | 74,822 | 44,746 | 42,326 | -5.4% | 30,460 |
+| 68k/ST4.S | 17,274 | 9,120 | 8,630 | -5.4% | 6,398 |
+| St4Compressor.java | 15,284 | 6,816 | 6,488 | -4.8% | 4,655 |
+| the five | 120,957 | 68,761 | **65,090** | **-5.3%** | **48,089** |
+
+**At ZX1's window ST4 writes 5.3 per cent fewer bytes**, and no input is
+outside 4.8 to 5.8. At its default window it writes 30.1 per cent fewer,
+which is the window and not the format.
+
+## Where the 5.3 per cent comes from
+
+The two spend their bits on a new offset like this, read out of ZX1's
+`compress.c` and SPEC.md 3.5:
+
+| offset | zx1 | ST4 |
+|---|---|---|
+| 1 to 128 | flag, one byte: 9 bits | flag, two class bits, one byte of C: 11 bits |
+| 129 to 511 | flag, two bytes: 17 bits | flag, two class bits, one byte of C: 11 bits |
+
+ST4 pays two bits on every new offset and is repaid six on every one past
+128. The crossover is where the parse spends most of its offsets: confined
+to the reach ZX1 encodes in a single byte, `st4 -k1 -m128` writes 83,797
+bytes over the five, 21.9 per cent above zx1. The step from 128 to 511 is
+worth more to both than the two class bits cost.
+
+| ST4 at `k` = 1 | the five inputs | against zx1 |
+|---|---:|---:|
+| `-m128` | 83,797 | +21.9% |
+| `-m511` | 65,090 | -5.3% |
+| no `-m` | 48,089 | -30.1% |
+
+## What this does not measure
+
+Five inputs of prose, 68000 assembly and Java, at one unit size. A margin
+on a set of chiptune columns, which is what ships, would be a separate
+measurement, and at `k` of 2 or 4 there is no ZX1 to compare with.
+
+`St4RoundTripTest` keeps the bound the recorded jx1 sizes support rather
+than this one: at `k` of 1 no input packs more than five per cent and eight
+bytes above what jx1 wrote for it.
+
+# What the copy code costs a decoder
+
+A decoder built with `ST4_WINDOW equ 1` tells a copy from a match by
+magnitude, which is a `cmp.w` and a short branch once a match segment
+(decoders.md, copies from the literal stream). A build without it is byte
+for byte the decoder that has no copy code at all, so the cost is a
+subtraction over one stream.
+
+`bench_decode.py` packs each corpus of the rigs with the real packer,
+assembles both builds of the real decoder, runs the decode under emulation
+and costs every instruction on an MC68000 model. Cycles a unit, over the
+eleven corpora together:
+
+| decoder | `k` | plain | window | window build costs |
+|---|---:|---:|---:|---:|
+| ST4.S, window 256 bytes | 1 | 15.0 | 15.1 | +0.6% |
+| ST4.S | 2 | 15.3 | 15.4 | +0.7% |
+| ST4.S | 4 | 22.7 | 22.8 | +0.3% |
+| ST4_wrap.S, ring 256 bytes | 1 | 25.2 | 25.8 | +2.6% |
+| ST4_wrap.S | 2 | 25.9 | 26.6 | +2.6% |
+| ST4_wrap.S | 4 | 34.0 | 34.7 | +2.0% |
+
+**The ring pays for it four times over.** The compare stands once a match
+segment, and a ring splits a match at every wrap where ST4.S runs one
+segment an operation, so ST4_wrap meets the compare far more often: 0.6
+cycles a unit against 0.1 at `k` of 1. On a single stream the figure runs
+from 0.0 per cent, where the parse is long matches, to 5.9, where it is
+short ones. The two corpora of one and two bytes read 9 per cent, which is
+the call and the init rather than the decode.
+
+## What a stream with copies costs
+
+Copies are for a ring too small to keep what the stream repeats, so the
+comparison is against the same data at a ring that could. word-soup at `k`
+of 1 through ST4_wrap, the payload being the four streams:
+
+| the stream | ring | payload | cycles a unit |
+|---|---:|---:|---:|
+| packed with copies | 16 bytes | 956 | 66.5 |
+| packed without | 256 bytes | 1,200 | 64.8 |
+| packed without | 16 bytes | 2,800 | 42.0 |
+
+A copy costs what an operation costs, so the rate follows the operation
+count rather than the build: the copies stream runs 2.6 per cent slower a
+unit than the same data at a ring sixteen times larger, and 58 per cent
+slower than the same data packed for the small ring, which is 2.9 times the
+bytes and nearly all of it literals.
+
+## What this does not measure
+
+A cycle model of the MC68000, not a machine: no bus contention, no
+shifter, no memory of any particular Atari. It counts what the instructions
+cost in the manual, which is what a comparison of two builds of one decoder
+needs and not what a frame budget needs.
+
+The figures the two copy ladders and the loop code are worth
+(decoders.md) were measured against decoders that are not in this tree, and
+`bench_decode.py` cannot count those again.
+
+# What the three optimizers cost, and on what
+
+tools.md tabulates the three parsers on a disk image and two slices that are
+not in this repository. This measures them again on two corpora made from
+what is, so the shape of the answer can be checked.
+
+The corpora, both a little under 900 KB, packed at `k` of 4 and `-m1024`:
+
+- **the sources**: every `.java`, `.go`, `.cs`, `.S`, `.md` and `.py` file
+  of the tree, in path order, 929,630 bytes. Prose and code, which repeat at
+  the scale of a line.
+- **one block repeated**: the first 4,096 bytes of that, repeated to 900,000
+  bytes. Which is what a disk image or a register stream looks like to a
+  parser: the same stretch, over and over.
+
+Each parser ran three times over a 40,000-unit prefix first, so the JIT has
+compiled it before the run that is timed.
+
+| corpus | units | reference | fast | event-driven |
+|---|---:|---:|---:|---:|
+| the sources | 232,408 | 3.4 s | 3.6 s | 3.8 s |
+| one block repeated | 204,800 | 120.0 s | 29.1 s | **0.49 s** |
+
+All three wrote the same bit count on both corpora: 5,353,737 bits on the
+sources and 28,005 on the repeated block.
+
+**The win is in the repetition.** On the sources the three are within 12 per
+cent of one another and the reference is the quickest of them, since its
+inner loop stops at the first position where no match runs further. On the
+repeated block the reference walks a thousand-unit window at nearly every
+position, the fast parser is 4.1 times it, and the event-driven one visits
+only where a repeated stretch starts or ends, which is 246 times less work.
+
+That is the same shape as tools.md's table, an order of magnitude apart in
+the absolute seconds because a disk image repeats differently from a block
+copied two hundred times. A reader choosing a parser reads the ratio, not
+the seconds.

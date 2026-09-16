@@ -37,7 +37,7 @@ package org.st4;
  * longer than the window is replayed instead: the header records the rewind
  * point in bytes, the caller saves the decoder's registers there and
  * restores them, all but the write pointer, at O. The packer parses the loop
- * on its own, so every pass sees the same history.
+ * separately, so every pass sees the same history.
  *
  * <p>The header is twenty-eight bytes:
  *

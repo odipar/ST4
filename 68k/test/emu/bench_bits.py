@@ -9,8 +9,8 @@ from stream A, and has three readers reproduce it:
                     time.
   V2  word queue    ST4's reader: a $8000 sentinel, refilled a word at a
                     time. The same bits, half the refills, possible because
-                    stream A holds bits alone.
-  V3  peek table    lengths in a stream of their own, written LSB first, read
+                    stream A has the bits alone.
+  V3  peek table    lengths in a separate stream, written LSB first, read
                     through a 512-entry table indexed by the next 9 bits.
                     Flags keep a word queue.
 
@@ -128,7 +128,7 @@ def assemble(source_text):
 # --------------------------------------------------------------- the streams
 
 def operations(control: bytes):
-    """The lengths and the control bits between them, as stream A really holds.
+    """The lengths and the control bits between them, as stream A has them.
 
     Returns the lengths and, for each, the bits that follow it: one flag bit,
     and two more when that flag opens a new-offset match. Timing them means

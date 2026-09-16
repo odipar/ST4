@@ -26,7 +26,12 @@ before both.
 - **R0.8** A term that changes in the glossary changes everywhere in the
   same change.
 - **R0.9** A figure in a document is measured, and what measured it stands
-  beside it or in [research.md](research.md).
+  beside it or in [research.md](research.md). A figure measured against
+  something no longer in the tree names the release that measured it.
+- **R0.10** A test reads the documents against the tree: the clauses and
+  requirements they cite, the figures the code defines, the flags the tools
+  print, the scripts and rigs they name, and the toolchains the build files
+  require.
 
 ## R1. The format
 
@@ -76,8 +81,8 @@ before both.
 - **R3.5** A wide move never lands on an odd address, at any unit size
   (decoders.md, the state).
 - **R3.6** A decoder built for copies reads the window out of the header
-  and writes it into the instructions that read it, so one build a unit size serves
-  every window (decoders.md, copies from the literal stream).
+  and writes it into the instructions that read it, so one build a unit
+  size serves every window (decoders.md, copies from the literal stream).
 
 ## R4. The three trees
 
@@ -99,3 +104,5 @@ before both.
   was built from.
 - **R5.4** A release records whether a packer writes other bytes than the
   release before it, either way.
+- **R5.5** [RELEASES.md](RELEASES.md) lists every release published, newest
+  first, and the newest of them names the version in the pom.
