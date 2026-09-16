@@ -1646,6 +1646,49 @@ Below 129 the trade runs the other way, and `-m128` is the one row where
 ST4 writes more: there every offset fits the single byte ZX1 spends, so
 ST4's two class bits are two bits a match on top of the same byte.
 
+## The curve at a unit of 2 and 4
+
+ZX1 has no unit size, so at `k` of 2 or 4 the comparison is what ST4 pays
+for a decoder that runs half or a quarter as many operations. The same
+eight inputs, the window in bytes so the three lines meet, and the margin
+against zx1's 109,162 beside each:
+
+| window | `k` = 1 | `k` = 2 | `k` = 4 |
+|---|---:|---:|---:|
+| 128 bytes | 136,699 (+25.2%) | 173,488 (+58.9%) | 199,648 (+82.9%) |
+| 256 bytes | 119,906 (+9.8%) | 160,366 (+46.9%) | 192,861 (+76.7%) |
+| 512 bytes | 103,871 (-4.8%) | 146,434 (+34.1%) | 185,634 (+70.1%) |
+| 1,024 bytes | 95,422 (-12.6%) | 131,703 (+20.6%) | 177,707 (+62.8%) |
+| 2,048 bytes | 87,490 (-19.9%) | 120,274 (+10.2%) | 168,784 (+54.6%) |
+| 4,096 bytes | 80,323 (-26.4%) | 109,381 (+0.2%) | 161,830 (+48.2%) |
+| 8,192 bytes | 75,682 (-30.7%) | 101,416 (-7.1%) | 155,454 (+42.4%) |
+| 16,384 bytes | 72,818 (-33.3%) | 95,978 (-12.1%) | 151,167 (+38.5%) |
+| 32,512 bytes | 70,928 (-35.0%) | 92,790 (-15.0%) | 148,217 (+35.8%) |
+
+**The three curves are the same shape, displaced.** Each doubling of the
+window is worth about the same fraction at every unit size, so the unit is
+a multiplier on the whole curve rather than a change in what the window is
+worth. A unit of 2 needs 4,096 bytes of window to reach what ZX1 reaches
+with 511, and a unit of 4 reaches it at no window the format allows.
+
+**What the unit costs, at the widest window**: 30.8 per cent over `k` of 1
+for a unit of 2, and 109 per cent for a unit of 4. That is the trade
+SPEC.md 1.3 defines, and this corpus is prose and source text, which is the
+shape it costs most on. Two others for the range, at a window of 1,024
+bytes:
+
+| corpus | `k` = 2 over `k` = 1 | `k` = 4 over `k` = 1 |
+|---|---:|---:|
+| 256 KB of text | +36.1% | +76.5% |
+| 256 KB of arm64 code, four bytes an instruction | +15.5% | +41.6% |
+| the 120 chiptune columns, at 32,512 bytes | +32.3% | +99.7% |
+
+Machine code of one instruction width is where a unit costs least, and it
+halves the figure rather than turning it around: a unit above 1 writes more
+bytes on every corpus measured here, and buys operations rather than
+bytes. The arm64 slice is a build product of this repository's Go tree, so
+its exact bytes follow the toolchain that built it.
+
 ## What this does not measure
 
 One unit size, and a corpus of one repository's prose and code. A margin on
