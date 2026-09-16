@@ -671,6 +671,39 @@ final class ConsistencyTest {
     }
 
     /**
+     * The corpus the ZX1 comparison measured, against the tree. The section
+     * names each input and the bytes it ran to, so an input edited since the
+     * measurement fails here rather than leaving a stale ratio standing.
+     */
+    @Test
+    void theZx1CorpusIsTheOneTheMeasurementRan() throws IOException {
+        String research = read(Path.of("doc/research.md"));
+        int at = research.indexOf("# What ST4 at k = 1 is worth against ZX1");
+        assertTrue(at >= 0, "research.md does not measure ST4 against ZX1");
+        int end = research.indexOf("\n# ", at + 1);
+        String section = research.substring(at, end < 0 ? research.length() : end);
+
+        List<String> wrong = new ArrayList<>();
+        int inputs = 0;
+        Matcher row = Pattern.compile("^\\| (\\S+/\\S+|doc/\\S+) \\| ([\\d,]+) \\|",
+                Pattern.MULTILINE).matcher(section);
+        while (row.find()) {
+            Path input = Path.of(row.group(1));
+            long ran = Long.parseLong(row.group(2).replace(",", ""));
+            inputs++;
+            if (!Files.isRegularFile(input)) {
+                wrong.add("the corpus names " + input + ", which is not there");
+            } else if (Files.size(input) != ran) {
+                wrong.add(input + " ran to " + ran + " bytes and is now "
+                        + Files.size(input) + ": measure the section again");
+            }
+        }
+        int named = inputs;
+        assertTrue(named >= 8, () -> "the corpus read as " + named + " inputs");
+        assertTrue(wrong.isEmpty(), () -> String.join("\n", wrong));
+    }
+
+    /**
      * The odds the search proposes a move at, in the two documents that
      * report them. The bounds are read out of the parser, so a move
      * reweighted in the code and left in a document fails here.

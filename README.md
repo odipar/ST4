@@ -35,9 +35,9 @@ The unit size `k` is a trade. An offset or length that is not a multiple of
 good trade on data that is itself word- or long-shaped - 68000 code, word
 tables, speedcode, register streams - and a bad one elsewhere, so `k` is
 chosen per asset and recorded in the header. At `k` of 1 and the 511-byte
-window ZX1 reaches, ST4 writes 5.3 per cent fewer bytes over five inputs of
-prose and code ([research.md](doc/research.md), What ST4 at k = 1 is worth
-against ZX1).
+window ZX1 reaches, ST4 writes 4.8 per cent fewer bytes over eight inputs
+of prose and code ([research.md](doc/research.md), What ST4 at k = 1 is
+worth against ZX1).
 
 A stream can loop: packed with a loop point, it plays its intro once and
 its loop forever through a ring far smaller than itself. And a stream
