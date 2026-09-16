@@ -710,6 +710,54 @@ spends the random extend spends better. The size of a seed reads the same
 from 6 to 24 units, within four bytes over the subset, seed being four of
 twenty now and rarely accepted.
 
+## The annealing schedule reads flat
+
+The schedule is 10 bits hot, 0.3 cold over the budget, and a patience of
+2,000 steps without a new best. None of the three had been read since the
+moves were reweighted, so each was swept at 1,000 steps a column over the
+24-column subset:
+
+| the setting | bytes |
+|---|---|
+| hot 3 | 21,360 |
+| hot 5 | 21,360 |
+| hot 10, as it is | 21,296 |
+| hot 20 | 21,324 |
+| cold 0.01 | 21,360 |
+| cold 0.05 | 21,324 |
+| cold 0.1 | 21,308 |
+| cold 0.3, as it is | 21,296 |
+| cold 1.0 | 21,318 |
+| patience 200 | 21,288 |
+| patience 500 | 21,288 |
+| patience 2,000, as it is | 21,296 |
+| patience 8,000 | 21,296 |
+
+**Every one of them lands inside what the seed alone moves.** Three seeds of
+the settings as they are write 21,296, 21,318 and 21,402 bytes at that
+budget, a spread of 0.5 per cent, where the widest reading in the table is
+0.3.
+
+A cold of 0.01 read 0.74 per cent better at 3,000 steps a column, 20,934
+against 21,090, which is above the seed's spread - and then 0.18 per cent
+worse at 6,000, 20,948 against 20,910. No setting reads best at every
+budget.
+
+**Against no annealing at all.** A search that keeps only what packs
+smaller writes 21,356 bytes at 1,000 steps and 20,980 at 3,000, where the
+schedule writes 21,296 and 21,090: better at one budget, worse at the
+other, both inside the seed's spread. What the uphill moves are worth is
+under what this corpus reads at these budgets.
+
+So the schedule stays as it is. What moves the bits is which move is
+proposed and how far it reaches, which the two readings above measure at
+0.72 and 0.59 per cent over the corpus, above the noise and in one
+direction.
+
+A reading of 0.5 per cent from one seed at one budget says little here.
+Both of the settings this note declines looked like wins at the budget they
+were found at.
+
 ## Seeding by what copying wants does not pay
 
 The parse that lets a source be free names what copying would read from
