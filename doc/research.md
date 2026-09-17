@@ -461,9 +461,9 @@ In cycles, measured by `68k/test/emu/bench_offset.py`, which assembles both
 decode paths out of ST4_wrap.S and counts them over the references of a real
 stream: the offset path drops from about 59 cycles to about 38. Counting
 also the stream A refills that the two removed bits no longer cause, the
-saving is about 24 cycles per reference. References make up 4,428 of the
-6,609 operations at that ring, so an operation of 225 to 240 cycles loses
-about 16 of them: seven percent.
+saving is about 24 cycles per reference. References make up 4,428 of the 6,609
+operations at that ring, so an operation of 200 to 270 cycles (YMXR,
+performance.md) loses about 16 of them: six to eight percent.
 
 ### Why it was left alone
 
@@ -536,9 +536,10 @@ of 8 bits brings it to 12 for under two percent more file. At k = 2 a
 penalty of 16 brings 9 down to 7 for 2.8 percent, and 32 and 64 buy no
 further reduction: the worst window stays at 7 while the bytes keep rising.
 
-At 225 to 240 cycles a block, against the 6,656 cycles in the thirteen
-scanlines YMXR's R4.5 allows the worst frame, the refill at k = 1 was 52
-percent of that budget; a penalty of 8 makes it 42.
+At 200 to 270 cycles a block (YMXR, performance.md), against the 6,656
+cycles in the thirteen scanlines YMXR's R4.5 allows the worst frame, the
+refill at k = 1 was 45 to 61 percent of that budget; a penalty of 8 brings it
+to 36 to 49.
 
 ### Neither parser is exact at a penalty
 
