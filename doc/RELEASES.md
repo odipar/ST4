@@ -44,6 +44,31 @@ plain `vN.0` means the format.
 
 ## Published
 
+### go/v0.1.8, 2026-09-17
+
+<https://github.com/odipar/ST4/releases/tag/go/v0.1.8>, built from the
+commit tagged `go/v0.1.8`.
+
+The documents alone. The tools write the bytes v0.1.7 wrote, the Go module
+is v0.1.7's, and the three 68000 decoders are v0.1.5's: every file under
+`src/main`, `go/`, `csharp/src` and `68k/` stands as v0.1.7 has it.
+
+- **The near offset is priced and parked.** research.md and near-offset.md
+  read a near offset at the class tree the format's parity rule allows, a
+  flag, three class bits and five offset bits, which saves two bits a near
+  match against the four the first reckoning claimed: 2.88 per cent of the
+  corpus it was measured on, and 3.57 per cent of thirty columns of real
+  tune data parsed for it at a ring of 256 and k = 2. Decode costs 4.7 per
+  cent more there and 6.6 per cent on the tune data, so the two documents
+  are headed by what the measurement found: the decode costs more than the
+  file saves.
+- **The figures YMXR measured are read again here.** An operation costs 200
+  to 270 cycles to parse where research.md read 225 to 240, so the worst
+  window at k = 1 is 45 to 61 per cent of YMXR's frame budget where the
+  sentence read 52, a penalty of 8 bits brings it to 36 to 49 where it read
+  42, and the near offset's saving is six to eight per cent of an operation
+  where it read seven.
+
 ### go/v0.1.7, 2026-09-17
 
 <https://github.com/odipar/ST4/releases/tag/go/v0.1.7>, built from the
