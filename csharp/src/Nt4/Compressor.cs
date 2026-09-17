@@ -297,6 +297,16 @@ public sealed class Compressor
                 throw new InvalidOperationException("a copy's source must be literal");
             }
             int back = LiteralsAt(start) - LiteralsAt(source);
+            // The parse costs a copy with the literal count of its dictionary,
+            // a lower bound on the literals between a source and the copy, so
+            // it may choose one that reads further back than an offset
+            // reaches. Those units go in as literals: they decode the same,
+            // and they stand where a later copy may read them.
+            if (window + back > Format.MaxOffsetUnits(unit))
+            {
+                pendingLiterals += size;
+                continue;
+            }
             int given = 0;
             if (back == size)
             {

@@ -99,6 +99,12 @@ far no longer finds the best parse, and the exact optimum is NP-hard.
 dynamic program with copies added, exact for a fixed set of forced
 literals, the dictionary.
 
+A copy is costed with the literal count of that dictionary, a lower bound
+on the literals between a source and the copy, so the parse may choose one
+whose offset, the window plus that distance, runs past what an offset
+reaches (SPEC.md 4.3). The compressor writes the units of such a copy as
+literals: they decode the same, and a later copy may read them.
+
 `-c` runs its opening passes: the dictionary is the literals of a
 full-window parse, holes of a few units filled, shrunk to what is copied
 from, up to four times.

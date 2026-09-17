@@ -323,6 +323,34 @@ final class St4RoundTripTest {
     }
 
     @Test
+    void aCopyPastTheOffsetsIsWrittenAsLiterals() {
+        // 32,512 units of random data and its first 500 units again. At a
+        // window of 16 every match between the two lies outside it, so every
+        // unit between them stands in the literal stream, and a copy of the
+        // tail reads 32,512 literal units back: past the 32,512 units an
+        // offset reaches, once the window is added. The parse costs a copy
+        // with the literal count of its dictionary, a lower bound, so it
+        // chooses one; the compressor writes the units of a copy it cannot
+        // address as literals, and the stream decodes.
+        Random random = new Random(7);
+        byte[] head = new byte[32_512];
+        random.nextBytes(head);
+        byte[] input = Arrays.copyOf(head, head.length + 500);
+        System.arraycopy(head, 0, input, head.length, 500);
+        int[] units = Units.split(input, 1);
+        int window = 16;
+        St4Block parse = St4LiteralCopySearch.optimize(units, 1, window,
+                St4Format.MAX_OP, 0, 1);
+        St4Compressor.Result packed = St4Compressor.compress(parse, units, 1,
+                St4Format.MAX_OP, -1, window);
+        assertArrayEquals(input, St4Decompressor.decompress(packed.control(),
+                packed.literal(), packed.byteOffsets(), packed.wordOffsets(), 1,
+                packed.paddedSize(), window),
+                "a copy past the offsets decodes to the input it was made from");
+        assertEquals(window, St4Format.read(St4.container(packed)).window());
+    }
+
+    @Test
     void theOracleCostsExactlyWhatTheCompressorWrites() {
         // The oracle claims to know the format's every cost, reps of copies and
         // the offset a copy leaves behind included; the compressor is the

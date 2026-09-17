@@ -343,6 +343,32 @@ public sealed class RoundTripTests
     }
 
     [Fact]
+    public void ACopyPastTheOffsetsIsWrittenAsLiterals()
+    {
+        // 32,512 units of random data and its first 500 units again. At a
+        // window of 16 every match between the two lies outside it, so every
+        // unit between them stands in the literal stream, and a copy of the
+        // tail reads 32,512 literal units back: past the 32,512 units an
+        // offset reaches, once the window is added. The parse costs a copy
+        // with the literal count of its dictionary, a lower bound, so it
+        // chooses one; the compressor writes the units of a copy it cannot
+        // address as literals, and the stream decodes.
+        byte[] head = new byte[32_512];
+        new JavaRandom(7).NextBytes(head);
+        byte[] input = new byte[head.Length + 500];
+        Array.Copy(head, input, head.Length);
+        Array.Copy(head, 0, input, head.Length, 500);
+        int[] units = Units.Split(input, 1);
+        const int window = 16;
+        Block parse = LiteralCopySearch.Optimize(units, 1, window, Format.MaxOp, 0, 1);
+        Compressor.Result packed = Compressor.Compress(parse, units, 1, Format.MaxOp,
+            -1, window);
+        Assert.Equal(input, Decompressor.Decompress(packed.Control, packed.Literal,
+            packed.ByteOffsets, packed.WordOffsets, 1, packed.PaddedSize, window));
+        Assert.Equal(window, Format.Read(Nt4.Container(packed)).Window);
+    }
+
+    [Fact]
     public void TheOracleCostsExactlyWhatTheCompressorWrites()
     {
         // The oracle claims to know the format's every cost; the compressor is

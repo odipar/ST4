@@ -228,6 +228,15 @@ public final class St4Compressor {
                     : "a copy's source must be literal";
             int back = literalsAt(start) - literalsAt(source);
             assert back >= size : "a copy's source lies behind its own literals";
+            // The parse costs a copy with the literal count of its dictionary,
+            // a lower bound on the literals between a source and the copy, so
+            // it may choose one that reads further back than an offset
+            // reaches. Those units go in as literals: they decode the same,
+            // and they stand where a later copy may read them.
+            if (window + back > St4Format.maxOffsetUnits(unit)) {
+                pendingLiterals += size;
+                continue;
+            }
             int given = 0;
             if (back == size) {
                 if (size - 1 < 2) {
