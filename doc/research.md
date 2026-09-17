@@ -1212,7 +1212,8 @@ on the blocks `dtx-write` writes.
 
 ## Verdict
 
-**2.88 per cent**, and the figure rests on which class code grows the third
+**Parked: the decode costs more than the file saves.** The file figure is
+**2.88 per cent**, and it rests on which class code grows the third
 bit. Parity picks the end code, and three class bits then pick five bits of
 offset. The figure is a floor, since the parse it is priced on was made
 under the old costs; a parse made under the new ones reads 0.27 points

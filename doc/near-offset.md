@@ -1,10 +1,16 @@
 # A near offset in five bits
 
+**Parked: the decode costs more than the file saves.** A near offset is
+worth 3.57 per cent of a stream packed without copies and 2.88 of one
+packed with them, and it costs 56 cycles a near match, 6.6 per cent of the
+decode over the columns those figures are measured on. A format version,
+two conformance kits and twenty-two images move with it. The sections below
+are the figures that decision rests on; none of it is built.
+
 Half the matches a stream makes reach back 32 units or fewer, and each of
 them spends a byte on an offset five bits would carry. This is what adding
 a near offset would be worth, what it would cost, and what building it
-touches. It is parked here so the decision rests on figures rather than on
-a memory of them. None of it is built.
+touches.
 
 The measurement it rests on is in [research.md](research.md), under *What a
 short-offset class is worth against the packer*.
@@ -164,9 +170,6 @@ change intended without reading the parse.
 
 ## What is open
 
-- Whether the end code or the word code grows. The end code is the measured
-  choice and the larger saving; it makes the end marker three bits, which
-  the loop path reads as well.
 - What the near reach should be at each unit. An offset counts units, so
   five bits reach 32 units: 32 bytes at `k` of 1 and 128 at `k` of 4.
 - What the third class bit and the five-bit read cost a decoder in bytes,
