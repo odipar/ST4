@@ -44,6 +44,38 @@ plain `vN.0` means the format.
 
 ## Published
 
+### go/v0.1.6, 2026-09-17
+
+<https://github.com/odipar/ST4/releases/tag/go/v0.1.6>, built from the
+commit tagged `go/v0.1.6`.
+
+A copy the offsets cannot reach is written as literals. Every other stream
+packs to the bytes v0.1.5 wrote, and the three 68000 decoders are v0.1.5's.
+
+- `st4 -k1 -m16 -c` over 32,512 units of random data and its first 500
+  units again ended the Go tool at `a copy reaches past the offsets` and
+  the C# port at the same message, while the Java tool, whose check is an
+  assertion and whose script runs without `-ea`, wrote a container with an
+  offset the format does not encode (SPEC.md 4.3).
+- The parse costs a copy with the literal count of its dictionary, a lower
+  bound on the literals between a source and the copy, so it may choose one
+  that reads further back than an offset reaches. The compressor reads that
+  distance before it writes the offset and puts the units of such a copy in
+  as literals: they decode the same, and a later copy may read them. The
+  same lines go into all three trees, and the three pack that stream to
+  the same bytes.
+- Copies exist only where the window stands well under the 32,512 bytes an
+  offset reaches, so the default window never met this and a ring of 960 or
+  of 16 does.
+- What moves: the broken case alone. README.md, doc/SPEC.md and 68k/ST4.S
+  pack byte for byte as before at `-k1`, `-k2 -c`, `-k1 -m960 -c`, `-k2
+  -m256 -c` and `-k4 -c`.
+
+`St4RoundTripTest` and the C# `RoundTripTests` pack that stream and decode
+it, and `GoParityTest` packs it in both trees and requires the same bytes:
+its four inputs are each under 32,512 bytes, so no flag setting over them
+reaches this.
+
 ### go/v0.1.5, 2026-09-16
 
 <https://github.com/odipar/ST4/releases/tag/go/v0.1.5>, built from the
