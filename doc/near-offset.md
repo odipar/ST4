@@ -28,28 +28,41 @@ rather than a byte from stream C. Two class bits name four outcomes, so one
 of the four grows a third bit and its two children are the old meaning and
 the new one.
 
-**The end code is the one to grow.** It stands once a stream where a word
-offset stands 698 times over the 120 columns of the corpus, so the bits the
-third class bit costs are 120 against 698. Measured on the parse the
-packer writes:
+**The end code is the one to grow, and parity settles it.** A block with
+its flag is an even number of bits: a gamma is odd, and the flag with the
+class bits makes it even, which lets a 68000 decoder skip the refill check
+on every read but three. Grow the word-offset code and a word block is
+flag, three class bits and sixteen, an even count against an odd gamma,
+698 times over the corpus. Grow the end code and the block that turns odd
+is the end, once a stream, at the end of a stream A padded to an even
+length. So the end code grows, its two children are the end and the near
+offset, and a near offset is read in three class bits.
 
-| the code that grows | four bits of offset | five | six |
+**Five bits of offset is then the width parity admits.** A near block is
+flag, class, offset and gamma, so flag plus class plus offset has to be
+odd: three class bits and five of offset is nine, where four or six would
+be even.
+
+So a near match spends eight bits of class and offset where it spends ten
+today, and the end code spends one more. Measured on the parse the
+packer writes, over the 120 columns of the corpus:
+
+| the tree | a near block | over the corpus | the parity rule |
 |---|---|---|---|
-| the word-offset code | 2.83% | 2.82% | 1.72% |
-| the end code | 3.78% | **4.25%** | 3.50% |
+| three class bits and five of offset, the end code grown | 9 bits with its flag | **2.88%** | kept |
+| two class bits and five, the end and the word code grown | 8 bits with its flag | 4.25% | broken, 14,362 times |
 
-**Five bits is also the only width the format's parity admits.** A block
-with its flag is an even number of bits: a gamma is odd, and the flag with
-the class bits makes it even, which lets a 68000 decoder skip the refill
-check on every read but three. A near block is flag, class, offset and
-gamma, so flag plus class plus offset has to be odd: three class bits and
-five of offset is nine, and four or six would be even. The width the
-measurement picks is the width the format needs.
-
-The end block itself becomes odd, being a flag, three class bits and a
-repeat bit. It is the last block of a stream and stream A is padded to an
-even length, so what that costs a decoder is a question for the 68000 side
-rather than for the format.
+This document read the second row until the arithmetic was checked against
+the parity rule above, and research.md's table beside it prices the same
+way. The second tree puts the near offset in the freed two-bit code and
+grows the end and the word code instead, which saves three bits a near
+match rather than two. What it costs is the property the format is shaped
+around: a near block of flag, two class bits, five of offset and an odd
+gamma is odd, and a decoder reads it with the refill check the parity was
+there to spare. The end block itself becomes odd, being a flag, three class
+bits and a repeat bit. It is the last block of a stream and stream A is
+padded to an even length, so what that costs a decoder is a question for
+the 68000 side rather than for the format.
 
 ## What it is worth
 
@@ -63,25 +76,55 @@ a 256-byte ring, where the packer writes 124,220 bytes:
 | 1 to 64, six bits | 17,788 | 63.0% |
 | past 512, a word | 698 | 2.5% |
 
-A near match spends seven bits against the ten it spends now, and the word
-offset and the end each spend one more: 14,362 x 3 - 698 - 120 = 42,268
-bits, 5,284 bytes of 124,220, **4.25 per cent**.
+A near match spends eight bits of class and offset against the ten it
+spends now, and the end code spends one more: 14,362 x 2 - 120 = 28,604
+bits, 3,576 bytes of 124,220, **2.88 per cent**.
 
 That is a floor. The parse it is priced on was chosen under the costs as
-they are; a parse made under the new ones reaches for more near matches.
+they are; a parse made under the new ones reaches for more near matches,
+and the section below measures what that adds.
+
+## What a parse made under the new costs finds
+
+The floor above is priced on a parse the old costs chose. This parses again
+with the near class in the cost model, so the parse reaches for it.
+
+The corpus is thirty columns of real tunes, the three tone-period low bytes
+of the ten dumps under YMXR's `ym/test`, 90,138 bytes in all, packed a
+column at a time at `-k2` through a 256-byte ring, without copies.
+`St4Optimizer` with the one cost line changed makes the second parse, and
+both parses are priced under both models. The model reproduces the packer:
+it counts 14,025 bytes where the packer writes 14,092 of payload, the
+difference being the padding each stream ends on, and on the longest column
+it counts 14,701 bits where the packer reports 14,712.
+
+| | bytes | against today |
+|---|---|---|
+| today's costs, today's parse | 14,025 | |
+| the near class, today's parse | 13,562 | -3.30% |
+| the near class, parsed for it | 13,525 | **-3.57%** |
+
+**Parsing for the class adds 0.27 points to the floor's 3.30**, a twelfth
+of it. The parse does reach: near matches rise from 1,879 to 2,309 and byte
+offsets fall from 1,026 to 923, and each swap trades one encoding for
+another of nearly the same cost.
+
+Note: at a 256-byte ring without copies every offset fits a byte, so this
+corpus has no word offset in it at all. The 698 word offsets of the corpus
+above are the copies, which are written as offsets beyond the window.
 
 ## What it costs to decode
 
 A byte offset is `move.b (a2)+,d1` and an `ext.w`, 16 cycles, with the two
 class bits 24: 40 cycles. A five-bit near offset is five reads out of
 stream A at 12 cycles a bit, 60, with three class bits 36: 96. Over 14,362
-near matches and 898,830 output bytes that is **0.78 cycles a byte on the
-19.00 the format decodes at, 4.1 per cent**, and the third class bit on
-every other new offset is beside it.
+near matches and 898,830 output bytes the 56 cycles between them are **0.89
+cycles a byte on the 19.00 the format decodes at, 4.7 per cent**, and the
+third class bit on every other new offset is beside it.
 
-So the trade is 4.25 per cent of the file against about 4 per cent of the
-decode, and the file figure is the one that grows when the parse is made
-under the new costs.
+So the trade is about 3 per cent of the file against about 4 per cent of
+the decode. Parsing for the class moves the file figure by a quarter of a
+point, which leaves the decode the dearer side of the two.
 
 ## What building it touches
 
@@ -123,5 +166,6 @@ change intended without reading the parse.
   five bits reach 32 units: 32 bytes at `k` of 1 and 128 at `k` of 4.
 - What the third class bit and the five-bit read cost a decoder in bytes,
   against ST4_wrap's 324 to 330.
-- What a parse made under the new costs finds, which the 4.25 per cent does
-  not include.
+- What it is worth with copies on. The corpus above is packed without them,
+  where every offset fits a byte; with copies a stream has word offsets in
+  it, and a near class competes with them for the same class codes.

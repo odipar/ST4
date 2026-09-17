@@ -1212,14 +1212,16 @@ on the blocks `dtx-write` writes.
 
 ## Verdict
 
-**4.25 per cent**, and the figure rests on which class code grows the third
-bit: the end code saves 4.25 where the word-offset code saves 2.82. Five
-bits beat four and six. The figure is a floor, since the parse it is priced
-on was made under the old costs, and a parse under the new costs has more
-short offsets in it.
+**2.88 per cent**, and the figure rests on which class code grows the third
+bit. Parity picks the end code, and three class bits then pick five bits of
+offset. The figure is a floor, since the parse it is priced on was made
+under the old costs; a parse made under the new ones reads 0.27 points
+further down on a corpus of thirty columns packed without copies
+([near-offset.md](near-offset.md)).
 
-It costs the decode 3.7 per cent: a near offset is five bits out of stream
-A where a byte offset is one byte out of stream C.
+It costs the decode 4.7 per cent: a near offset is five bits out of stream
+A and three class bits, where a byte offset is one byte out of stream C and
+two class bits.
 
 ## What the parse is
 
@@ -1243,30 +1245,35 @@ Half the new offsets are within 32 units.
 ## Which code grows
 
 A new-offset match spends a flag bit, two class bits and a byte today. A
-fifth outcome needs one of the four class codes to grow a third bit, and the
-code to grow is the rarest: the end code stands once a stream, 120 times
-over the set, where a word offset stands 698 times.
+fifth outcome needs one of the four class codes to grow a third bit, and
+parity picks which: a block with its flag is an even number of bits, so
+growing the word-offset code turns a word block odd, 698 times over the
+set, where growing the end code turns the end block odd once a stream, at
+the end of a stream A padded to an even length. Three class bits then leave
+five bits of offset as the width that keeps a near block even.
 
-| the code that grows | four bits | five bits | six bits |
+| the tree | a near block | over the set | the parity rule |
 |---|---|---|---|
-| the word-offset code | 2.83% | 2.82% | 1.72% |
-| the end code | 3.78% | **4.25%** | 3.50% |
+| three class bits and five of offset, the end code grown | 9 bits with its flag | **2.88%** | kept |
+| two class bits and five, the end and the word code grown | 8 bits with its flag | 4.25% | broken, 14,362 times |
 
-At the end code a near match spends two class bits and five, seven against
-the ten it spends now, and the word offset and the end each spend one more:
-14,362 x 3 - 698 - 120 = 42,268 bits, 5,284 bytes of 124,220.
+A near match spends three class bits and five against the ten it spends
+now, and the end spends one more: 14,362 x 2 - 120 = 28,604 bits, 3,576
+bytes of 124,220. The second row is what this section read until the
+arithmetic was checked against the parity rule, and 2.83, 2.82 and 1.72 per
+cent were the same pricing over a grown word-offset code.
 
 ## What it costs to decode
 
 A byte offset is `move.b (a2)+,d1` and an `ext.w`, 16 cycles, and the two
 class bits 24: 40 cycles. A five-bit near offset is five reads out of
-stream A at ST4's 12 cycles a bit, 60, and the same two class bits: 84. The
-44 cycles between them, over 14,362 near matches and 898,830 output bytes,
-is 0.70 cycles a byte on the 19.00 the format decodes at, 3.7 per cent.
+stream A at ST4's 12 cycles a bit, 60, and three class bits 36: 96. The 56
+cycles between them, over 14,362 near matches and 898,830 output bytes, is
+0.89 cycles a byte on the 19.00 the format decodes at, 4.7 per cent.
 
-So the trade is 4.25 per cent of the file for 3.7 per cent of the decode,
-and the file figure is the one that grows when the parse is made under the
-new costs.
+So the trade is 2.88 per cent of the file for 4.7 per cent of the decode,
+and a parse made under the new costs moves the file figure a quarter of a
+point ([near-offset.md](near-offset.md)).
 
 # What the copies search costs in memory
 
