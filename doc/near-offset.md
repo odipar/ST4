@@ -119,12 +119,17 @@ A byte offset is `move.b (a2)+,d1` and an `ext.w`, 16 cycles, with the two
 class bits 24: 40 cycles. A five-bit near offset is five reads out of
 stream A at 12 cycles a bit, 60, with three class bits 36: 96. Over 14,362
 near matches and 898,830 output bytes the 56 cycles between them are **0.89
-cycles a byte on the 19.00 the format decodes at, 4.7 per cent**, and the
-third class bit on every other new offset is beside it.
+cycles a byte on the 19.00 the format decodes at, 4.7 per cent**. A byte
+offset and a word offset keep the two class bits they read today, so the
+near block and the end block are the only ones that read three.
 
-So the trade is about 3 per cent of the file against about 4 per cent of
-the decode. Parsing for the class moves the file figure by a quarter of a
-point, which leaves the decode the dearer side of the two.
+Measured the same way over the thirty columns of the section above, decoded
+by ST4.S at `k` of 2 under the rig's cycle counter: the stream costs 21.86
+cycles a byte today, and 2,309 near matches at 56 cycles each add 1.43,
+**6.6 per cent of the decode for the 3.57 per cent of the file**.
+
+So the decode is the dearer side of the trade on either corpus, and parsing
+for the class moves the file figure a quarter of a point.
 
 ## What building it touches
 
