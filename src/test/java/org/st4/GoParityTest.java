@@ -118,6 +118,30 @@ final class GoParityTest {
         }
     }
 
+    /**
+     * A copy the offsets cannot reach, in both trees. The inputs above are
+     * all under 32,512 bytes, so no flag setting over them makes a copy
+     * whose source lies past the offsets; this input does, and each tree
+     * writes those units as literals. It packed here and ended the Go tree
+     * at a panic until the compressor read the distance before it wrote
+     * the offset.
+     */
+    @Test
+    void aCopyPastTheOffsetsPacksTheSameInBothTrees() throws Exception {
+        byte[] head = new byte[32_512];
+        new java.util.Random(7).nextBytes(head);
+        byte[] input = java.util.Arrays.copyOf(head, head.length + 500);
+        System.arraycopy(head, 0, input, head.length, 500);
+        List<String> flags = List.of("-k1", "-m16", "-c");
+        byte[] mine = java(() -> St4.main(new String[] {"-silent", "-k1", "-m16", "-c"}), input);
+        assertTrue(mine.length > 0, "the input packs to something");
+        assertArrayEquals(mine, go("st4", input, flags),
+                "the two trees pack a copy past the offsets the same");
+        assertArrayEquals(input, java.util.Arrays.copyOf(
+                java(() -> Dst4.main(new String[] {"-silent"}), mine), input.length),
+                "and what comes back is the input");
+    }
+
     @Test
     void everyContainerUnpacksTheSameInBothTrees() throws Exception {
         for (String named : INPUTS) {
