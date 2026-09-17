@@ -44,6 +44,25 @@ plain `vN.0` means the format.
 
 ## Published
 
+### go/v0.1.7, 2026-09-17
+
+<https://github.com/odipar/ST4/releases/tag/go/v0.1.7>, built from the
+commit tagged `go/v0.1.7`.
+
+The checks alone. The tools write the bytes v0.1.6 wrote, the Go module is
+v0.1.6's, and the three 68000 decoders are v0.1.5's: every file under
+`src/main`, `go/`, `csharp/src` and `68k/` stands as v0.1.6 has it.
+
+- `everyClauseCitedIsDefined` reads every `<document>.md N` citation
+  against the clauses that document defines. It read `SPEC.md N` alone
+  before, and a citation of tools.md, decoders.md or research.md by number
+  went unread. 43 citations are read and each resolves.
+- The clause reader accepts any numbered heading and any bold clause number
+  rather than SPEC.md's two shapes, so a document numbered another way is
+  read as it stands.
+- DTX and YMXR carry the same check now, and YMXR and YMXS read a citation
+  written through a link as this one always has.
+
 ### go/v0.1.6, 2026-09-17
 
 <https://github.com/odipar/ST4/releases/tag/go/v0.1.6>, built from the
