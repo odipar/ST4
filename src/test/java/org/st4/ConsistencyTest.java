@@ -93,16 +93,17 @@ final class ConsistencyTest {
         assertTrue(broken.isEmpty(), () -> String.join("\n", broken));
     }
 
-    /** The clauses SPEC.md numbers, as {@code 2}, {@code 2.1} and so on. */
-    private static Set<String> clauses(String spec) {
+    /** The clauses a document numbers, as {@code 2}, {@code 2.1} and so
+     *  on: its numbered headings and the bold number that opens a clause. */
+    private static Set<String> clauses(String document) {
         Set<String> out = new TreeSet<>();
-        Matcher h = Pattern.compile("^## (\\d+)\\. ", Pattern.MULTILINE)
-                .matcher(spec);
+        Matcher h = Pattern.compile("^#{1,4} (\\d+(?:\\.\\d+)*)\\.?\\s",
+                Pattern.MULTILINE).matcher(document);
         while (h.find()) {
             out.add(h.group(1));
         }
-        Matcher c = Pattern.compile("^\\*\\*(\\d+\\.\\d+)\\*\\* ", Pattern.MULTILINE)
-                .matcher(spec);
+        Matcher c = Pattern.compile("^\\*\\*(\\d+(?:\\.\\d+)*)\\b",
+                Pattern.MULTILINE).matcher(document);
         while (c.find()) {
             out.add(c.group(1));
         }
@@ -110,23 +111,57 @@ final class ConsistencyTest {
     }
 
     @Test
-    void everyClauseCitedIsInTheSpecification() throws IOException {
+    void everyClauseCitedIsDefined() throws IOException {
         Set<String> clauses = clauses(read(SPEC));
         assertTrue(clauses.size() > 20,
                 () -> "SPEC.md read as " + clauses.size() + " clauses");
+        java.util.Map<Path, Set<String>> defined = new java.util.LinkedHashMap<>();
         List<String> dangling = new ArrayList<>();
+        int found = 0;
         for (Path p : documents()) {
-            Matcher m = Pattern.compile("SPEC\\.md\\)? (\\d+(?:\\.\\d+)?)"
-                    + "(?:, (\\d+\\.\\d+))?").matcher(read(p));
+            if (p.getFileName().toString().equals("RELEASES.md")) {
+                continue;   // what was true at a release stands as it was
+            }
+            String said = read(p);
+            Matcher m = Pattern.compile("([A-Za-z_]+)\\.md\\)? (\\d+(?:\\.\\d+)*)"
+                    + "(?:, (\\d+\\.\\d+))?").matcher(said);
             while (m.find()) {
-                for (int g = 1; g <= m.groupCount(); g++) {
-                    String cited = m.group(g);
-                    if (cited != null && !clauses.contains(cited)) {
-                        dangling.add(p + " cites SPEC.md " + cited);
+                // A citation qualified with DTX or YMXR names that
+                // repository's document, and so does one this repository
+                // does not have; both are left alone.
+                int open = said.lastIndexOf('(', Math.max(0, m.start() - 1));
+                String before = open >= 0 && m.start() - open <= 120
+                        ? said.substring(open, m.start())
+                        : said.substring(Math.max(0, m.start() - 20), m.start());
+                if (before.contains("DTX") || before.contains("YMXR")
+                        || before.contains("YMXS")) {
+                    continue;
+                }
+                Path in = Path.of("doc", m.group(1) + ".md");
+                if (!Files.exists(in)) {
+                    in = Path.of(m.group(1) + ".md");
+                }
+                if (!Files.exists(in)) {
+                    continue;
+                }
+                if (!defined.containsKey(in)) {
+                    defined.put(in, clauses(read(in)));
+                }
+                for (int g = 2; g <= m.groupCount(); g++) {
+                    String at = m.group(g);
+                    if (at == null) {
+                        continue;
+                    }
+                    found++;
+                    if (!defined.get(in).contains(at)) {
+                        dangling.add(p + " cites " + m.group(1) + ".md " + at);
                     }
                 }
             }
         }
+        final int read = found;
+        assertTrue(read > 30, () -> "only " + read
+                + " citations read; the check is asleep");
         // SPEC.md points at the clauses of this document by number alone, in brackets
         Matcher inside = Pattern.compile("\\((\\d+\\.\\d+)(?:, (\\d+\\.\\d+))?"
                 + "(?:, (\\d+\\.\\d+))?\\)").matcher(read(SPEC));
