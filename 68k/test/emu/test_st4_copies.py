@@ -17,13 +17,10 @@ decode streams packed without copies as the plain build does.
 """
 import importlib.util
 import math
-import subprocess
 import sys
-import tempfile
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-REPO = HERE.parents[2]
 
 spec = importlib.util.spec_from_file_location('st4', HERE / 'test_st4.py')
 QUICK = '--quick' in sys.argv
@@ -33,53 +30,9 @@ sys.modules['st4'] = st4
 spec.loader.exec_module(st4)
 t = st4.t
 
-from unicorn import UC_HOOK_MEM_WRITE                                # noqa: E402
-from unicorn.m68k_const import (                                     # noqa: E402
-    UC_M68K_REG_A0, UC_M68K_REG_A1, UC_M68K_REG_A2, UC_M68K_REG_A4,
-    UC_M68K_REG_A5, UC_M68K_REG_D1, UC_M68K_REG_D3,
+from unicorn.m68k_const import (                      # noqa: E402
+    UC_M68K_REG_A1, UC_M68K_REG_D1, UC_M68K_REG_D3,
 )
-
-
-def assemble(name: str, unit: int) -> bytes:
-    """A decoder built for one unit size, with the copy code."""
-    with tempfile.TemporaryDirectory() as directory:
-        source = Path(directory) / 'build.S'
-        binary = Path(directory) / 'build.bin'
-        source.write_text(f'ST4_UNIT    equ     {unit}\n'
-                          f'ST4_WINDOW  equ     1\n'
-                          f'        include "{REPO / "68k" / name}"\n')
-        result = subprocess.run(
-            ['rmac', '-m68000', '-fr', '+o3', '-o', str(binary), str(source)],
-            capture_output=True, text=True)
-        if result.returncode:
-            raise SystemExit(result.stdout + result.stderr)
-        return binary.read_bytes()
-
-
-def seed(uc, control, literal, byte_offsets, word_offsets, destination):
-    uc.mem_map(st4.LITERAL, 0x20000)
-    uc.mem_map(st4.BYTE_OFFSETS, 0x20000)
-    uc.mem_map(st4.WORD_OFFSETS, 0x20000)
-    uc.mem_write(st4.LITERAL, literal)
-    uc.mem_write(st4.BYTE_OFFSETS, byte_offsets or b'\0')
-    uc.mem_write(st4.WORD_OFFSETS, word_offsets or b'\0\0')
-    uc.reg_write(UC_M68K_REG_A0, t.SRC)
-    uc.reg_write(UC_M68K_REG_A1, destination)
-    uc.reg_write(UC_M68K_REG_A2, st4.LITERAL)
-    uc.reg_write(UC_M68K_REG_A4, st4.BYTE_OFFSETS)
-    uc.reg_write(UC_M68K_REG_A5, st4.WORD_OFFSETS)
-
-
-def drained(uc, control, literal, byte_offsets, word_offsets) -> str:
-    for name, register, base, stream in (
-            ('A', UC_M68K_REG_A0, t.SRC, control),
-            ('B', UC_M68K_REG_A2, st4.LITERAL, literal),
-            ('C', UC_M68K_REG_A4, st4.BYTE_OFFSETS, byte_offsets),
-            ('D', UC_M68K_REG_A5, st4.WORD_OFFSETS, word_offsets)):
-        problem = st4.read_fully(name, uc.reg_read(register) - base, stream)
-        if problem:
-            return problem
-    return ''
 
 
 def run_linear(control, literal, byte_offsets, word_offsets, expected, unit, code, chunk,
@@ -87,7 +40,7 @@ def run_linear(control, literal, byte_offsets, word_offsets, expected, unit, cod
     """ST4.S: resumed in chunks, the copies reaching B from a plain buffer."""
     uc = t.make_emu(control)
     uc.mem_write(t.CODE, code)
-    seed(uc, control, literal, byte_offsets, word_offsets, t.DST)
+    st4.seed(uc, control, literal, byte_offsets, word_offsets, t.DST)
     uc.reg_write(UC_M68K_REG_D3, 0xBEEF0000 | window_bytes)
     t.call(uc, t.CODE)                                  # ST4_init, the window in d3
     calls = 0
@@ -103,7 +56,7 @@ def run_linear(control, literal, byte_offsets, word_offsets, expected, unit, cod
         return f'produced {uc.reg_read(UC_M68K_REG_A1) - t.DST} bytes'
     if bytes(uc.mem_read(t.DST, len(expected))) != expected:
         return 'output differs'
-    return drained(uc, control, literal, byte_offsets, word_offsets)
+    return st4.drained(uc, control, literal, byte_offsets, word_offsets)
 
 
 def run_wrap(control, literal, byte_offsets, word_offsets, expected, unit, code,
@@ -115,15 +68,8 @@ def run_wrap(control, literal, byte_offsets, word_offsets, expected, unit, code,
     uc = t.make_emu(control)
     uc.mem_write(t.CODE, code)
     ring = t.DST + 16
-    seed(uc, control, literal, byte_offsets, word_offsets, ring)
-    uc.mem_write(ring - 8, b'\xAA' * (ring_bytes + 16))
-    stray = []
-
-    def guard(u, access, address, size, value, data):
-        if not (ring <= address and address + size <= ring + ring_bytes):
-            stray.append(address)
-
-    uc.hook_add(UC_HOOK_MEM_WRITE, guard, begin=t.DST, end=t.DST + 0x1FFFF)
+    st4.seed(uc, control, literal, byte_offsets, word_offsets, ring)
+    stray = st4.guarded(uc, ring, ring_bytes)
     uc.reg_write(UC_M68K_REG_D3, 0xBEEF0000 | ring_bytes)
     t.call(uc, t.CODE)                                  # ST4_init at +0
     output = bytearray()
@@ -146,7 +92,7 @@ def run_wrap(control, literal, byte_offsets, word_offsets, expected, unit, code,
             previous = current
     if bytes(output) != expected:
         return 'output differs'
-    return drained(uc, control, literal, byte_offsets, word_offsets)
+    return st4.drained(uc, control, literal, byte_offsets, word_offsets)
 
 
 def run_ring(control, literal, byte_offsets, word_offsets, expected, unit, code,
@@ -156,15 +102,8 @@ def run_ring(control, literal, byte_offsets, word_offsets, expected, unit, code,
     uc.mem_write(t.CODE, code)
     ring = t.DST + 16
     ring_end = ring + ring_bytes
-    seed(uc, control, literal, byte_offsets, word_offsets, ring)
-    uc.mem_write(ring - 8, b'\xAA' * (ring_bytes + 16))
-    stray = []
-
-    def guard(u, access, address, size, value, data):
-        if not (ring <= address and address + size <= ring_end):
-            stray.append(address)
-
-    uc.hook_add(UC_HOOK_MEM_WRITE, guard, begin=t.DST, end=t.DST + 0x1FFFF)
+    st4.seed(uc, control, literal, byte_offsets, word_offsets, ring)
+    stray = st4.guarded(uc, ring, ring_bytes)
     uc.reg_write(UC_M68K_REG_D3, ring_end)
     t.call(uc, t.CODE)                                  # ST4_init at +0
     output = bytearray()
@@ -194,7 +133,7 @@ def run_ring(control, literal, byte_offsets, word_offsets, expected, unit, code,
             previous = current
     if bytes(output) != expected:
         return 'output differs'
-    return drained(uc, control, literal, byte_offsets, word_offsets)
+    return st4.drained(uc, control, literal, byte_offsets, word_offsets)
 
 
 def main() -> int:
@@ -202,9 +141,9 @@ def main() -> int:
     windows = [16] if QUICK else [16, 64, 256]
     for unit in (1, 2, 4):
         cases = 0
-        linear = assemble('ST4.S', unit)
-        wrap = assemble('ST4_wrap.S', unit)
-        ring = assemble('ST4_ring.S', unit)
+        linear = st4.assemble(unit, 'ST4.S', window=True)
+        wrap = st4.assemble(unit, 'ST4_wrap.S', window=True)
+        ring = st4.assemble(unit, 'ST4_ring.S', window=True)
         for window in windows:
             ring_bytes = window * unit
             chunk = 16 if window >= 16 * 1 else window
