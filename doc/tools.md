@@ -148,3 +148,9 @@ guard bands and the register state. The two loop rigs drive all three
 decoders as a caller would, budgets, snapshots and restores included,
 through more than two passes, against the infinite output the container
 stands for, and read `dst4 -rN` back against the same bytes.
+
+`test_st4.py` is the harness the other five read: it packs and unpacks
+through the real tools, builds a decoder at a unit size, seeds the four
+streams and the registers a decoder reads them through, guards a ring
+against a write outside it, and reads every stream to its end. A rig
+reads the harness for those and has the calls its subject needs.

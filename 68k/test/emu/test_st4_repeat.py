@@ -15,13 +15,10 @@ included, and that no decoder reports done.
 """
 import importlib.util
 import math
-import subprocess
 import sys
-import tempfile
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-REPO = HERE.parents[2]
 
 spec = importlib.util.spec_from_file_location('st4', HERE / 'test_st4.py')
 QUICK = '--quick' in sys.argv
@@ -31,61 +28,9 @@ sys.modules['st4'] = st4
 spec.loader.exec_module(st4)
 t = st4.t
 
-from unicorn import UC_HOOK_MEM_WRITE                                # noqa: E402
-from unicorn.m68k_const import (                                     # noqa: E402
-    UC_M68K_REG_A0, UC_M68K_REG_A1, UC_M68K_REG_A2, UC_M68K_REG_A4,
-    UC_M68K_REG_A5, UC_M68K_REG_D1, UC_M68K_REG_D2, UC_M68K_REG_D3,
+from unicorn.m68k_const import (                      # noqa: E402
+    UC_M68K_REG_A1, UC_M68K_REG_D1, UC_M68K_REG_D2, UC_M68K_REG_D3,
 )
-
-
-def assemble(name: str, unit: int) -> bytes:
-    with tempfile.TemporaryDirectory() as directory:
-        source = Path(directory) / 'build.S'
-        binary = Path(directory) / 'build.bin'
-        source.write_text(f'ST4_UNIT    equ     {unit}\n'
-                          f'        include "{REPO / "68k" / name}"\n')
-        result = subprocess.run(
-            ['rmac', '-m68000', '-fr', '+o3', '-o', str(binary), str(source)],
-            capture_output=True, text=True)
-        if result.returncode:
-            raise SystemExit(result.stdout + result.stderr)
-        return binary.read_bytes()
-
-
-def looped(data: bytes, unit: int, index: int, target: int) -> bytes:
-    """The padded pass, continued to target bytes from its loop point."""
-    expected = bytearray(data + bytes(-len(data) % unit))
-    period = len(expected) - index * unit
-    while len(expected) < target:
-        expected.append(expected[-period])
-    return bytes(expected)
-
-
-def seed(uc, control, literal, byte_offsets, word_offsets, destination):
-    uc.mem_map(st4.LITERAL, 0x20000)
-    uc.mem_map(st4.BYTE_OFFSETS, 0x20000)
-    uc.mem_map(st4.WORD_OFFSETS, 0x20000)
-    uc.mem_write(st4.LITERAL, literal)
-    uc.mem_write(st4.BYTE_OFFSETS, byte_offsets or b'\0')
-    uc.mem_write(st4.WORD_OFFSETS, word_offsets or b'\0\0')
-    uc.reg_write(UC_M68K_REG_A0, t.SRC)
-    uc.reg_write(UC_M68K_REG_A1, destination)
-    uc.reg_write(UC_M68K_REG_A2, st4.LITERAL)
-    uc.reg_write(UC_M68K_REG_A4, st4.BYTE_OFFSETS)
-    uc.reg_write(UC_M68K_REG_A5, st4.WORD_OFFSETS)
-
-
-def drained(uc, control, literal, byte_offsets, word_offsets) -> str:
-    """After decoding past the end marker, every stream must be spent."""
-    for name, register, base, stream in (
-            ('A', UC_M68K_REG_A0, t.SRC, control),
-            ('B', UC_M68K_REG_A2, st4.LITERAL, literal),
-            ('C', UC_M68K_REG_A4, st4.BYTE_OFFSETS, byte_offsets),
-            ('D', UC_M68K_REG_A5, st4.WORD_OFFSETS, word_offsets)):
-        problem = st4.read_fully(name, uc.reg_read(register) - base, stream)
-        if problem:
-            return problem
-    return ''
 
 
 def run_linear(control, literal, byte_offsets, word_offsets, expected, unit,
@@ -95,7 +40,7 @@ def run_linear(control, literal, byte_offsets, word_offsets, expected, unit,
     uc.mem_write(t.CODE, code)
     if len(expected) > 0x20000:         # the far cases outgrow the harness DST
         uc.mem_map(t.DST + 0x20000, 0x40000)
-    seed(uc, control, literal, byte_offsets, word_offsets, t.DST)
+    st4.seed(uc, control, literal, byte_offsets, word_offsets, t.DST)
     t.call(uc, t.CODE)                                  # ST4_init at +0
 
     done, total = 0, len(expected) // unit
@@ -114,7 +59,7 @@ def run_linear(control, literal, byte_offsets, word_offsets, expected, unit,
         return 'output differs'
     if uc.reg_read(UC_M68K_REG_D2) & 0xFFFF != (-distance * unit) & 0xFFFF:
         return 'the armed offset is not the loop distance'
-    return drained(uc, control, literal, byte_offsets, word_offsets)
+    return st4.drained(uc, control, literal, byte_offsets, word_offsets)
 
 
 def run_wrap(control, literal, byte_offsets, word_offsets, expected, unit,
@@ -127,15 +72,8 @@ def run_wrap(control, literal, byte_offsets, word_offsets, expected, unit,
     uc = t.make_emu(control)
     uc.mem_write(t.CODE, code)
     ring = t.DST + 16
-    seed(uc, control, literal, byte_offsets, word_offsets, ring)
-    uc.mem_write(ring - 8, b'\xAA' * (ring_bytes + 16))
-    stray = []
-
-    def guard(u, access, address, size, value, data):
-        if not (ring <= address and address + size <= ring + ring_bytes):
-            stray.append(address)
-
-    uc.hook_add(UC_HOOK_MEM_WRITE, guard, begin=t.DST, end=t.DST + 0x1FFFF)
+    st4.seed(uc, control, literal, byte_offsets, word_offsets, ring)
+    stray = st4.guarded(uc, ring, ring_bytes)
     uc.reg_write(UC_M68K_REG_D3, 0xBEEF0000 | ring_bytes)
     t.call(uc, t.CODE)                                  # ST4_init at +0
 
@@ -162,7 +100,7 @@ def run_wrap(control, literal, byte_offsets, word_offsets, expected, unit,
 
     if bytes(output) != expected[:len(output)]:
         return 'output differs'
-    return drained(uc, control, literal, byte_offsets, word_offsets)
+    return st4.drained(uc, control, literal, byte_offsets, word_offsets)
 
 
 def run_ring(control, literal, byte_offsets, word_offsets, expected, unit,
@@ -172,15 +110,8 @@ def run_ring(control, literal, byte_offsets, word_offsets, expected, unit,
     uc.mem_write(t.CODE, code)
     ring = t.DST + 16
     ring_end = ring + ring_bytes
-    seed(uc, control, literal, byte_offsets, word_offsets, ring)
-    uc.mem_write(ring - 8, b'\xAA' * (ring_bytes + 16))
-    stray = []
-
-    def guard(u, access, address, size, value, data):
-        if not (ring <= address and address + size <= ring_end):
-            stray.append(address)
-
-    uc.hook_add(UC_HOOK_MEM_WRITE, guard, begin=t.DST, end=t.DST + 0x1FFFF)
+    st4.seed(uc, control, literal, byte_offsets, word_offsets, ring)
+    stray = st4.guarded(uc, ring, ring_bytes)
     uc.reg_write(UC_M68K_REG_D3, ring_end)
     t.call(uc, t.CODE)                                  # ST4_init at +0
 
@@ -209,22 +140,7 @@ def run_ring(control, literal, byte_offsets, word_offsets, expected, unit,
 
     if bytes(output[:len(expected)]) != expected:
         return 'output differs'
-    return drained(uc, control, literal, byte_offsets, word_offsets)
-
-
-def played(file: bytes, data: bytes, unit: int, index: int, target: int) -> str:
-    """dst4 -rN on the container, for enough passes to cover target bytes: it
-    must obey the recurrence the decoders follow - so the unpacker's
-    repeats are the decoders' - and reach at least as far."""
-    padded = len(data) + (-len(data) % unit)
-    period = padded - index * unit
-    times = 1 + max(0, -(-(target - padded) // period))
-    out = st4.unpack_file(file, times)
-    if len(out) < target:
-        return f'dst4 -r{times} wrote {len(out)} bytes, short of {target}'
-    if out != looped(data, unit, index, len(out)):
-        return f'dst4 -r{times} does not follow the loop from unit {index}'
-    return ''
+    return st4.drained(uc, control, literal, byte_offsets, word_offsets)
 
 
 def repeats_for(units_total: int, window: int) -> list[int]:
@@ -240,9 +156,9 @@ def main() -> int:
     ring_shapes = [(1024, 16)] if QUICK else [(1024, 16), (256, 127)]
     wrap_shapes = [(1024, 16)] if QUICK else [(1024, 16), (256, 16)]
     for unit in (1, 2, 4):
-        linear = assemble('ST4.S', unit)
-        wrap = assemble('ST4_wrap.S', unit)
-        ring = assemble('ST4_ring.S', unit)
+        linear = st4.assemble(unit, 'ST4.S')
+        wrap = st4.assemble(unit, 'ST4_wrap.S')
+        ring = st4.assemble(unit, 'ST4_ring.S')
         window = 32512 // unit
         cases = 0
         for name, data, _ in t.testcases():
@@ -254,8 +170,8 @@ def main() -> int:
             for index in repeats_for(units_total, window):
                 file = st4.pack_file(data, unit, window, index)
                 streams = st4.streams(file, unit)[:4]
-                expected = looped(data, unit, index, target_units * unit)
-                problem = played(file, data, unit, index, len(expected))
+                expected = st4.looped(data, unit, index, target_units * unit)
+                problem = st4.played(file, data, unit, index, len(expected))
                 if problem:
                     print(f'FAIL k={unit} {name} -r{index} (dst4): {problem}')
                     failures += 1
@@ -274,7 +190,7 @@ def main() -> int:
                 for index in repeats_for(units_total, ring_units):
                     file = st4.pack_file(data, unit, min(ring_units, window), index)
                     streams = st4.streams(file, unit)[:4]
-                    problem = played(file, data, unit, index, target_units * unit)
+                    problem = st4.played(file, data, unit, index, target_units * unit)
                     if problem:
                         print(f'FAIL k={unit} {name} -r{index} (dst4, N={ring_bytes}): '
                               f'{problem}')
@@ -284,7 +200,7 @@ def main() -> int:
                     if is_wrap:
                         whole = chunk_units * (ring_bytes // (chunk_units * unit))
                         wanted = math.ceil(target_units / whole) * whole
-                        expected = looped(data, unit, index, wanted * unit)
+                        expected = st4.looped(data, unit, index, wanted * unit)
                         problem = run_wrap(*streams, expected, unit, wrap,
                                            ring_bytes, chunk_units)
                         if problem:
@@ -293,7 +209,7 @@ def main() -> int:
                             failures += 1
                         cases += 1
                     else:
-                        expected = looped(data, unit, index, target_units * unit)
+                        expected = st4.looped(data, unit, index, target_units * unit)
                         for caller_wraps in (True, False):
                             problem = run_ring(*streams, expected, unit, ring,
                                                ring_bytes, chunk_units, caller_wraps)
@@ -316,11 +232,11 @@ def main() -> int:
         whole = 16 * (1024 // (16 * unit))
         wrap_far = math.ceil(far / whole) * whole
         for shape, problem in (
-                ('linear', run_linear(*streams, looped(data, unit, index, far * unit),
+                ('linear', run_linear(*streams, st4.looped(data, unit, index, far * unit),
                                       unit, units_total - index, linear, 255)),
-                ('wrap', run_wrap(*streams, looped(data, unit, index, wrap_far * unit),
+                ('wrap', run_wrap(*streams, st4.looped(data, unit, index, wrap_far * unit),
                                   unit, wrap, 1024, 16)),
-                ('ring', run_ring(*streams, looped(data, unit, index, far * unit),
+                ('ring', run_ring(*streams, st4.looped(data, unit, index, far * unit),
                                   unit, ring, 1024, 255, False))):
             if problem:
                 print(f'FAIL k={unit} {name} -r{index} (far, {shape}): {problem}')

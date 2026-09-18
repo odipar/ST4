@@ -12,13 +12,10 @@ and that the state's high words survive.
     python3 68k/test/emu/test_st4_ring.py [--quick]
 """
 import importlib.util
-import subprocess
 import sys
-import tempfile
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-REPO = HERE.parents[2]
 
 spec = importlib.util.spec_from_file_location('st4', HERE / 'test_st4.py')
 sys.argv = ['x'] + [a for a in sys.argv[1:] if a.startswith('-')]
@@ -27,7 +24,6 @@ sys.modules['st4'] = st4
 spec.loader.exec_module(st4)
 t = st4.t
 
-from unicorn import UC_HOOK_MEM_WRITE                                # noqa: E402
 from unicorn.m68k_const import (                                     # noqa: E402
     UC_M68K_REG_A0, UC_M68K_REG_A1, UC_M68K_REG_A2, UC_M68K_REG_A4,
     UC_M68K_REG_A5, UC_M68K_REG_D1, UC_M68K_REG_D2, UC_M68K_REG_D3,
@@ -36,46 +32,14 @@ from unicorn.m68k_const import (                                     # noqa: E40
 QUICK = '--quick' in sys.argv
 
 
-def assemble(unit: int) -> bytes:
-    with tempfile.TemporaryDirectory() as directory:
-        source = Path(directory) / 'build.S'
-        binary = Path(directory) / 'build.bin'
-        source.write_text(f'ST4_UNIT    equ     {unit}\n'
-                          f'        include "{REPO / "68k" / "ST4_ring.S"}"\n')
-        result = subprocess.run(
-            ['rmac', '-m68000', '-fr', '+o3', '-o', str(binary), str(source)],
-            capture_output=True, text=True)
-        if result.returncode:
-            raise SystemExit(result.stdout + result.stderr)
-        return binary.read_bytes()
-
-
 def run(control, literal, byte_offsets, word_offsets, expected, unit, code, ring_bytes, budget,
         caller_wraps: bool) -> str:
     uc = t.make_emu(control)
-    uc.mem_map(st4.LITERAL, 0x20000)
-    uc.mem_map(st4.BYTE_OFFSETS, 0x20000)
-    uc.mem_map(st4.WORD_OFFSETS, 0x20000)
     uc.mem_write(t.CODE, code)
-    uc.mem_write(st4.LITERAL, literal)
-    uc.mem_write(st4.BYTE_OFFSETS, byte_offsets or b'\0')
-    uc.mem_write(st4.WORD_OFFSETS, word_offsets or b'\0\0')
     ring = t.DST + 16                   # unit-aligned, with room for a guard band
     ring_end = ring + ring_bytes
-    uc.mem_write(ring - 8, b'\xAA' * (ring_bytes + 16))
-    stray = []
-
-    def guard(u, access, address, size, value, data):
-        if not (ring <= address and address + size <= ring_end):
-            stray.append(address)
-
-    uc.hook_add(UC_HOOK_MEM_WRITE, guard, begin=t.DST, end=t.DST + 0x1FFFF)
-
-    uc.reg_write(UC_M68K_REG_A0, t.SRC)
-    uc.reg_write(UC_M68K_REG_A1, ring)
-    uc.reg_write(UC_M68K_REG_A2, st4.LITERAL)
-    uc.reg_write(UC_M68K_REG_A4, st4.BYTE_OFFSETS)
-    uc.reg_write(UC_M68K_REG_A5, st4.WORD_OFFSETS)
+    st4.seed(uc, control, literal, byte_offsets, word_offsets, ring)
+    stray = st4.guarded(uc, ring, ring_bytes)
     uc.reg_write(UC_M68K_REG_D3, ring_end)
     t.call(uc, t.CODE)                                  # ST4_init at +0
 
@@ -136,7 +100,7 @@ def run(control, literal, byte_offsets, word_offsets, expected, unit, code, ring
 def main() -> int:
     failures = 0
     for unit in (1, 2, 4):
-        code = assemble(unit)
+        code = st4.assemble(unit, 'ST4_ring.S')
         window = 32512 // unit
         # ring bytes, budget in units - deliberately including budgets that do
         # not divide the ring, which this variant exists for.

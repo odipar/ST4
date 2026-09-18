@@ -26,6 +26,7 @@ t = importlib.util.module_from_spec(spec)
 sys.modules['t'] = t
 spec.loader.exec_module(t)
 
+from unicorn import UC_HOOK_MEM_WRITE                                # noqa: E402
 from unicorn.m68k_const import (                                    # noqa: E402
     UC_M68K_REG_A0, UC_M68K_REG_A1, UC_M68K_REG_A2, UC_M68K_REG_A3,
     UC_M68K_REG_A4, UC_M68K_REG_A5, UC_M68K_REG_A6, UC_M68K_REG_D0,
@@ -42,13 +43,16 @@ PRESERVED = {UC_M68K_REG_D6: 0xD6D6D6D6, UC_M68K_REG_D7: 0xD7D7D7D7,
 SCRATCH = (UC_M68K_REG_D3, UC_M68K_REG_D4, UC_M68K_REG_D5, UC_M68K_REG_A3)
 
 
-def assemble(unit: int) -> bytes:
-    """ST4.S built for one unit size: the width is decided here, not at run time."""
+def assemble(unit: int, name: str = 'ST4.S', window: bool = False) -> bytes:
+    """A decoder built for one unit size: the width is decided here, not at
+    run time, and with window the build reads copies from the literal
+    stream (ST4_WINDOW). Every rig builds through this."""
     with tempfile.TemporaryDirectory() as directory:
         source = Path(directory) / 'build.S'
         binary = Path(directory) / 'build.bin'
         source.write_text(f'ST4_UNIT    equ     {unit}\n'
-                          f'        include "{REPO / "68k" / "ST4.S"}"\n')
+                          + (f'ST4_WINDOW  equ     1\n' if window else '')
+                          + f'        include "{REPO / "68k" / name}"\n')
         result = subprocess.run(
             ['rmac', '-m68000', '-fr', '+o3', '-o', str(binary), str(source)],
             capture_output=True, text=True)
@@ -81,7 +85,6 @@ def pack_file(data: bytes, unit: int, window: int, repeat: int | None = None,
     return key.read_bytes()
 
 
-
 def unpack_file(file: bytes, times: int) -> bytes:
     """Runs the real unpacker on a container: dst4 -rN, the pass and then N-1
     repeats of its loop section. Cached by the container and the count."""
@@ -94,6 +97,7 @@ def unpack_file(file: bytes, times: int) -> bytes:
                              stderr=subprocess.PIPE)
         key.write_bytes(run.stdout)
     return key.read_bytes()
+
 
 def streams(file: bytes, unit: int) -> tuple:
     """The four streams, the padded size, the rewind point and the window."""
@@ -133,25 +137,84 @@ def read_fully(name: str, count: int, stream: bytes) -> str:
     return ''
 
 
-def run(control: bytes, literal: bytes, byte_offsets: bytes, word_offsets: bytes,
-        expected: bytes, unit: int, code: bytes, chunk: int | None) -> str:
-    uc = t.make_emu(control)
+def seed(uc, control, literal, byte_offsets, word_offsets, destination):
+    """The three stream regions mapped and written, and the registers a
+    decoder reads them through: a0 the control stream, a1 the output, a2,
+    a4 and a5 streams B, C and D."""
     uc.mem_map(LITERAL, 0x20000)        # stream B is as large as the literals
     uc.mem_map(BYTE_OFFSETS, 0x20000)
     uc.mem_map(WORD_OFFSETS, 0x20000)
-    uc.mem_write(t.CODE, code)
     uc.mem_write(LITERAL, literal)
     uc.mem_write(BYTE_OFFSETS, byte_offsets or b'\0')
     uc.mem_write(WORD_OFFSETS, word_offsets or b'\0\0')
+    uc.reg_write(UC_M68K_REG_A0, t.SRC)
+    uc.reg_write(UC_M68K_REG_A1, destination)
+    uc.reg_write(UC_M68K_REG_A2, LITERAL)
+    uc.reg_write(UC_M68K_REG_A4, BYTE_OFFSETS)
+    uc.reg_write(UC_M68K_REG_A5, WORD_OFFSETS)
+
+
+def guarded(uc, ring: int, ring_bytes: int) -> list:
+    """A guard band around a ring and a hook over the whole output region:
+    the list comes back empty, and a write outside the ring appends its
+    address to it."""
+    uc.mem_write(ring - 8, b'\xAA' * (ring_bytes + 16))
+    stray = []
+
+    def guard(u, access, address, size, value, data):
+        if not (ring <= address and address + size <= ring + ring_bytes):
+            stray.append(address)
+
+    uc.hook_add(UC_HOOK_MEM_WRITE, guard, begin=t.DST, end=t.DST + 0x1FFFF)
+    return stray
+
+
+def drained(uc, control, literal, byte_offsets, word_offsets) -> str:
+    """At the end of a pass, every stream must be spent."""
+    for name, register, base, stream in (
+            ('A', UC_M68K_REG_A0, t.SRC, control),
+            ('B', UC_M68K_REG_A2, LITERAL, literal),
+            ('C', UC_M68K_REG_A4, BYTE_OFFSETS, byte_offsets),
+            ('D', UC_M68K_REG_A5, WORD_OFFSETS, word_offsets)):
+        problem = read_fully(name, uc.reg_read(register) - base, stream)
+        if problem:
+            return problem
+    return ''
+
+
+def looped(data: bytes, unit: int, index: int, target: int) -> bytes:
+    """The padded pass, continued to target bytes from its loop point."""
+    expected = bytearray(data + bytes(-len(data) % unit))
+    period = len(expected) - index * unit
+    while len(expected) < target:
+        expected.append(expected[-period])
+    return bytes(expected)
+
+
+def played(file: bytes, data: bytes, unit: int, index: int, target: int) -> str:
+    """dst4 -rN on the container, for enough passes to cover target bytes: it
+    must obey the recurrence the decoders follow - so the unpacker's
+    repeats are the decoders' - and reach at least as far."""
+    padded = len(data) + (-len(data) % unit)
+    period = padded - index * unit
+    times = 1 + max(0, -(-(target - padded) // period))
+    out = unpack_file(file, times)
+    if len(out) < target:
+        return f'dst4 -r{times} wrote {len(out)} bytes, short of {target}'
+    if out != looped(data, unit, index, len(out)):
+        return f'dst4 -r{times} does not follow the loop from unit {index}'
+    return ''
+
+
+def run(control: bytes, literal: bytes, byte_offsets: bytes, word_offsets: bytes,
+        expected: bytes, unit: int, code: bytes, chunk: int | None) -> str:
+    uc = t.make_emu(control)
+    uc.mem_write(t.CODE, code)
+    seed(uc, control, literal, byte_offsets, word_offsets, t.DST)
     for register, canary in PRESERVED.items():
         uc.reg_write(register, canary)
     for register in SCRATCH:
         uc.reg_write(register, 0xBAD0BAD0)
-    uc.reg_write(UC_M68K_REG_A0, t.SRC)
-    uc.reg_write(UC_M68K_REG_A1, t.DST)
-    uc.reg_write(UC_M68K_REG_A2, LITERAL)
-    uc.reg_write(UC_M68K_REG_A4, BYTE_OFFSETS)
-    uc.reg_write(UC_M68K_REG_A5, WORD_OFFSETS)
     t.call(uc, t.CODE)                                  # ST4_init at +0
 
     if chunk is None:
@@ -173,14 +236,9 @@ def run(control: bytes, literal: bytes, byte_offsets: bytes, word_offsets: bytes
         return f'produced {produced} bytes, expected {len(expected)}'
     if bytes(uc.mem_read(t.DST, len(expected))) != expected:
         return 'output differs'
-    for name, register, base, stream in (
-            ('A', UC_M68K_REG_A0, t.SRC, control),
-            ('B', UC_M68K_REG_A2, LITERAL, literal),
-            ('C', UC_M68K_REG_A4, BYTE_OFFSETS, byte_offsets),
-            ('D', UC_M68K_REG_A5, WORD_OFFSETS, word_offsets)):
-        problem = read_fully(name, uc.reg_read(register) - base, stream)
-        if problem:
-            return problem
+    spent = drained(uc, control, literal, byte_offsets, word_offsets)
+    if spent:
+        return spent
     for register, canary in PRESERVED.items():
         if uc.reg_read(register) != canary:
             return 'a preserved register was clobbered'
