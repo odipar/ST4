@@ -13,11 +13,41 @@ shift
 root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 classes=$root/target/classes
 built=$classes/.built
+lock=$root/target/.building
 
-if [ ! -f "$built" ] || [ -n "$(find "$root/src/main/java" \
-        -newer "$built" -print -quit 2>/dev/null)" ]; then
+# Whether a build is owed: no build yet, or a source newer than the last
+# build.
+owed() {
+    [ ! -f "$built" ] || [ -n "$(find "$root/src/main/java" \
+        -newer "$built" -print -quit 2>/dev/null)" ]
+}
+
+build() {
     (cd "$root" && mvn -q compile </dev/null >&2)
     : > "$built"
+}
+
+if owed; then
+    # A pipe starts every tool at once, so two of them can owe the same
+    # build. mkdir either makes the directory or does not, so the first
+    # one through builds and the rest wait on it.
+    mkdir -p "$root/target"
+    waited=0
+    while ! mkdir "$lock" 2>/dev/null; do
+        waited=$((waited + 1))
+        if [ "$waited" -gt 180 ]; then
+            echo "st4-run: a build has held $lock for three minutes" >&2
+            exit 2
+        fi
+        sleep 1
+    done
+    trap 'rmdir "$lock" 2>/dev/null || true' EXIT INT TERM
+    # The one that waited may find the build already done.
+    if owed; then
+        build
+    fi
+    rmdir "$lock" 2>/dev/null || true
+    trap - EXIT INT TERM
 fi
 
 exec java -cp "$classes" "$class" "$@"
