@@ -55,15 +55,15 @@ document - so the six executables are that release's and the Go module is
 its bytes.
 
 - **`org.st4.doc.Documents`** reads a link that resolves, one wrap width, a
-  glossary in order and the rows it is read from. Those four were written
-  in each of the four repositories of the family and the copies had drifted
-  in both directions: this tree skipped fenced blocks and anchors where DTX
-  read them, and named neither the line a broken link stands on nor how
-  many documents it had read, which YMXS and YMXR did. The package takes
-  the best of the copies and is carried here from DTX, which holds it, as
-  `org.st4.style` is.
-- `ConsistencyTest` lost 54 lines to it and reads its own figures as it
-  did.
+  glossary in order and the rows it is read from. Those four were written in
+  each of the four repositories of the family, and the copies had drifted in
+  both directions. This tree skipped fenced blocks and anchors where DTX
+  read them; YMXS named the line a broken link is written at, and YMXS and
+  YMXR both reported how many documents they had read, where this tree
+  reported neither. The package reads the best of the four and is carried
+  here from DTX, where it is kept, as `org.st4.style` is.
+- `ConsistencyTest` is 54 lines shorter for it, and reads the figures of
+  this repository as it did.
 
 ### go/v0.1.9, 2026-09-18
 
