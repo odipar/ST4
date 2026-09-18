@@ -4,7 +4,7 @@
 # a class and pass their arguments on.
 #
 # A tool reads standard input and writes standard output, so the build is
-# given no input of its own and its output goes to standard error.
+# handed no input and its output goes to standard error.
 set -e
 
 class=$1

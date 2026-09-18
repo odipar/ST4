@@ -26,7 +26,7 @@ public final class St4Compressor {
     /**
      * The four streams and their figures. {@code rewindIndex} is the loop
      * point of a stream the caller loops by rewind, in units, or -1;
-     * {@code window} is what the header records; {@code copies} counts the
+     * {@code window} is the figure the header records; {@code copies} counts the
      * blocks copied from the literal stream.
      */
     public record Result(byte[] control, byte[] literal, byte[] byteOffsets,
@@ -210,7 +210,7 @@ public final class St4Compressor {
 
     /**
      * A copy from the literal stream, {@code distance} units back in the
-     * output for {@code length} units, in pieces the counters hold. A piece
+     * output for {@code length} units, in pieces the counters have. A piece
      * is written as a match at the window plus the literals between its
      * source and itself; a piece as long as that count leaves its last unit
      * to a literal, so the decoder's offset, advanced by what it copies,

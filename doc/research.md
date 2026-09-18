@@ -28,7 +28,7 @@ as the container is in memory: a second dictionary that never scrolls.
 Anything that entered the output as a literal can be copied again from it,
 however small the ring, so the ring needs only what is generated rather
 than stored - self-overlapping copies, and the chains of matches the packer
-still chooses. The reach is what the word offset allows: 32512
+still chooses. The reach is the word offset's: 32512
 literals less the window, which with a tiny ring is a 32 KB dictionary at
 k = 1, today's whole window.
 
@@ -123,7 +123,7 @@ it: smaller is better. Only ring decoders are compared - a stream that stays
 in one buffer has the whole window already. "Ring alone" is the
 parse at that ring size without copies, "with copies" the same ring with
 copies from the literal stream. The prose corpus is README.md at 15,732
-bytes, which is what it ran to when this was measured; the file is shorter
+bytes, the length it ran to when this was measured; the file is shorter
 since its documents moved into doc/.
 
 At k = 1:
@@ -210,11 +210,11 @@ and k = 4, where the decoders live, a 16-unit ring with copies beats a
 with copies packs the README at k = 4 to 92.4% where 256 units alone give
 96.0%.
 
-**Prose gains less, and the search is what makes it gain.** A ring's
+**Prose gains less, and the search makes it gain.** A ring's
 advantage on text is a cheap reference to the most recent occurrence, which
 is usually match output, not a literal; a copy has to reach the first
 occurrence instead, often a word offset away, unless the parse makes a
-nearer occurrence literal to serve the ones after it - which is what the
+nearer occurrence literal to serve the ones after it - which the
 search finds and a one-shot parse cannot. On the README a 16-unit ring with
 copies packs to 68.5% at k = 1, just short of a 256-unit ring alone, where
 the one-shot parse gave 78.3%; the class file to 65.9% against 73.5%.
@@ -232,7 +232,7 @@ eleven of a compiled effect script - each decoded through a separate ring
 of 960 bytes by default. The four example tunes of that repository and one
 long one, Synergy's Wicked Polygons 2 at 43132 frames, their stream vectors
 built as its encoder builds them, packed here one section per stream: the
-previous ST4, which is what YMX packs with today, against this one with
+previous ST4, the packer YMX runs today, against this one with
 thirty seconds of search per stream, at the player's ring, at one larger
 and at three smaller. Sizes are the four ST4 streams in bytes, summed over
 the twenty-five streams, without headers or padding.
@@ -509,7 +509,7 @@ blocks it meets, not the bytes the column packs to. The parser can be asked
 for fewer blocks: `st4 -pN` charges N extra bits on every block beyond what
 the block writes, so a chain of fewer, longer blocks wins wherever the bit
 costs are close. At a penalty of zero the reference parser produces exactly
-the bytes the event-driven parser does, which is what makes the rows below
+the bytes the event-driven parser does, which makes the rows below
 comparable.
 
 Deeper's thirty columns at k = 2 (a window of 15 units) and low's thirty at
@@ -530,7 +530,7 @@ k = 1 (a window of 30):
 
 ### What it is worth
 
-The worst window is what a demo has to budget for. At k = 1 it was 15
+The worst window is the figure a demo has to budget for. At k = 1 it was 15
 blocks, the most a 30-unit window fits at one block per unit; a penalty
 of 8 bits brings it to 12 for under two percent more file. At k = 2 a
 penalty of 16 brings 9 down to 7 for 2.8 percent, and 32 and 64 buy no
@@ -571,7 +571,7 @@ cheapest chain ending in a literal run or in a match at that offset. That is
 sufficient when only bits count. A charge per block makes the number of
 blocks matter as well, and those figures do not record it.
 
-So the byte figures in the table above are what these parsers reach, not
+So the byte figures in the table above are these parsers' reach, not
 what an exact penalised parse would cost: the true price of a shorter worst
 window is lower than they show. The window counts stand, since they were
 read from files that were really written.
@@ -663,7 +663,7 @@ at 512, and three quarters of what 960 reaches. What a larger ring finds is
 a repeat further back than the ring before it could read: a chiptune column
 repeats at the scale of a pattern, tens to hundreds of frames.
 
-**Copies are worth more the smaller the ring**, which is what they are for:
+**Copies are worth more the smaller the ring**, which is their purpose:
 30 per cent at 256 bytes, 12.9 at 960, 6.5 at 2,048. A copy reaches past
 the ring into the literal stream, so it stands in for the ring the asset
 did not pay for.
@@ -798,7 +798,7 @@ the parse for where to act were added to them.
 
 **source** grows the dictionary where a copy reads from. A copy at distance
 d covering the output from a to b reads the units from a-d to b-d, so
-lengthening the run there is what lets that copy, or the next at the same
+lengthening the run there lets that copy, or the next at the same
 distance, read further. The parse names d, so the move reads where to act
 rather than searching for it.
 
@@ -916,7 +916,7 @@ of the column. This reads whether a step can stop there.
 before a position set every later copy's offset, so a dictionary changed
 anywhere changes both what the tail may copy and what a copy there costs.
 Two parses in one state at a checkpoint part again as soon as the tail
-reads a unit the change touched. The state is not the whole of what a tail
+reads a unit the change touched. The state is not the whole of what a run
 depends on; the dictionary is.
 
 **Heuristically it is a wash, and worse where it counts.** A parse that
@@ -937,7 +937,7 @@ the parse stops, and its chain is the blocks it made up to there and the
 accepted parse's blocks past there.
 
 The comparison is equality, not equality up to a constant. Up to a constant
-is what the reading above found, and it is not enough to rest on: the
+is the reading above, and it is not enough to rest on: the
 channel's values before the change stand where they were while those after
 it move, so a class whose window spans the change can pick one end in one
 parse and another in the other.
@@ -984,7 +984,7 @@ parity between them is on the bytes out.
 
 The search grinds: the note above reads it still improving at 4,000 steps a
 column, where a step is one dictionary, one parse of it and one count of
-the compressor's bits. So what a step costs is what the search is worth in
+the compressor's bits. So a step's cost measures the search in
 a second of it.
 
 ## Where the time goes
@@ -1048,7 +1048,7 @@ another. What moves is the time.
 
 The search is where it pays: a fifth more steps a second at a ring of 256
 bytes. At a wide window the ring loop is the parse and the channel is
-noise, which is what the last row reads. At three seconds a column over 24
+noise, which the last row reads. At three seconds a column over 24
 columns the extra steps are worth 0.35 per cent: 21,936 bytes against
 22,012.
 
@@ -1138,7 +1138,7 @@ The bound is loose, and its looseness is the tension itself. The relaxed
 parse reads from **40.4 per cent of all units**, and a dictionary of those
 units, at 16 bits each, writes 410,792 bytes before a sweep shrinks it.
 Copying wants a large dictionary and the dictionary is charged by the unit,
-which is what the search is weighing at every step.
+which the search weighs at every step.
 
 ## Destroy and repair
 
@@ -1261,7 +1261,7 @@ five bits of offset as the width that keeps a near block even.
 
 A near match spends three class bits and five against the ten it spends
 now, and the end spends one more: 14,362 x 2 - 120 = 28,604 bits, 3,576
-bytes of 124,220. The second row is what this section read until the
+bytes of 124,220. The second row is the reading this section had until the
 arithmetic was checked against the parity rule, and 2.83, 2.82 and 1.72 per
 cent were the same pricing over a grown word-offset code.
 
@@ -1374,7 +1374,8 @@ below the top a restore drops to, and the pass counts them so the top
 follows.
 
 Ids move, and a parse weighs its candidates by their bits alone, so the
-bytes out are what they were. The node lost two of its six fields with the
+bytes out are the bytes it wrote before. The node lost two of its six
+fields with the
 collection: the kind, which the rebuild reads off the offset, since a
 literal run stands at zero and a match or a copy never does, and the
 length, which the rebuild never reads. The two per-state arrays that fed
@@ -1412,7 +1413,7 @@ trade that against how far a parse re-runs, and the pool bound trades it
 against time - at 1.5 times what a collection keeps the peak is 1,191 MB
 and the run 20.9 seconds.
 
-The representation is what those chains are: a node a state against a
+The representation is the chains themselves: a node a state against a
 winner a position. Re-deriving a state on demand, as optimize.go's
 `rebuilder.resolveState` does for the two parsers beside it, is still the
 way to be rid of them, and is still a redesign of the parse, the
@@ -1588,7 +1589,7 @@ behind it. This is the measurement, on the data ST4 ships.
 ## The corpus
 
 The 120 chiptune columns of *What a ring is worth*: the three tone-period
-low bytes of real tunes, 898,830 bytes raw, which is what a DTX2 column is
+low bytes of real tunes, 898,830 bytes raw, the shape a DTX2 column is
 and what a YMXR tune reaches the chips through. The packer is zx1 v1.5,
 built from einar-saukas/ZX1's `src`, and the ST4 figure is the four streams
 as `st4` reports them, without the 28-byte header. Neither tool has copies
@@ -1660,9 +1661,9 @@ this window. On prose and source text, where offsets spread through the
 
 ## The curve at a unit of 2 and 4
 
-ZX1 has no unit size, so at `k` of 2 or 4 the comparison is what ST4 pays
-for a decoder that runs half or a quarter as many operations. The same 120
-columns, the window in bytes so the three lines meet, and the margin
+ZX1 has no unit size, so at `k` of 2 or 4 the comparison measures what ST4
+pays for a decoder that runs half or a quarter as many operations. The same
+120 columns, the window in bytes so the three lines meet, and the margin
 against zx1's 105,742 beside each:
 
 | window | `k` = 1 | `k` = 2 | `k` = 4 |
@@ -1745,7 +1746,7 @@ bytes and nearly all of it literals.
 
 A cycle model of the MC68000, not a machine: no bus contention, no
 shifter, no memory of any particular Atari. It counts what the instructions
-cost in the manual, which is what a comparison of two builds of one decoder
+cost in the manual, which a comparison of two builds of one decoder
 needs and not what a frame budget needs.
 
 The figures the two copy ladders and the loop code are worth
@@ -1764,7 +1765,7 @@ The corpora, both a little under 900 KB, packed at `k` of 4 and `-m1024`:
   of the tree, in path order, 929,630 bytes. Prose and code, which repeat at
   the scale of a line.
 - **one block repeated**: the first 4,096 bytes of that, repeated to 900,000
-  bytes. Which is what a disk image or a register stream looks like to a
+  bytes. That is how a disk image or a register stream looks to a
   parser: the same stretch, over and over.
 
 Each parser ran three times over a 40,000-unit prefix first, so the JIT has

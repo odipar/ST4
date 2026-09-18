@@ -121,7 +121,7 @@ public sealed class RoundTripTests
     [Fact]
     public void LimitedOffsetsStayInsideTheirWindow()
     {
-        // -mN is what makes a stream safe for an N-unit ring; decoding through
+        // -mN makes a stream safe for an N-unit ring; decoding through
         // exactly that much history has to reproduce the input.
         byte[] input = new byte[8000];
         var random = new JavaRandom(11);

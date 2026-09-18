@@ -7,14 +7,14 @@
 #   OUT=dir release/publish.sh
 #
 # They are built from go/, so there are six of them: go build cross-compiles
-# to any target from any host with nothing installed for it.
+# to any target from any host with no toolchain installed for it.
 #
 # NO JAVA AND NO DOTNET RUN HERE. The three trees write the same bytes and
 # the parity check reads them against one another; a release is built from
 # one tree.
 #
-# The executables take no wrapper. Go builds a real executable, so nothing
-# has to find a runtime or a classpath before one runs. The Java tools take
+# The executables run with no wrapper. Go builds a real executable, so no tool
+# has to find a runtime or a classpath before one runs. The Java tools read
 # the wrappers under bin/ instead.
 set -e
 cd "$(dirname "$0")/.."
@@ -27,10 +27,10 @@ case $OUT in /*) ;; *) OUT=$REPO/$OUT ;; esac
 TARGETS=${TARGETS:-"win-x64 win-arm64 osx-x64 osx-arm64 linux-x64 linux-arm64"}
 TOOLS="st4 dst4"
 
-# The version names the zips. The pom is where it is written down, and this
+# The version names the zips. The pom is where it is recorded, and this
 # reads the text rather than running anything. It is the version of the
 # tools and of the Go module, which is not the format version the tools
-# print: the format is 7, and a Go module takes semver from v0.
+# print: the format is 7, and a Go module reads semver from v0.
 VERSION=${1:-$(sed -n 's/.*<version>\(.*\)<\/version>.*/\1/p' pom.xml | head -1)}
 if [ -z "$VERSION" ]; then
     echo "publish: pom.xml does not name a version" >&2
@@ -59,7 +59,7 @@ for target in $TARGETS; do
     mkdir -p "$OUT/$target"
     for tool in $TOOLS; do
         # CGO off makes the binary static and the cross-build runs; -s -w
-        # drop the symbol and debug tables, which nothing here reads.
+        # drop the symbol and debug tables, which no tool here reads.
         (cd go && CGO_ENABLED=0 GOOS=$os GOARCH=$arch \
             go build -ldflags="-s -w" -o "$OUT/$target/$tool$ext" ./cmd/"$tool")
     done

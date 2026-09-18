@@ -14,6 +14,7 @@ import java.util.TreeSet;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import org.junit.jupiter.api.Assumptions;
+import org.st4.style.HouseStyle;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -54,7 +55,7 @@ final class ConsistencyTest {
      * here without a list to add it to.
      */
     private static List<Path> documents() throws IOException {
-        return HouseStyleTest.documents();
+        return HouseStyle.documents(Path.of("."));
     }
 
     /** Prose as one line, so a figure is found however its sentence wraps. */

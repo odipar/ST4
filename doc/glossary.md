@@ -15,7 +15,7 @@ same change (requirements.md, R0.6 to R0.8).
 | container | One packed file: twenty-eight bytes of header, then streams A, B, C and D. | SPEC.md 2 |
 | copy | A block whose offset is beyond the window, which reads from the literal stream rather than from the output. | SPEC.md 5 |
 | copy ladder | The unrolled run of moves a decoder copies a match or a literal run with, one counted and one not. | decoders.md, the copy ladders |
-| dictionary | The units a search forces to be literal, which are what a copy may read from. | tools.md, the search |
+| dictionary | The units a search forces to be literal, which a copy may read from. | tools.md, the search |
 | end code | The class `0 1`, which ends the data and is followed by the repeat bit. | SPEC.md 3.6 |
 | gamma | An interlaced Elias gamma, how every length is stored. | SPEC.md 3.3 |
 | `k` | The unit size in bytes: 1, 2 or 4. | SPEC.md 1.1 |

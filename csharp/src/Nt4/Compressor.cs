@@ -28,7 +28,7 @@ public sealed class Compressor
     /// <param name="Unit">Bytes per unit: 1, 2 or 4.</param>
     /// <param name="PaddedSize">The output size in bytes, a multiple of the unit.</param>
     /// <param name="LongestOp">Longest literal run or match emitted, in units.</param>
-    /// <param name="Operations">How many operations the streams hold.</param>
+    /// <param name="Operations">How many operations the streams have.</param>
     /// <param name="RewindIndex">The loop point of a stream the caller loops by rewind, in units, or -1.</param>
     /// <param name="Window">The window the parse kept to, in units: what the header records.</param>
     /// <param name="Copies">The blocks copied from the literal stream.</param>
@@ -277,7 +277,7 @@ public sealed class Compressor
     /// <summary>
     /// A copy from the literal stream, <paramref name="distance"/> units back
     /// in the output for <paramref name="length"/> units, in pieces the
-    /// counters hold. A piece is written as a match at the window plus the
+    /// counters have. A piece is written as a match at the window plus the
     /// literals between its source and itself; a piece as long as that count
     /// leaves its last unit to a literal, so the decoder's offset, advanced by
     /// what it copies, never reaches zero.

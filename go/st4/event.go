@@ -19,7 +19,7 @@ const churn = 8
 const absent = -1 << 63
 
 // OptimizeEvents is the parser the tools use. Where the event count is low it
-// runs the engine, and otherwise the plain DP, which is what the other trees
+// runs the engine, and otherwise the plain DP, which the other trees
 // do and what keeps the bytes the same.
 func OptimizeEvents(units []uint32, unit, offsetLimit int,
 	progress bool) *Block {

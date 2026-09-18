@@ -8,7 +8,7 @@ two conformance kits and twenty-two images move with it. The sections below
 are the figures that decision rests on; none of it is built.
 
 Half the matches a stream makes reach back 32 units or fewer, and each of
-them spends a byte on an offset five bits would carry. This is what adding
+them spends a byte on an offset five bits would carry. Adding
 a near offset would be worth, what it would cost, and what building it
 touches.
 
