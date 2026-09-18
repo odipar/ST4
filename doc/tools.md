@@ -140,6 +140,11 @@ python3 68k/test/emu/bench_offset.py      # why the class bits select the stream
 python3 68k/test/emu/bench_decode.py      # cycles a unit, plain build against window
 ```
 
+`.github/workflows/test.yml` runs `mvn test` on a GitHub runner, with Go
+on the path so the parity check runs rather than skips. No push starts
+it: a caller starts it from the Actions tab or by
+`gh workflow run test.yml`.
+
 The Python rigs need `mvn compile`, [rmac](http://rmac.is-slick.com) and
 `pip install unicorn`: they pack every corpus with the real packer,
 assemble the real decoders, decode under emulation as a plain 68000, and
