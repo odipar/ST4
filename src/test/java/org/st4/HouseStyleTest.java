@@ -167,6 +167,28 @@ final class HouseStyleTest {
     }
 
     @Test
+    void aCodeSpanIsQuotedWhereverTheWrapFallsInIt() throws IOException {
+        // The message of a tool is quoted material, and its words are the
+        // tool's rather than this tree's. A message as wide as the document
+        // wraps, and the words on each side of the wrap are as quoted as
+        // the ones in a message that fits a line.
+        assertEquals(List.of(), style().document(Path.of("a.md"), List.of(
+                "A waiting process writes `run: a build holds the lock`.")));
+        assertEquals(List.of(), style().document(Path.of("a.md"), List.of(
+                "A waiting process writes `run: a build holds",
+                "the lock` and exits with 2.")));
+        assertEquals(List.of(), style().document(Path.of("a.md"), List.of(
+                "A waiting process writes",
+                "`run: a build holds the lock`.")));
+        // The prose around a span is read, and so is the prose after a
+        // backtick that stands alone.
+        assertEquals(1, style().document(Path.of("a.md"), List.of(
+                "The lock `run` holds a build.")).size());
+        assertEquals(1, style().document(Path.of("a.md"), List.of(
+                "A build holds ` the lock.")).size());
+    }
+
+    @Test
     void aNameSpelledLikeAWordPasses() {
         HouseStyle style = HouseStyle.parse(List.of(
                 "names", "    ST4_WINDOW", "",
