@@ -44,6 +44,27 @@ plain `vN.0` means the format.
 
 ## Published
 
+### go/v0.1.10, 2026-09-18
+
+<https://github.com/odipar/ST4/releases/tag/go/v0.1.10>, built from the
+commit tagged `go/v0.1.10`.
+
+The document checks are one package. Every file a tool is built from
+stands as v0.1.9 has it - `go/`, `68k/`, `csharp/`, `bin/` and every
+document - so the six executables are that release's and the Go module is
+its bytes.
+
+- **`org.st4.doc.Documents`** reads a link that resolves, one wrap width, a
+  glossary in order and the rows it is read from. Those four were written
+  in each of the four repositories of the family and the copies had drifted
+  in both directions: this tree skipped fenced blocks and anchors where DTX
+  read them, and named neither the line a broken link stands on nor how
+  many documents it had read, which YMXS and YMXR did. The package takes
+  the best of the copies and is carried here from DTX, which holds it, as
+  `org.st4.style` is.
+- `ConsistencyTest` lost 54 lines to it and reads its own figures as it
+  did.
+
 ### go/v0.1.9, 2026-09-18
 
 <https://github.com/odipar/ST4/releases/tag/go/v0.1.9>, built from the
