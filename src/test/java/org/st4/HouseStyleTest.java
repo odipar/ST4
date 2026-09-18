@@ -189,6 +189,32 @@ final class HouseStyleTest {
     }
 
     @Test
+    void anIndentedBlockIsQuotedAndAListItemIsRead() throws IOException {
+        // An indented block standing after a blank line is a code block,
+        // quoted as a fenced one is, and it runs to the first line that is
+        // neither blank nor indented.
+        List<Hit> hits = style().document(Path.of("a.md"), List.of(
+                "The call is",
+                "",
+                "    the ring holds a row",
+                "",
+                "    and holds another",
+                "",
+                "The ring holds a row."));
+        assertEquals(List.of(7), hits.stream().map(Hit::line).toList());
+        // An indented line under an open paragraph continues a list item,
+        // and is this tree's prose: it joins, so a construct the wrap of an
+        // item breaks is read at the line it begins on.
+        hits = style().document(Path.of("a.md"), List.of(
+                "- (a) the row the effect reads, which is",
+                "         what makes the tick;",
+                "- (b) the row after it."));
+        assertEquals(1, hits.size());
+        assertEquals(1, hits.get(0).line());
+        assertEquals("is what", hits.get(0).text());
+    }
+
+    @Test
     void aNameSpelledLikeAWordPasses() {
         HouseStyle style = HouseStyle.parse(List.of(
                 "names", "    ST4_WINDOW", "",
