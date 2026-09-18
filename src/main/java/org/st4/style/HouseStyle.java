@@ -215,18 +215,26 @@ public record HouseStyle(List<Construct> constructs, List<String> names,
 
     /**
      * The hits in a document. A paragraph runs to a blank line, a table row,
-     * an indented block or a fence, and each of those is read alone:
-     * joining them would put words side by side that no sentence puts there.
+     * an indented block or a fence, and a table row is read alone: joining
+     * them would put words side by side that no sentence puts there.
+     *
+     * <p>A fenced block is quoted material, as a code span is: a command, a
+     * file, a run of output. Its words are those of what it quotes rather
+     * than this tree's, so the check reads past the block and the two
+     * fences around it. A script a document quotes stands in the tree as
+     * well, and is read there, under {@code sources}.
      */
     public List<Hit> document(Path file, List<String> lines) {
         List<Hit> out = new ArrayList<>();
         List<String> paragraph = new ArrayList<>();
         int began = 0;
+        boolean fenced = false;
         for (int at = 0; at <= lines.size(); at++) {
             String line = at < lines.size() ? lines.get(at) : "";
-            boolean breaks = at == lines.size() || line.isBlank()
-                    || line.startsWith("|") || indented(line)
-                    || line.startsWith("```");
+            boolean fence = line.startsWith("```");
+            boolean breaks = at == lines.size() || fenced || fence
+                    || line.isBlank() || line.startsWith("|")
+                    || indented(line);
             if (!breaks) {
                 if (paragraph.isEmpty()) {
                     began = at;
@@ -238,7 +246,11 @@ public record HouseStyle(List<Construct> constructs, List<String> names,
                 out.addAll(hits(file, began + 1, paragraph));
                 paragraph.clear();
             }
-            if (!line.isBlank()) {
+            if (fence) {
+                // A fence the document leaves open runs to its end, which
+                // is where the lines run out.
+                fenced = !fenced;
+            } else if (!fenced && !line.isBlank()) {
                 out.addAll(hits(file, at + 1, List.of(line)));
             }
         }

@@ -201,16 +201,25 @@ final class HouseStyleTest {
     }
 
     @Test
-    void aTableRowAndAFenceAreReadOnTheirOwn() throws IOException {
+    void aTableRowIsReadAloneAndAFencedBlockIsQuoted() throws IOException {
+        // A table row is read apart from the paragraph around it; a fenced
+        // block is a command, a file or a run of output, whose words are
+        // the block's, and the prose after the closing fence is read again.
         List<Hit> hits = style().document(Path.of("a.md"), List.of(
                 "| column | what it is |",
                 "| ring | what it holds |",
                 "",
-                "```",
+                "```sh",
                 "the ring holds a row",
-                "```"));
-        assertEquals(List.of(2, 5),
+                "```",
+                "The ring holds a row."));
+        assertEquals(List.of(2, 7),
                 hits.stream().map(Hit::line).toList());
+        // A fence a document leaves open runs to the end of the document,
+        // as Markdown reads it.
+        assertEquals(List.of(), style().document(Path.of("a.md"), List.of(
+                "```",
+                "the ring holds a row")));
     }
 
     @Test
