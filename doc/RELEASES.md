@@ -44,6 +44,44 @@ plain `vN.0` means the format.
 
 ## Published
 
+### go/v0.1.11, 2026-09-18
+
+<https://github.com/odipar/ST4/releases/tag/go/v0.1.11>, built from the
+commit tagged `go/v0.1.11`.
+
+The rigs read one harness, one build runs at a time, and a quoted block
+keeps its words. Every file the six executables are built from stands as
+v0.1.9 has it - `go/`, `68k/` and `csharp/` - so they are that release's
+bytes and the Go module is unchanged. What this release has in it is the
+Java tree's style check, the script under `bin/` and the Python rigs.
+
+- **The six rigs read one harness.** Each of the five rigs beside
+  `test_st4.py` had a separate copy of four blocks: a decoder built at a
+  unit size, the three stream regions mapped and seeded with the registers
+  a decoder reads them through, a guard band and a write hook around a
+  ring, and the read of all four streams to their ends. `test_st4.py` is
+  the module the other five load, so the blocks stand there now:
+  `assemble`, `seed`, `guarded`, `drained`, `looped` and `played`. The
+  rigs lose 372 lines and gain 136, and each one has the calls its subject
+  needs.
+- **One build runs at a time.** `bin/st4 -k2 < tune.bin | bin/dst4` starts
+  both tools at once, and with a source newer than the last build both
+  found a build owed and both ran Maven into the same `target/classes`:
+  measured here with a wrapper counting invocations, that pipeline ran
+  `mvn` twice in the same second. `bin/st4-run` builds under the lock
+  `target/.building` now, as YMXS's runner has since it hit the same race.
+- **A code span that wraps is quoted whole.** The style check blanked a
+  code span a line at a time while the rest of it reads a paragraph
+  joined, so a span broken by a wrap was two unpaired backticks and its
+  words were read as prose - and the pairing ran from one span's closing
+  backtick to the next span's opening one, which blanked the prose
+  between them. The blanking runs over the joined lines now.
+- **A fenced block is quoted as a code span is.** A fence broke the
+  paragraph and was read alone, and the lines inside it were read as
+  paragraphs of this tree: 53 blocks, 106 fences and 188 lines across the
+  four repositories, every one of them a command, a file, a run of output
+  or a diagram. The check reads past a block and the two fences around it.
+
 ### go/v0.1.10, 2026-09-18
 
 <https://github.com/odipar/ST4/releases/tag/go/v0.1.10>, built from the
