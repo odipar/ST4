@@ -146,7 +146,8 @@ public record HouseStyle(List<Construct> constructs, List<String> names,
      * line wrap stands in neither of its lines, and a hit is reported at the
      * line the matched text begins on. A line joins without its indent and
      * without the marks a comment writes in front of it, or those would
-     * stand inside the phrase a wrap broke.
+     * stand inside the phrase a wrap broke. The code spans are blanked once
+     * the lines are joined, so a span a wrap breaks is blanked whole.
      */
     public List<Hit> hits(Path file, int first, List<String> lines) {
         StringBuilder joined = new StringBuilder();
@@ -155,7 +156,7 @@ public record HouseStyle(List<Construct> constructs, List<String> names,
             begins[i] = joined.length();
             joined.append(lower(unmarked(lines.get(i)))).append(' ');
         }
-        String prose = joined.toString();
+        String prose = quoted(joined.toString());
         List<Hit> out = new ArrayList<>();
         for (Construct construct : constructs) {
             for (Match match : construct.matches(prose)) {
@@ -178,17 +179,23 @@ public record HouseStyle(List<Construct> constructs, List<String> names,
                 || line.charAt(at) == '/')) {
             at++;
         }
-        return quoted(line.substring(at).strip());
+        return line.substring(at).strip();
     }
 
     /**
-     * The line with what stands between backticks blanked, a space a
-     * character so the rest keeps its offsets.
+     * The joined lines with what stands between backticks blanked, a space
+     * a character so the rest keeps its offsets.
      *
      * <p>A code span is quoted material: a message a tool writes, a name in
      * a tree, a construct a document strikes and must spell to strike it. A
      * quoted message keeps its words (AGENTS.md), so the words inside one
      * are not this tree's prose and are not read.
+     *
+     * <p>A span opens and closes where Markdown reads it opening and
+     * closing, which is over the run rather than the line: a message as wide
+     * as the document wraps, and the half on each line is quoted as much as
+     * a message that fits one line. Blanking needs the pair, so where one
+     * backtick stands alone in the run the words after it are read.
      */
     private static String quoted(String line) {
         StringBuilder out = new StringBuilder(line);
