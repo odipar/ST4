@@ -214,27 +214,40 @@ public record HouseStyle(List<Construct> constructs, List<String> names,
     }
 
     /**
-     * The hits in a document. A paragraph runs to a blank line, a table row,
-     * an indented block or a fence, and a table row is read alone: joining
-     * them would put words side by side that no sentence puts there.
+     * The hits in a document. A paragraph runs to a blank line, a table row
+     * or a fence, and a table row is read alone: joining them would put
+     * words side by side that no sentence puts there.
      *
      * <p>A fenced block is quoted material, as a code span is: a command, a
      * file, a run of output. Its words are those of what it quotes rather
      * than this tree's, so the check reads past the block and the two
      * fences around it. A script a document quotes stands in the tree as
      * well, and is read there, under {@code sources}.
+     *
+     * <p>An indent reads two ways, and where it falls decides which. An
+     * indented line that opens a block, after a blank line, is an indented
+     * code block, quoted as a fenced one is, and it runs to the first
+     * line that is neither blank nor indented. An indented line under an
+     * open paragraph continues a list item, or opens a list under one, and
+     * is this tree's prose: it joins the paragraph, so a construct the wrap
+     * of a list item breaks is read.
      */
     public List<Hit> document(Path file, List<String> lines) {
         List<Hit> out = new ArrayList<>();
         List<String> paragraph = new ArrayList<>();
         int began = 0;
         boolean fenced = false;
+        boolean block = false;
         for (int at = 0; at <= lines.size(); at++) {
             String line = at < lines.size() ? lines.get(at) : "";
+            if (block && at < lines.size() && (line.isBlank() || indented(line))) {
+                continue;
+            }
+            block = false;
             boolean fence = line.startsWith("```");
-            boolean breaks = at == lines.size() || fenced || fence
-                    || line.isBlank() || line.startsWith("|")
-                    || indented(line);
+            boolean opens = !fenced && paragraph.isEmpty() && indented(line);
+            boolean breaks = at == lines.size() || fenced || fence || opens
+                    || line.isBlank() || line.startsWith("|");
             if (!breaks) {
                 if (paragraph.isEmpty()) {
                     began = at;
@@ -250,6 +263,8 @@ public record HouseStyle(List<Construct> constructs, List<String> names,
                 // A fence the document leaves open runs to its end, which
                 // is where the lines run out.
                 fenced = !fenced;
+            } else if (opens) {
+                block = true;
             } else if (!fenced && !line.isBlank()) {
                 out.addAll(hits(file, at + 1, List.of(line)));
             }
