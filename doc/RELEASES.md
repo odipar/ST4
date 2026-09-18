@@ -44,6 +44,31 @@ plain `vN.0` means the format.
 
 ## Published
 
+### go/v0.1.9, 2026-09-18
+
+<https://github.com/odipar/ST4/releases/tag/go/v0.1.9>, built from the
+commit tagged `go/v0.1.9`.
+
+The style check, and the comments it read. The tools write the bytes
+v0.1.8 wrote: the three trees' packers moved in their comments alone, and
+the pair built here packs README.md, SPEC.md and research.md at k of 1, 2
+and 4 to the bytes a build of the tag before writes.
+
+- **The struck list is a document.** The check was a list of 104 phrases in
+  a test class, matched as substrings. `org.st4.style` reads `STRUCK.md` -
+  a section a rule of AGENTS.md, an entry a name, a pattern and the samples
+  the pattern is and is not in - and runs over every document and every
+  code comment. `HouseStyleTest` reads every sample back, so a pattern that
+  drifts fails there rather than in review. The package is carried from
+  DTX, which wrote it, and the four repositories of the family run the same
+  370 lines.
+- **The cleft was struck in AGENTS.md and in no list.** Adding the entry
+  found 44 of the 67 lines reworded here, most of them in research.md. Each
+  paragraph those lines stand in is rewrapped, and every other paragraph is
+  the one the release before has.
+- The `names` entry stands empty: the only names this tree spells a struck
+  construct inside are Go identifiers, which the check reads past.
+
 ### go/v0.1.8, 2026-09-17
 
 <https://github.com/odipar/ST4/releases/tag/go/v0.1.8>, built from the
