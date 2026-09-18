@@ -21,7 +21,29 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: '1.26'
+      # ConsistencyTest reads the figures of the documents against a
+      # build, and skips where rmac is absent. The version is pinned:
+      # another rmac assembles other bytes.
+      - name: rmac 2.4.3
+        run: |
+          curl -fsSL -o /tmp/rmac.zip \
+            https://rmac.is-slick.com/static/rmac-2.4.3-lin-x64.zip
+          unzip -j -o /tmp/rmac.zip -d /tmp/rmac
+          sudo install -m 755 /tmp/rmac/rmac /usr/local/bin/rmac
       # GoParityTest reads the Go tree against the Java one and skips
       # where go is absent, so a runner without it is green and asleep.
-      - run: go version
-      - run: mvn -B --no-transfer-progress test
+      - run: go version && rmac | sed -n '7p'
+      # A skipped test is a check that did not run, and a run that skips
+      # one is green and asleep. Every skip here has a cause the steps
+      # above remove, so the count stands at 0.
+      - name: the suite, and no skip
+        run: |
+          set -o pipefail
+          mvn -B --no-transfer-progress test | tee /tmp/test.log
+          skipped=$(grep -oE 'Tests run: [0-9]+, Failures: [0-9]+, Errors: [0-9]+, Skipped: [0-9]+$' \
+              /tmp/test.log | tail -1 | grep -oE '[0-9]+$')
+          if [ "$skipped" != "0" ]; then
+              echo "::error::$skipped skipped, and this workflow reads 0"
+              grep -E 'Skipped: [1-9]' /tmp/test.log
+              exit 1
+          fi
