@@ -183,34 +183,46 @@ public record HouseStyle(List<Construct> constructs, List<String> names,
     }
 
     /**
-     * The joined lines with what stands between backticks blanked, a space
-     * a character so the rest keeps its offsets.
+     * The joined lines with every quoted span blanked, a space a character
+     * so the rest keeps its offsets.
      *
-     * <p>A code span is quoted material: a message a tool writes, a name in
-     * a tree, a construct a document strikes and must spell to strike it. A
-     * quoted message keeps its words (AGENTS.md), so the words inside one
-     * are not this tree's prose and are not read.
+     * <p>A quoted span is a message a tool writes, a name in a tree, a
+     * construct a document strikes and must spell to strike it. A quoted
+     * message keeps its words (AGENTS.md), so the words inside one are not
+     * this tree's prose and are not read. A document quotes between
+     * backticks; a comment quotes in the marks Javadoc reads, {@code
+     * &#123;@code x&#125;} and {@code &#123;@link X&#125;} for a span and
+     * {@code <pre>} for a block.
      *
-     * <p>A span opens and closes where Markdown reads it opening and
-     * closing, which is over the run rather than the line: a message as wide
-     * as the document wraps, and the half on each line is quoted as much as
-     * a message that fits one line. Blanking needs the pair, so where one
-     * backtick stands alone in the run the words after it are read.
+     * <p>A span opens and closes over the run rather than the line: a
+     * message as wide as the document wraps, and the half on each line is
+     * quoted as much as a message that fits one line. Blanking needs the
+     * pair, so where one mark stands alone in the run the words after it
+     * are read.
      */
     private static String quoted(String line) {
         StringBuilder out = new StringBuilder(line);
-        int at = out.indexOf("`");
+        blank(out, "`", "`");
+        blank(out, "{@", "}");
+        blank(out, "<pre>", "</pre>");
+        return out.toString();
+    }
+
+    /** Every span of {@code out} from an opening mark to the closing one
+     *  blanked, the marks included. */
+    private static void blank(StringBuilder out, String opens, String closes) {
+        int at = out.indexOf(opens);
         while (at >= 0) {
-            int to = out.indexOf("`", at + 1);
+            int to = out.indexOf(closes, at + opens.length());
             if (to < 0) {
-                break;
+                return;
             }
-            for (int i = at; i <= to; i++) {
+            int end = to + closes.length();
+            for (int i = at; i < end; i++) {
                 out.setCharAt(i, ' ');
             }
-            at = out.indexOf("`", to + 1);
+            at = out.indexOf(opens, end);
         }
-        return out.toString();
     }
 
     /**
