@@ -27,6 +27,7 @@ names
 
 carried
     /org/st4/style/
+    /org/st4/doc/
 
 own
 

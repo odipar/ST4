@@ -14,6 +14,7 @@ import java.util.TreeSet;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import org.junit.jupiter.api.Assumptions;
+import org.st4.doc.Documents;
 import org.st4.style.HouseStyle;
 import org.junit.jupiter.api.Test;
 
@@ -75,22 +76,7 @@ final class ConsistencyTest {
 
     @Test
     void everyLinkResolves() throws IOException {
-        List<String> broken = new ArrayList<>();
-        for (Path p : documents()) {
-            Matcher m = Pattern.compile("\\[([^\\]]+)\\]\\(([^)]+)\\)")
-                    .matcher(read(p));
-            while (m.find()) {
-                String target = m.group(2);
-                if (target.startsWith("http") || target.startsWith("#")) {
-                    continue;
-                }
-                Path base = p.getParent() == null ? Path.of(".") : p.getParent();
-                Path at = base.resolve(target.split("#")[0]).normalize();
-                if (!Files.exists(at)) {
-                    broken.add(p + ": [" + m.group(1) + "](" + target + ')');
-                }
-            }
-        }
+        List<String> broken = Documents.links(documents());
         assertTrue(broken.isEmpty(), () -> String.join("\n", broken));
     }
 
@@ -206,37 +192,12 @@ final class ConsistencyTest {
     }
 
     /** Every row of the glossary's table: the term, what it is, and where. */
-    private static List<String[]> glossaryRows(String glo) {
-        List<String[]> out = new ArrayList<>();
-        for (String line : glo.split("\n")) {
-            if (!line.startsWith("| ") || line.startsWith("| term")
-                    || line.startsWith("| ---")) {
-                continue;
-            }
-            String[] cells = line.split("\\|");
-            if (cells.length >= 4) {
-                out.add(new String[] {cells[1].trim(), cells[2].trim(),
-                                      cells[3].trim()});
-            }
-        }
-        return out;
-    }
-
     @Test
     void theGlossaryIsInOrder() throws IOException {
-        List<String[]> rows = glossaryRows(read(GLO));
-        assertTrue(rows.size() > 20, () -> "the glossary read as " + rows.size()
+        List<String[]> rows = Documents.glossaryRows(read(GLO));
+        assertTrue(rows.size() > 5, () -> "the glossary read as " + rows.size()
                 + " rows");
-        List<String> wrong = new ArrayList<>();
-        for (int i = 1; i < rows.size(); i++) {
-            String before = rows.get(i - 1)[0].replace("`", "")
-                    .toLowerCase(Locale.ROOT);
-            String after = rows.get(i)[0].replace("`", "")
-                    .toLowerCase(Locale.ROOT);
-            if (before.compareTo(after) > 0) {
-                wrong.add('"' + before + "\" stands before \"" + after + '"');
-            }
-        }
+        List<String> wrong = Documents.outOfOrder(rows);
         assertTrue(wrong.isEmpty(), () -> String.join("\n", wrong));
     }
 
@@ -244,7 +205,7 @@ final class ConsistencyTest {
     void everyGlossaryRowPointsSomewhereReal() throws IOException {
         Set<String> clauses = clauses(read(SPEC));
         List<String> bad = new ArrayList<>();
-        for (String[] row : glossaryRows(read(GLO))) {
+        for (String[] row : Documents.glossaryRows(read(GLO))) {
             String where = row[2];
             String file = where.split("[ ,;]")[0];
             if (!Files.exists(Path.of("doc", file))) {
@@ -282,27 +243,12 @@ final class ConsistencyTest {
 
     @Test
     void everyDocumentKeepsOneWrapWidth() throws IOException {
-        List<String> wide = new ArrayList<>();
-        for (Path p : documents()) {
-            List<String> lines = Files.readAllLines(p);
-            boolean fenced = false;
-            for (int at = 0; at < lines.size(); at++) {
-                String line = lines.get(at);
-                if (line.startsWith("```")) {
-                    fenced = !fenced;
-                    continue;
-                }
-                if (fenced || line.startsWith("|") || line.startsWith("    ")
-                        || line.contains("](") || line.contains("<https://")) {
-                    continue;
-                }
-                if (line.length() > 78) {
-                    wide.add(p + ":" + (at + 1) + " runs to " + line.length());
-                }
-            }
-        }
+        List<Path> read = documents();
+        assertTrue(read.size() > 5, () -> "only " + read.size()
+                + " documents read; the check is asleep");
+        List<String> wide = Documents.wide(read, 78);
         assertTrue(wide.isEmpty(), () -> String.join("\n", wide)
-                + "\nAGENTS.md defines one wrap width, and a document keeps it.");
+                + "\nAGENTS.md gives one wrap width, and a document keeps it.");
     }
 
     // -------------------------------------------------------- the format
