@@ -46,7 +46,7 @@ func (r Result) PackedSize() int {
 		len(r.WordOffsets)
 }
 
-// Bits is what the parse cost, what a chain counts: everything written but
+// Bits is the parse's cost, what a chain counts: everything written but
 // the end code, its repeat bit, the repeat's word and stream A's padding.
 func (r Result) Bits() int {
 	repeat := 0
@@ -253,7 +253,7 @@ func (c *compressor) run(chains []*Block, maxOpLength, repeatIndex,
 }
 
 // copy writes a copy from the literal stream, distance units back in the
-// output for length units, in pieces the counters hold. A piece is written
+// output for length units, in pieces the counters have. A piece is written
 // as a match at the window plus the literals between its source and itself;
 // a piece as long as that count leaves its last unit to a literal, so the
 // decoder's offset, advanced by what it copies, never reaches zero.

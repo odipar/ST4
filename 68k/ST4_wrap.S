@@ -45,7 +45,7 @@
 ;
 ; Two copy ladders: match segments of at most sixteen units, measured at four
 ; of every five segments a small-budget streamer makes, run a counter-free
-; ladder that falls into the match epilogue; literals and longer segments take
+; ladder that falls into the match epilogue; literals and longer segments run
 ; the counted ladder. There is no first-call test: ST4_init seeds the bit
 ; queue with one virtual 0 flag ($4000), so the first call runs a zero-unit
 ; match segment and reads that flag as "begin literals".

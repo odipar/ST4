@@ -228,8 +228,8 @@ def played(file: bytes, data: bytes, unit: int, index: int, target: int) -> str:
 
 
 def repeats_for(units_total: int, window: int) -> list[int]:
-    """Two loop points: a whole-stream loop as far as the window allows, and a
-    tail loop - as indices, the way -rR counts them."""
+    """Two loop points: a whole-stream loop as far as the window reaches, and
+    a loop over the last units - as indices, the way -rR counts them."""
     reach = min(units_total, window)
     return sorted({units_total - reach, units_total - max(1, reach // 3)})
 

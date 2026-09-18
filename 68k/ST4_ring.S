@@ -394,7 +394,7 @@ get_gamma:
         add.w   d0,d0                   ; first continuation bit
         beq.s   gamma_refill            ; the queue empties on one bit in eight,
         bcc.s   gamma_done              ; so the refill is out of line and this
-gamma_loop:                             ; branch is the one normally not taken
+gamma_loop:                             ; the branch a run normally skips
         add.w   d0,d0                   ; data bit: never a refill
         addx.w  d1,d1                   ; value = value*2 + bit
         add.w   d0,d0                   ; continuation bit

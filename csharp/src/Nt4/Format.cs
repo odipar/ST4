@@ -61,7 +61,7 @@ public static class Format
     /// <summary>
     /// The furthest any offset reaches, in bytes. A word offset is stored as
     /// <c>-offset * k</c> and the decoder installs it unchanged, so the limit
-    /// is what fits a signed word.
+    /// is the most a signed word fits.
     /// </summary>
     public const int MaxOffset = 32_512;
 

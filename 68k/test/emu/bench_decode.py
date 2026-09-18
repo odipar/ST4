@@ -203,7 +203,7 @@ def main() -> int:
         if one and name != one:
             continue
         if forced is not None:
-            continue                         # a corpus with a window of its own
+            continue                         # a corpus with a separate window
         padded = data + bytes(-len(data) % unit)
         packed = st4.pack_file(data, unit, window, copies=copies)
         units = len(padded) // unit

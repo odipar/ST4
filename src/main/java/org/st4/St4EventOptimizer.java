@@ -12,7 +12,7 @@ import java.util.TreeSet;
  * every candidate's cost is a closed form of the position; only a run
  * starting or ending changes anything, and on repetitive data those are
  * orders of magnitude fewer than DP steps. So this class walks positions
- * taking three channel minima from range structures, the literal channel
+ * reading three channel minima from range structures, the literal channel
  * keyed by state end, the rep channel by run start, the new-offset channel a
  * range minimum over recorded costs per gamma class, and does per-offset
  * work only at run boundaries, found through occurrence chains keyed by

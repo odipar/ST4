@@ -139,7 +139,7 @@ def main() -> int:
         code = assemble(unit)
         window = 32512 // unit
         # ring bytes, budget in units - deliberately including budgets that do
-        # not divide the ring, which is what this variant exists for.
+        # not divide the ring, which this variant exists for.
         # Budgets deliberately include ones larger than the ring: a call that
         # wraps and then fills it is exactly what used to lose a whole ring.
         shapes = [(1024, 16), (256, 127), (48 * unit, 5), (256, 256 // unit)]

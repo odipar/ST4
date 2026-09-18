@@ -1,7 +1,7 @@
 # The 68000 decoders
 
 Three decoders, each built for one unit size with `ST4_UNIT`. Each file
-defines its contract and its numbered assumptions; this document is what
+defines its contract and its numbered assumptions; this document reads what
 they share and how a caller chooses between them. The format they read is
 [SPEC.md](SPEC.md).
 
@@ -103,9 +103,8 @@ magnitude, a `cmp.w` and a short branch a match segment, and reads a copy's
 source from the stream B read pointer with one `lea` in place of the ring
 arithmetic a match needs:
 
-```
-d2 >= -M*k    a match     a3 = a1 + d2            the output, M units back at most
-d2 <  -M*k    a copy      a3 = a2 + M*k + d2      stream B, offset-M units behind a2
+``` d2 >= -M*k a match a3 = a1 + d2 the output, M units back at most d2 < -M*k
+a copy a3 = a2 + M*k + d2 stream B, offset-M units behind a2
                           d2 += n*k               the offset advances by the segment
 ```
 

@@ -93,7 +93,7 @@ type copySearch struct {
 	best     *Block
 	bestBits int
 
-	// The budget: a deadline, a step count, and the steps taken.
+	// The budget: a deadline, a step count, and the steps run.
 	deadline     time.Time
 	stepsAllowed int64
 	started      time.Time
@@ -327,7 +327,7 @@ func (s *copySearch) report(move string) {
 // what each move saved when it was accepted: a move that changes one run
 // at random is the walk the annealing makes, and the moves the parse aims
 // - a run grown where a copy reads from, a gap between two runs filled -
-// are what lands the bits. Weighted this way the search writes 1.08 per
+// land the bits. Weighted this way the search writes 1.08 per
 // cent fewer bytes at the same steps over the corpus, on every seed tried
 // (doc/research.md).
 func (s *copySearch) propose(dictionary []bool) string {
@@ -627,7 +627,7 @@ type copyParser struct {
 	// reached and left. A collection marks from the arrays that name a node,
 	// renumbers what it keeps into the front of the pool, and bounds the
 	// next collection at copyPoolGrowth times that. Ids move, and a parse
-	// decides on bits alone, so the bytes out are what they were.
+	// decides on bits alone, so the bytes out are the bytes it wrote before.
 	nodeEnd    []int32
 	nodeOffset []int32
 	nodePred   []int32
@@ -1277,7 +1277,7 @@ func (p *copyParser) collect(at int) {
 	if cap(p.nodeEnd) > 2*p.limit {
 		// The pool grew for a parse that kept far more than this one. The
 		// arrays come back to the bound, since what a run needs at its
-		// widest is what it asks the operating system for.
+		// widest is the figure it asks the operating system for.
 		p.nodeEnd = append(make([]int32, 0, p.limit), p.nodeEnd[:kept]...)
 		p.nodeOffset = append(make([]int32, 0, p.limit), p.nodeOffset[:kept]...)
 		p.nodePred = append(make([]int32, 0, p.limit), p.nodePred[:kept]...)

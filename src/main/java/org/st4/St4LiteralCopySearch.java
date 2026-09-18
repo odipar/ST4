@@ -113,7 +113,7 @@ public final class St4LiteralCopySearch {
         private St4Block best;
         private int bestBits;
 
-        // The budget: a deadline, a step count, and the steps taken.
+        // The budget: a deadline, a step count, and the steps run.
         private long deadline;
         private long stepsAllowed;
         private long started;
@@ -333,7 +333,7 @@ public final class St4LiteralCopySearch {
          * what each move saved when it was accepted: a move that changes
          * one run at random is the walk the annealing makes, and the moves
          * the parse aims - a run grown where a copy reads from, a gap
-         * between two runs filled - are what lands the bits. Weighted this
+         * between two runs filled - land the bits. Weighted this
          * way the search writes 1.08 per cent fewer bytes at the same steps
          * over the corpus, on every seed tried (doc/research.md).
          */
@@ -597,7 +597,7 @@ public final class St4LiteralCopySearch {
         // marks from the arrays that name a node, renumbers what it keeps
         // into the front of the pool, and bounds the next collection at
         // POOL_GROWTH times that. Ids move, and a parse decides on bits
-        // alone, so the bytes out are what they were.
+        // alone, so the bytes out are the bytes it wrote before.
         private int[] nodeEnd = new int[1024];
         private int[] nodeOffset = new int[1024];
         private int[] nodePred = new int[1024];
@@ -1223,7 +1223,7 @@ public final class St4LiteralCopySearch {
             if (nodeEnd.length > 2 * limit) {
                 // The pool grew for a parse that kept far more than this
                 // one. The arrays come back to the bound, since what a run
-                // needs at its widest is what it asks the machine for.
+                // needs at its widest is the figure it asks the machine for.
                 nodeEnd = Arrays.copyOf(nodeEnd, limit);
                 nodeOffset = Arrays.copyOf(nodeOffset, limit);
                 nodePred = Arrays.copyOf(nodePred, limit);
@@ -1343,7 +1343,7 @@ public final class St4LiteralCopySearch {
         }
 
         /**
-         * Fills every class from the values a parse begins with, which is
+         * Fills every class from the values a parse begins with, which the
          * what a checkpoint restored, for a parse that begins at
          * {@code start}.
          */

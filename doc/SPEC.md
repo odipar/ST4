@@ -117,7 +117,8 @@ move.
 
 **4.3** No offset reaches further back than 32512 bytes, at any `k`.
 
-**4.4** `M`, the window (2.1), is what the packer was told a decoder keeps.
+**4.4** `M`, the window (2.1), is the figure the packer was told a
+decoder keeps.
 An offset of at most `M` is a match: it reads the output that many units
 back. An offset above `M` is a copy from the literal stream (5).
 

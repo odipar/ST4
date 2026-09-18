@@ -90,7 +90,7 @@ public final class St4Format {
     /**
      * The furthest any offset reaches, in bytes. A word offset is stored as
      * {@code -offset * k} and the decoder installs it unchanged, so the limit
-     * is what fits a signed word.
+     * is the most a signed word fits.
      */
     public static final int MAX_OFFSET = 32512;
 

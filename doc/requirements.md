@@ -5,7 +5,7 @@ Numbered so a change can name what it answers to. The format itself is
 
 ## R0. The house style and the terms
 
-The format and its decoders are what this repository produces. How it is
+The format and its decoders are this repository's product. How it is
 written comes before what it describes, and what things are called comes
 before both.
 

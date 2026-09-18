@@ -12,7 +12,7 @@ import org.junit.jupiter.api.Test;
  * {@link St4EventOptimizer} against {@link St4FastOptimizer}: the optimum is
  * unique, so the cost arrays are equal element for element, the strongest
  * check on an optimizer that breaks ties differently. The rebuilt chain
- * decompresses back to the input and packs to the same size, give or take
+ * decompresses back to the input and packs to the same size, within
  * stream padding.
  */
 final class St4EventOptimizerTest {
