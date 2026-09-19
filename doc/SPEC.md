@@ -41,7 +41,8 @@ or a length that is not a multiple of `k` cannot be stored, so `k` of 2 or
 **2.2** Every field of more than one byte is most significant byte first.
 
 **2.3** Stream A begins where the header ends. No stream length is stored:
-each stream runs to the next, and a reader stops on the end code (3.6).
+each stream runs to the next and stream D to the end of the container,
+and a reader stops on the end code (3.6).
 
 **2.4** The signature fills one long, so a decoder built for one `k`
 accepts or rejects a container with a single comparison.
@@ -73,7 +74,8 @@ and a `0` bit ends the value. So 1 is `0`, 2 is `100`, 3 is `110`, 4 is
 starts a match at the last offset and `1` a match at a new offset, so two
 literal runs in a row cannot occur. After a match, `0` starts literals and
 `1` a match at a new offset. The first block is literals and has no flag
-bit:
+bit. A decoder starts with the last offset at 1 unit, which a block at
+the last offset reads before any block has set one:
 
 ```
 open:            gamma(n)                   n literal units from stream B
@@ -86,7 +88,9 @@ after a match:   0 gamma(n)                 n literal units from stream B
 ```
 
 **3.5** The two class bits `cc` of a new offset select the stream the
-offset comes from, and its reach:
+offset comes from, and its reach. A block reads the next entry of that
+stream, the entries of each standing in the order the blocks that read
+them do:
 
 | class | meaning |
 |---|---|
@@ -102,7 +106,8 @@ whether the stream ends there: a `0` ends it, and a `1` loops it (6.2).
 stores gamma of the length less one.
 
 **3.8** With its flag, a block is an even number of bits: a gamma is an odd
-count, and the flag with the class bits makes it even. Stream A is padded
+count, and the flag with the class bits makes it even. The first block
+has no flag (3.4), so it is odd and so is the stream. Stream A is padded
 to an even length, so the last refill of a decoder that reads a word at a
 time finds a whole word.
 
