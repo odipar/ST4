@@ -118,7 +118,8 @@ stores gamma of the length less one.
 count, and the flag with the class bits makes it even. The first block
 has no flag (3.4), so it is odd and so is the stream. Stream A is padded
 to an even number of bytes, so the last refill of a decoder that reads a
-word at a time finds a whole word.
+word at a time finds a whole word; a container begins each stream on a
+long (2.1), which pads it further.
 
 ## 4. The offsets
 
@@ -141,10 +142,13 @@ back. An offset above `M` is a copy from the literal stream (5).
 
 ## 5. Copies from the literal stream
 
-**5.1** A copy reads `offset - M` literal units back from the stream B read
-pointer, and leaves that pointer where it is. The distance counts literal
-units, so a byte offset in bank 1 reaches `512 - M` literals back and one
-in bank 0 reaches `256 - M`.
+**5.1** A copy is a match block whose offset stands above `M` (4.4): the
+flag that starts it, the class bits and the length it reads are a match's
+(3.1, 3.4), and it leaves a reader where a match does. It reads
+`offset - M` literal units back from the stream B read pointer, and leaves
+that pointer where it is. The distance counts literal units, so a byte
+offset in bank 1 reaches at most `512 - M` literals back and one in bank 0
+at most `256 - M`.
 
 **5.2** A copy's offset falls by what it copies, so a copy cut short
 continues where it stopped, and a block at the last offset after a copy
@@ -190,7 +194,7 @@ repeat bit set and no rewind point, or a rewind point and that bit
 clear.
 
 **6.2** A loop within the window loops by itself. The repeat bit (3.6) is
-set, and the word after it in stream D is the distance back to the loop
+set, and the next entry of stream D is the distance back to the loop
 point in units, `O` over `k` less `R`, stored as 4.2 stores an offset; the
 header's rewind point is $FFFFFFFF in this form (2.6), so a reader that
 needs `R` reads it as `O` over `k` less that distance. A decoder installs
