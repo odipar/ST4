@@ -90,6 +90,11 @@ class ConformanceTest {
                     1, 4096, St4Format.MAX_OP, null, false, 1,
                     "word offsets, class 0 0, past the 512 units a byte offset reaches"
                             + " (SPEC.md 4.2)"),
+            new Source("k4-word-offset", "numbers(2800, 37, 251) twice",
+                    then(numbers(2800, 37, 251), numbers(2800, 37, 251)), 4, 4096,
+                    St4Format.MAX_OP, null, false, 1,
+                    "a word offset at a unit of 4, where the word stored is 65536 less the"
+                            + " offset times k (SPEC.md 4.2)"),
             new Source("k1-long-literals", "numbers(600, 97, 251)", numbers(600, 97, 251), 1, 4096, St4Format.MAX_OP,
                     null, false, 1,
                     "a literals block of more than 256 units, so its gamma runs long"),

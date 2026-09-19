@@ -26,6 +26,7 @@ container that ends, and three for one that loops (SPEC.md 6).
 | `k1-bank0` | tiled(numbers(16, 37, 251), 192) | 1 | 4096 |  |  | 1 | 52 | 345288c46cf6a011 | byte offsets in bank 0, 1 to 256 units back (SPEC.md 4.1) |
 | `k1-bank1` | numbers(300, 37, 251) twice | 1 | 512 |  |  | 1 | 292 | 0c24a18d68a54a14 | byte offsets in bank 1, 257 to 512 units back (SPEC.md 4.1) |
 | `k1-word-offset` | numbers(700, 37, 251) twice | 1 | 4096 |  |  | 1 | 294 | 5639a82a86e299ab | word offsets, class 0 0, past the 512 units a byte offset reaches (SPEC.md 4.2) |
+| `k4-word-offset` | numbers(2800, 37, 251) twice | 4 | 4096 |  |  | 1 | 1046 | f760ec0070d91516 | a word offset at a unit of 4, where the word stored is 65536 less the offset times k (SPEC.md 4.2) |
 | `k1-long-literals` | numbers(600, 97, 251) | 1 | 4096 |  |  | 1 | 292 | 0cbc4896a7fe4b25 | a literals block of more than 256 units, so its gamma runs long |
 | `k1-split-op` | run(1200, $5A) | 1 | 4096 | 64 |  | 1 | 88 | fc8797e6c5f23ff1 | an operation split at 64 units, the limit the packer packs to |
 | `k2-matches` | tiled(numbers(16, 37, 251), 256) | 2 | 4096 |  |  | 1 | 52 | d766e00980c57e5a | a unit of 2 bytes |

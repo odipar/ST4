@@ -11,7 +11,8 @@ test` and compares the file with it byte for byte. So the packer emits the
 kit itself, and a change that moved a byte of it fails there.
 
 The containers reach every unit size, both offset banks and the word
-offsets past them, a literals block longer than 256 units, an operation
+offsets past them at a unit of 1 and of 4, where the word stored scales by
+the unit, a literals block longer than 256 units, an operation
 split at a limit, an input padded to a whole unit, copies from the literal
 stream, a loop within the window, a loop from unit 0, a loop longer than
 the window with its rewind point, one unit of output, and a block at the
