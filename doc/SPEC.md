@@ -63,7 +63,11 @@ $FFFFFFFF otherwise.
 | match at the last offset | gamma(length) | copied from the current offset |
 | match at a new offset | 2 class bits, gamma(length - 1) | one byte from C or one word from D |
 
-**3.2** Bits are read from stream A most significant first.
+**3.2** Bits are read from stream A most significant first, and the left
+bit of a pair below is the one a reader reads first.
+
+**3.2.1** A match copies unit by unit as the output grows, so a match
+longer than its offset repeats the units it has just written.
 
 **3.3** A length is an interlaced Elias gamma: each binary digit of the
 value below its leading 1 follows a `1` marker bit, most significant first,
@@ -73,9 +77,11 @@ and a `0` bit ends the value. So 1 is `0`, 2 is `100`, 3 is `110`, 4 is
 **3.4** One flag bit says which block comes next. After literals, `0`
 starts a match at the last offset and `1` a match at a new offset, so two
 literal runs in a row cannot occur. After a match, `0` starts literals and
-`1` a match at a new offset. The first block is literals and has no flag
-bit. A decoder starts with the last offset at 1 unit, which a block at
-the last offset reads before any block has set one:
+`1` a match at a new offset. A literals block leaves the last offset as it
+is, so a block at the last offset after literals matches where the block
+before them did. The first block is literals and has no flag bit. A
+decoder starts with the last offset at 1 unit, which a block at the last
+offset reads before any block has set one:
 
 ```
 open:            gamma(n)                   n literal units from stream B
