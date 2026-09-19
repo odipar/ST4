@@ -54,6 +54,30 @@ marked *decides output*, and six clauses changed for what it found.
 - 2.3 runs each stream to the next where 2.1 begins each on a long, so
   the bytes between are padding rather than data.
 
+**The second run**, the same day, against the kit with the clauses of the
+first in it and a second implementer. The reader was 261 lines and
+produced all sixteen outputs byte for byte again; its notes had 20
+entries with 6 marked *decides output*, and eight places changed.
+
+- 6.2 read the loop word as the distance `O - R`, where 2.1 records `O` in
+  bytes and 6.1 reads `R` in units. It is `O` over `k` less `R`, in units,
+  stored as 4.2 stores an offset: both loop containers here are a unit of
+  1, where the two readings agree.
+- 4.2's word is the units times `k` where 4.1's byte is the units
+  themselves, which the clause reads now; `k4-word-offset` is where the
+  two part.
+- 3.8 read that stream A is padded "to an even length" where the sentence
+  before it counts bits and the reason counts words. It is bytes.
+- 3.6 reads that the end code stands where the output reaches `O`, which
+  2.1 and 2.3 both bear on and neither said.
+- 6.1 reads that a container has one loop form: the repeat bit and no
+  rewind point, or a rewind point and that bit clear.
+- 5.1 read that a byte offset reaches `512 - M` literals back, which is
+  bank 1's reach; one in bank 0 reaches `256 - M`.
+- 3.2's sentence on which bit of a class pair a reader reads first stands
+  with 3.5's table now, and 3.1 reads the last offset by the name the rest
+  of the document has.
+
 DTX's kit was read cold the same day and its reader read this document
 for the packed payloads it has; those payloads pack without a loop, so
 sections 6.2, 6.3 and the rewind point of 2.6 were outside that run, and
