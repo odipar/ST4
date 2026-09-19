@@ -42,7 +42,9 @@ or a length that is not a multiple of `k` cannot be stored, so `k` of 2 or
 
 **2.3** Stream A begins where the header ends. No stream length is stored:
 each stream runs to the next and stream D to the end of the container,
-and a reader stops on the end code (3.6).
+and a reader stops on the end code (3.6). Each begins on a long (2.1), so
+the bytes between the last one a stream uses and the next stream are
+padding.
 
 **2.4** The signature fills one long, so a decoder built for one `k`
 accepts or rejects a container with a single comparison.
@@ -141,15 +143,15 @@ back. An offset above `M` is a copy from the literal stream (5).
 pointer, and leaves that pointer where it is. The distance counts literal
 units, so a byte offset reaches `512 - M` literals back.
 
-**5.2** A copy advances its offset by what it copies, so a copy cut short
-continues where it stopped, and a match at the last offset after a copy
-resumes just past it, shifted by the literals in between. A decoder reads
-the offset against `M` where the block runs (4.4), so a block at the last
-offset reads the output once copies have brought that offset to `M` or
-below.
+**5.2** A copy's offset falls by what it copies, so a copy cut short
+continues where it stopped, and a block at the last offset after a copy
+resumes just past it, shifted by the literals in between. That offset
+stays above `M` (5.3), so such a block is a copy again, and a decoder
+that reads the offset against `M` where the block runs (4.4) reads it as
+one.
 
-**5.3** A copy is shorter than its distance, so its offset never reaches
-zero.
+**5.3** A copy is shorter than its distance, the `offset - M` literal
+units of 5.1, so its offset stays above `M`.
 
 **5.4** At `k` of 1 and `M` of 4, an input that repeats its first three
 units eight units back cannot match them, 8 being beyond `M`, and copies
@@ -178,19 +180,23 @@ one past where the copy stopped, shifted by the literal between.
 
 **6.1** A container packed with a loop point `R` stands for the infinite
 output `[0,R)` `[R,O)*`: after its last unit the output continues from unit
-`R`. The loop's length against the window decides which of the two forms
-(6.2, 6.3) a packer writes.
+`R`. `R` counts units here, where the header records the rewind point in
+bytes (2.1). The loop's length against the window decides which of the two
+forms (6.2, 6.3) a packer writes.
 
 **6.2** A loop within the window loops by itself. The repeat bit (3.6) is
 set, and the word after it in stream D is the distance `O - R` back to the
-loop point. A decoder installs it as any other offset and matches it
-forever, so after one pass every unit is the one `O - R` units back. It
-costs the container two bytes.
+loop point; the header's rewind point is $FFFFFFFF in this form (2.6), so a
+reader that needs `R` reads it as `O` less that distance. A decoder installs
+it as any other offset and matches it forever, so after one pass every unit
+is the one `O - R` units back. It costs the container two bytes.
 
 **6.3** A loop longer than the window is replayed by the caller. The stream
 ends plainly, and the header records the rewind point (2.6). The caller
 saves the decoder's state when the output reaches `R` and restores it, all
-but the write pointer, when the output reaches `O`, every pass. For every
+but the write pointer, when the output reaches `O`, every pass. `R` is a
+unit of the output and stands inside a block as readily as at its end, so
+the caller saves at that unit. For every
 pass to read the same history, the loop `[R,O)` is packed apart: no match
 in it reaches before `R` or straddles `R`. The cost is the first window of
 the loop, which cannot reference the intro.
