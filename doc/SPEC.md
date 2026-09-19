@@ -137,7 +137,10 @@ units, so a byte offset reaches `512 - M` literals back.
 
 **5.2** A copy advances its offset by what it copies, so a copy cut short
 continues where it stopped, and a match at the last offset after a copy
-resumes just past it, shifted by the literals in between.
+resumes just past it, shifted by the literals in between. A decoder reads
+the offset against `M` where the block runs (4.4), so a block at the last
+offset reads the output once copies have brought that offset to `M` or
+below.
 
 **5.3** A copy is shorter than its distance, so its offset never reaches
 zero.
