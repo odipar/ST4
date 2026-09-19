@@ -72,6 +72,7 @@ the chips through both.
 | [research.md](doc/research.md) | what was measured: rings, algorithms, the search, the memory |
 | [RELEASES.md](doc/RELEASES.md) | what a release contains, and every one published |
 | [near-offset.md](doc/near-offset.md) | a fifth class code, priced and parked |
+| [conformance/](doc/conformance) | the kit an independent reader is written against, and the runs against it |
 
 ## Usage
 
