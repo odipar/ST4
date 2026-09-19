@@ -78,12 +78,12 @@ entries with 6 marked *decides output*, and eight places changed.
   with 3.5's table now, and 3.1 reads the last offset by the name the rest
   of the document has.
 
-A third reader of DTX's kit, whose payloads this document packs, read
-three more places on 2026-09-19. A copy had no row of its own in 3.1 and
-no case in 3.4, so a reader had to decide that a copy is a match block
-for both, which governs every byte of that kit's `dtx2-copies` after its
-second block: 5.1 reads it now. 5.1's reach by bank is a bound rather
-than a distance, and 6.2's loop word is the next entry of stream D.
+A third reader of DTX's kit, whose payloads this document packs, read three
+more places on 2026-09-19. A copy had no row in 3.1 and no case in 3.4, so a
+reader had to decide that a copy is a match block for both, which governs
+every byte of that kit's `dtx2-copies` after its second block: 5.1 reads it
+now. 5.1's reach by bank is a bound rather than a distance, and 6.2's loop
+word is the next entry of stream D.
 
 DTX's kit was read cold the same day and its reader read this document
 for the packed payloads it has; those payloads pack without a loop, so
