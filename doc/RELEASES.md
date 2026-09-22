@@ -44,6 +44,38 @@ plain `vN.0` means the format.
 
 ## Published
 
+### go/v0.1.12, 2026-09-22
+
+<https://github.com/odipar/ST4/releases/tag/go/v0.1.12>, built from the
+commit tagged `go/v0.1.12`.
+
+What a caller sees when a tool reports something: tools.md writes those
+lines down for the first time, and the Java tree, the Go tree and the C#
+tree are read against them. Two of the three reported an input the other
+two report, or none at all.
+
+- **`dst4 -rN` on a stream that does not loop.** The Java tree and the C#
+  tree report `The stream does not loop, so -rN has nothing to repeat`
+  and exit 1; the Go tree unpacked one pass and exited 0. Measured on a
+  4,000-byte input packed with no loop: the two exits differed and the
+  Go tree's output was the pass. The Go tree reports it now.
+- **A read or a write that fails.** The Java tree and the Go tree report
+  `Cannot read standard input` and `Cannot write standard output`; the C#
+  tree let the runtime report it. Both tools of the C# tree report those
+  lines now.
+- **The lines are in the document.** tools.md has a table for the
+  container reader, one for the decoder and one for either tool, and
+  `ConsistencyTest` reads twelve of those lines against the three trees:
+  the longest run of words between the figures a tool writes into a line
+  must stand in each. A line reworded in one tree, or in the document
+  alone, fails there.
+
+The six executables are built from `go/`, where one line moved, so a
+`dst4` of this release differs from `go/v0.1.11`'s.
+
+Checks: `mvn -o clean test` green, 73 tests; `dotnet test` green, 26;
+`go test ./...` green.
+
 ### go/v0.1.11, 2026-09-18
 
 <https://github.com/odipar/ST4/releases/tag/go/v0.1.11>, built from the
