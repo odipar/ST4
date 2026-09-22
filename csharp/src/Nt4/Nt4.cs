@@ -136,11 +136,16 @@ public static class Nt4
         }
 
         byte[] input;
-        using (Stream stdin = Console.OpenStandardInput())
-        using (var buffer = new MemoryStream())
+        try
         {
+            using Stream stdin = Console.OpenStandardInput();
+            using var buffer = new MemoryStream();
             stdin.CopyTo(buffer);
             input = buffer.ToArray();
+        }
+        catch (IOException)
+        {
+            return Cli.Error("Cannot read standard input");
         }
         if (input.Length == 0)
         {
@@ -178,10 +183,15 @@ public static class Nt4
                 maxOpLength, repeatIndex, window);
         }
 
-        using (Stream stdout = Console.OpenStandardOutput())
+        try
         {
+            using Stream stdout = Console.OpenStandardOutput();
             byte[] container = Container(result);
             stdout.Write(container, 0, container.Length);
+        }
+        catch (IOException)
+        {
+            return Cli.Error("Cannot write standard output");
         }
         if (silent)
         {

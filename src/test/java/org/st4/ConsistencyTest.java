@@ -34,6 +34,90 @@ import org.junit.jupiter.api.Test;
  */
 final class ConsistencyTest {
 
+    /**
+     * Every line tools.md reports reads the same in the three trees: a
+     * line reworded in one tree and the document, or in the document
+     * alone, fails here. The letters a table writes for a figure, V or N
+     * or K, and the figures a tool builds a line from stand outside the
+     * comparison, and this reads the words around them.
+     *
+     * <p>The check came from YMXR, where a release took a descriptor's
+     * version to 2 in one clause and left another reading 1. Writing the
+     * table for it found the Go tree unpacking a stream that does not
+     * loop under -rN where the other two report it.
+     */
+    @Test
+    void everyLineTheDocumentReportsReadsTheSameInTheTrees() throws IOException {
+        String java = tree(Path.of("src/main/java/org/st4"), ".java");
+        String go = tree(Path.of("go"), ".go");
+        String sharp = tree(Path.of("csharp/src"), ".cs");
+        int read = 0;
+        for (String said : reported(Files.readString(TOOLS))) {
+            String part = longest(said);
+            if (part.isEmpty() || !java.contains(part)) {
+                continue;
+            }
+            read++;
+            assertTrue(go.contains(part),
+                    "tools.md reports \"" + said + "\" and the Go tree lacks \"" + part + "\"");
+            assertTrue(sharp.contains(part),
+                    "tools.md reports \"" + said + "\" and the C# tree lacks \"" + part + "\"");
+        }
+        assertTrue(read >= 12, "tools.md reports " + read + " lines of the tools");
+    }
+
+    /** The longest run of words of a line between the figures a tool
+     *  writes into it, and the empty text where the line is figures and
+     *  short runs. */
+    private static String longest(String said) {
+        String longest = "";
+        // a letter a table writes for a figure stands alone: a capital
+        // with no letter after it and no capital before it, as V or N or
+        // the N of -rN, or a run of digits between word boundaries
+        for (String part : said.split("(?<![A-Z])[A-Z](?![A-Za-z])|\\bi\\b|\\b[0-9]+\\b")) {
+            String one = part.strip();
+            if (one.length() >= 12 && one.length() > longest.length()) {
+                longest = one;
+            }
+        }
+        return longest;
+    }
+
+    /** The lines the tables of a document report: the last cell of a row,
+     *  each code span in it of three words or more. */
+    private static List<String> reported(String document) {
+        List<String> out = new ArrayList<>();
+        Matcher row = Pattern.compile("^\\|(.*)\\|\\s*$", Pattern.MULTILINE)
+                .matcher(document);
+        while (row.find()) {
+            String[] cells = row.group(1).split("\\|");
+            if (cells.length < 2) {
+                continue;
+            }
+            Matcher said = Pattern.compile("`([^`]+)`").matcher(cells[cells.length - 1]);
+            while (said.find()) {
+                String one = said.group(1);
+                if (one.split("\\s+").length >= 3) {
+                    out.add(one);
+                }
+            }
+        }
+        return out;
+    }
+
+    /** Every source of a tree, read as one text, a line built from two
+     *  strings read as one. */
+    private static String tree(Path at, String ending) throws IOException {
+        StringBuilder out = new StringBuilder();
+        try (java.util.stream.Stream<Path> found = Files.walk(at)) {
+            for (Path one : found.filter(p -> p.toString().endsWith(ending)).toList()) {
+                out.append(Files.readString(one)).append('\n');
+            }
+        }
+        return out.toString().replaceAll("\"\\s*\\+\\s*\"", "")
+                .replaceAll("\\$\"", "\"");
+    }
+
     private static final Path README = Path.of("README.md");
     private static final Path SPEC = Path.of("doc/SPEC.md");
     private static final Path REQ = Path.of("doc/requirements.md");

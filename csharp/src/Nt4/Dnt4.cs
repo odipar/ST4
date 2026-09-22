@@ -63,11 +63,16 @@ public static class Dnt4
         }
 
         byte[] file;
-        using (Stream stdin = Console.OpenStandardInput())
-        using (var buffer = new MemoryStream())
+        try
         {
+            using Stream stdin = Console.OpenStandardInput();
+            using var buffer = new MemoryStream();
             stdin.CopyTo(buffer);
             file = buffer.ToArray();
+        }
+        catch (IOException)
+        {
+            return Cli.Error("Cannot read standard input");
         }
 
         Format.Container container;
@@ -91,9 +96,14 @@ public static class Dnt4
             return Cli.Error(exception.Message);
         }
 
-        using (Stream stdout = Console.OpenStandardOutput())
+        try
         {
+            using Stream stdout = Console.OpenStandardOutput();
             stdout.Write(output, 0, output.Length);
+        }
+        catch (IOException)
+        {
+            return Cli.Error("Cannot write standard output");
         }
         if (silent)
         {
