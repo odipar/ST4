@@ -35,6 +35,48 @@ Its output is padded to a whole number of units, as the format stores it
 (SPEC.md 1.2): for a looping stream one whole pass, and it names where the
 loop is.
 
+## What the tools report
+
+Every line below reaches standard error, an error prefixed `Error: ` and
+the tool exiting 1. The three trees report the same line for the same
+input, which `ConsistencyTest` reads against each of them.
+
+`dst4`, reading a container (SPEC.md 3.1):
+
+| condition | reported as |
+|---|---|
+| the file is under 20 bytes | `too short to be an ST4 file` |
+| the signature's high word is other than the magic | `not an ST4 file` |
+| the signature's version byte is V, other than 7 | `ST4 format version V, not 7` |
+| the unit byte K is other than 1, 2 or 4 | `unit size K is not 1, 2 or 4` |
+| the output size N is negative, or no whole number of units | `output size N is not a whole number of K-byte units` |
+| the rewind point R is other than -1 and no unit of the output | `rewind point R is not a unit of the output` |
+| the window W is outside 1 to M units, M the reach at that unit | `window W is not 1..M units` |
+| stream S, B, C or D, begins off a long boundary | `stream S does not start on a long boundary` |
+| stream S begins before the one before it, or past the file | `stream S lies outside the file` |
+
+`dst4`, decoding the streams (SPEC.md 3.2, 6.2):
+
+| condition | reported as |
+|---|---|
+| a copy of L units from B units back reads past the literal read pointer | `a copy of L units from B units back does not stay behind the literal read pointer` |
+| the loop distance D units reaches past the window W | `the loop distance D units reaches past the W-unit window` |
+| `-rN` with N above 1 on a container whose rewind point is -1 | `The stream does not loop, so -rN has nothing to repeat` |
+
+Either tool:
+
+| condition | reported as |
+|---|---|
+| standard input cannot be read | `Cannot read standard input` |
+| standard output cannot be written | `Cannot write standard output` |
+
+`st4` reports two notes on standard error as it packs, the tool exiting
+0: `The loop is longer than the -mN window, so the decoder cannot loop
+it after the first pass` where the loop the caller asked for reaches
+past the window, and `Warning: longest operation is L units, over the
+-lN limit: a literal run always reaches` where an operation runs past
+the limit.
+
 ## The three trees
 
 | tree | what it is |

@@ -75,6 +75,9 @@ func main() {
 	}
 	output := decoded.Output
 	note := ""
+	if decoded.RepeatIndex < 0 && passes > 1 {
+		fail(fmt.Sprintf("The stream does not loop, so -r%d has nothing to repeat", passes))
+	}
 	if decoded.RepeatIndex >= 0 && passes > 1 {
 		// A repeating stream decodes to any size from one pass up: the pass,
 		// then the loop again for every repeat asked for.
