@@ -10,6 +10,8 @@ read to the end exactly, and that the caller's registers survive.
 """
 import hashlib
 import importlib.util
+import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -61,42 +63,74 @@ def assemble(unit: int, name: str = 'ST4.S', window: bool = False) -> bytes:
         return binary.read_bytes()
 
 
+_BUILT = None
+
+
+def built() -> Path:
+    """The directory of the cache for the packer as it is built now.
+
+    A container the cache keeps is the packer's output, so a packer that
+    writes other bytes has a separate directory: its name is a hash of every
+    class file of org.st4, and a directory of another build is removed on
+    the first call, which leaves one build's containers in the cache. A key
+    of the input and the format version alone let the rigs pass on the
+    containers of an old packer."""
+    global _BUILT
+    if _BUILT is None:
+        if not CLASSES.exists():
+            raise SystemExit('target/classes is missing; run `mvn compile` first')
+        digest = hashlib.sha1()
+        for one in sorted((CLASSES / 'org' / 'st4').rglob('*.class')):
+            digest.update(one.relative_to(CLASSES).as_posix().encode())
+            digest.update(one.read_bytes())
+        _BUILT = CACHE / digest.hexdigest()[:16]
+        _BUILT.mkdir(parents=True, exist_ok=True)
+        for other in CACHE.iterdir():
+            if other != _BUILT:
+                if other.is_dir():
+                    shutil.rmtree(other, ignore_errors=True)
+                else:
+                    other.unlink(missing_ok=True)
+    return _BUILT
+
+
+def _kept(key: Path, argv: list, data: bytes) -> bytes:
+    """The bytes a tool writes for data, from the cache or from a run of it.
+    A rig runs beside the others, so a file is written whole under a
+    temporary name and then renamed onto its key."""
+    if not key.exists():
+        # the tools read standard input and write standard output, so the
+        # bytes come back on the pipe and the report goes nowhere
+        run = subprocess.run(argv, input=data, check=True, stdout=subprocess.PIPE,
+                             stderr=subprocess.PIPE)
+        part = key.with_name(f'{key.name}.{os.getpid()}')
+        part.write_bytes(run.stdout)
+        os.replace(part, key)
+    return key.read_bytes()
+
+
 def pack_file(data: bytes, unit: int, window: int, repeat: int | None = None,
               copies: bool = False) -> bytes:
     """Runs the real packer; repeat is the loop point as a unit index, 0 valid,
     and copies lets a match past the window copy from the literal stream.
-    Returns the whole container, cached by its inputs and the format version."""
-    if not CLASSES.exists():
-        raise SystemExit('target/classes is missing; run `mvn compile` first')
-    CACHE.mkdir(exist_ok=True)
-    key = CACHE / (f'{hashlib.sha1(data).hexdigest()[:16]}-v7-k{unit}-m{window}'
-                   + (f'-at{repeat}' if repeat is not None else '')
-                   + ('-c' if copies else '') + '.st4')
-    if not key.exists():
-        # the tools read standard input and write standard output, so the
-        # container comes back on the pipe and the report goes nowhere
-        run = subprocess.run(['java', '-ea', '-cp', str(CLASSES), 'org.st4.St4',
-                              f'-k{unit}', f'-m{window}', '-l65535', '-silent']
-                             + ([f'-r{repeat}'] if repeat is not None else [])
-                             + (['-c'] if copies else []),
-                             input=data, check=True, stdout=subprocess.PIPE,
-                             stderr=subprocess.PIPE)
-        key.write_bytes(run.stdout)
-    return key.read_bytes()
+    Returns the whole container, cached by its inputs and the build of the
+    packer (built)."""
+    key = built() / (f'{hashlib.sha1(data).hexdigest()[:16]}-k{unit}-m{window}'
+                     + (f'-at{repeat}' if repeat is not None else '')
+                     + ('-c' if copies else '') + '.st4')
+    return _kept(key, ['java', '-ea', '-cp', str(CLASSES), 'org.st4.St4',
+                       f'-k{unit}', f'-m{window}', '-l65535', '-silent']
+                 + ([f'-r{repeat}'] if repeat is not None else [])
+                 + (['-c'] if copies else []), data)
 
 
 def unpack_file(file: bytes, times: int) -> bytes:
     """Runs the real unpacker on a container: dst4 -rN, the pass and then N-1
-    repeats of its loop section. Cached by the container and the count."""
-    CACHE.mkdir(exist_ok=True)
-    key = CACHE / f'{hashlib.sha1(file).hexdigest()[:16]}-r{times}.bin'
-    if not key.exists():
-        run = subprocess.run(['java', '-ea', '-cp', str(CLASSES), 'org.st4.Dst4',
-                              f'-r{times}', '-silent'],
-                             input=file, check=True, stdout=subprocess.PIPE,
-                             stderr=subprocess.PIPE)
-        key.write_bytes(run.stdout)
-    return key.read_bytes()
+    repeats of its loop section. Cached by the container, the count and the
+    build of the unpacker (built)."""
+    key = built() / f'{hashlib.sha1(file).hexdigest()[:16]}-r{times}.bin'
+    return _kept(key, ['java', '-ea', '-cp', str(CLASSES), 'org.st4.Dst4',
+                       f'-r{times}', '-silent'], file)
 
 
 def streams(file: bytes, unit: int) -> tuple:

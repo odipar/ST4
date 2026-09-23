@@ -1,6 +1,6 @@
-# The Java suite, run by hand. The Python rigs and the C# suite stand
-# outside it: they want an emulator, unicorn and the .NET SDK, and
-# doc/tools.md lists them.
+# The Java suite with the six rigs in it, and the C# suite, run by hand
+# through bin/suite (doc/tools.md). The benchmarks under 68k/test/emu stand
+# outside it.
 name: test
 
 # Off by default: no push and no pull request starts it. A caller starts
@@ -21,6 +21,20 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: '1.26'
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      # RigsTest decodes under unicorn.
+      - run: python3 -m pip install --quiet unicorn
+      # The rigs keep every container the packer writes, in a directory
+      # named by the build of the packer (test_st4.py), so a run of an
+      # unchanged packer reads them back and a changed one packs them
+      # again. The key is the packer's sources, which fix its build.
+      - uses: actions/cache@v4
+        with:
+          path: 68k/test/emu/.st4
+          key: st4-rigs-${{ hashFiles('src/main/java/**', 'pom.xml') }}
+          restore-keys: st4-rigs-
       # ConsistencyTest reads the figures of the documents against a
       # build, and skips where rmac is absent. The version is pinned:
       # another rmac assembles other bytes.
@@ -32,7 +46,7 @@ jobs:
           sudo install -m 755 /tmp/rmac/rmac /usr/local/bin/rmac
       # GoParityTest reads the Go tree against the Java one and skips
       # where go is absent, so a runner without it is green and asleep.
-      - run: go version && rmac | sed -n '7p'
+      - run: go version && dotnet --version && rmac | sed -n '7p'
       # A skipped test is a check that did not run, and a run that skips
       # one is green and asleep. bin/suite (doc/tools.md) requires what
       # the skipping tests need, runs the suite and ends with 1 where the

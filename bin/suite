@@ -11,16 +11,24 @@ root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 cd "$root"
 
 # GoParityTest builds the Go tools and reads them against the Java tree,
-# and skips where go is absent. ConsistencyTest reads the figures of the
-# documents against a build, and skips where rmac is absent; RMAC names it
-# where it stands outside the path.
+# and skips where go is absent. ConsistencyTest and RigsTest assemble the
+# decoders with rmac, which they run from the path. RigsTest decodes under
+# unicorn, which python3 imports. The C# tree is a separate suite, which
+# dotnet runs after the Java one.
 if ! command -v go >/dev/null 2>&1; then
     echo "suite: GoParityTest builds the Go tools, and go is not on the path" >&2
     exit 2
 fi
-if ! command -v "${RMAC:-rmac}" >/dev/null 2>&1; then
-    echo "suite: ConsistencyTest assembles the decoders, and ${RMAC:-rmac} is not"\
-         "on the path; RMAC names another" >&2
+if ! command -v rmac >/dev/null 2>&1; then
+    echo "suite: the decoders are assembled by rmac, which is not on the path" >&2
+    exit 2
+fi
+if ! python3 -c "import unicorn" >/dev/null 2>&1; then
+    echo "suite: RigsTest decodes under unicorn: pip install unicorn" >&2
+    exit 2
+fi
+if ! command -v dotnet >/dev/null 2>&1; then
+    echo "suite: the C# tree is tested by dotnet, which is not on the path" >&2
     exit 2
 fi
 
@@ -42,4 +50,20 @@ if [ "$skipped" != 0 ]; then
     grep -E 'Skipped: [1-9]' "$log" >&2
     exit 1
 fi
-echo "suite: $(echo "$said" | sed -n 's/^Tests run: \([0-9]*\).*/\1/p') tests, 0 skipped"
+java=$(echo "$said" | sed -n 's/^Tests run: \([0-9]*\).*/\1/p')
+
+# The C# tree: dotnet test reports one line of counts, and a skip there is
+# a check that did not run as much as one in the Java suite.
+( set +e; dotnet test csharp/Nt4.slnx 2>&1; echo $? > "$status" ) | tee -a "$log"
+[ "$(cat "$status")" = 0 ] || exit "$(cat "$status")"
+counts=$(grep -oE 'Failed: +[0-9]+, Passed: +[0-9]+, Skipped: +[0-9]+' "$log" | tail -1)
+if [ -z "$counts" ]; then
+    echo "suite: dotnet test reported no count of tests" >&2
+    exit 1
+fi
+if [ "$(echo "$counts" | sed -n 's/.*Skipped: *\([0-9]*\).*/\1/p')" != 0 ]; then
+    echo "suite: the C# tree skipped a test: $counts" >&2
+    exit 1
+fi
+csharp=$(echo "$counts" | sed -n 's/.*Passed: *\([0-9]*\).*/\1/p')
+echo "suite: $java tests and $csharp in C#, 0 skipped"
