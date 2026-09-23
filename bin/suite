@@ -1,0 +1,45 @@
+#!/bin/sh
+# The Java suite as .github/workflows/test.yml runs it, on this machine.
+# A test that skips is a check that did not run, so this requires what the
+# skipping tests need, runs the suite, and reads the skip count back: a
+# count above 0 ends this with exit 1 and the lines that report it.
+# doc/tools.md.
+#
+#   bin/suite [maven argument ...]
+set -e
+root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+cd "$root"
+
+# GoParityTest builds the Go tools and reads them against the Java tree,
+# and skips where go is absent. ConsistencyTest reads the figures of the
+# documents against a build, and skips where rmac is absent; RMAC names it
+# where it stands outside the path.
+if ! command -v go >/dev/null 2>&1; then
+    echo "suite: GoParityTest builds the Go tools, and go is not on the path" >&2
+    exit 2
+fi
+if ! command -v "${RMAC:-rmac}" >/dev/null 2>&1; then
+    echo "suite: ConsistencyTest assembles the decoders, and ${RMAC:-rmac} is not"\
+         "on the path; RMAC names another" >&2
+    exit 2
+fi
+
+log=target/suite.log
+status=target/suite.status
+mkdir -p target
+( set +e; mvn -B --no-transfer-progress "$@" test 2>&1; echo $? > "$status" ) | tee "$log"
+[ "$(cat "$status")" = 0 ] || exit "$(cat "$status")"
+
+said=$(grep -oE 'Tests run: [0-9]+, Failures: [0-9]+, Errors: [0-9]+, Skipped: [0-9]+$' \
+    "$log" | tail -1)
+if [ -z "$said" ]; then
+    echo "suite: the run reported no count of tests" >&2
+    exit 1
+fi
+skipped=${said##*: }
+if [ "$skipped" != 0 ]; then
+    echo "suite: $skipped skipped, and a whole run reads 0" >&2
+    grep -E 'Skipped: [1-9]' "$log" >&2
+    exit 1
+fi
+echo "suite: $(echo "$said" | sed -n 's/^Tests run: \([0-9]*\).*/\1/p') tests, 0 skipped"

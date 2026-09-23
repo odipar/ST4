@@ -182,10 +182,16 @@ python3 68k/test/emu/bench_offset.py      # why the class bits select the stream
 python3 68k/test/emu/bench_decode.py      # cycles a unit, plain build against window
 ```
 
-`.github/workflows/test.yml` runs `mvn test` on a GitHub runner, with Go
+`.github/workflows/test.yml` runs `bin/suite` on a GitHub runner, with Go
 on the path so the parity check runs rather than skips. No push starts
 it: a caller starts it from the Actions tab or by
 `gh workflow run test.yml`.
+
+`bin/suite [maven argument ...]` runs that suite on the caller's machine.
+A skipped test is a check that did not run, so the script requires go on
+the path and rmac on it or at `RMAC`, exit 2 where one of them is absent,
+and reads the count of skipped tests off the run, exit 1 and the lines
+that report it where the count is above 0.
 
 The Python rigs need `mvn compile`, [rmac](http://rmac.is-slick.com) and
 `pip install unicorn`: they pack every corpus with the real packer,
