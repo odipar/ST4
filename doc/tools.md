@@ -182,16 +182,19 @@ python3 68k/test/emu/bench_offset.py      # why the class bits select the stream
 python3 68k/test/emu/bench_decode.py      # cycles a unit, plain build against window
 ```
 
-`.github/workflows/test.yml` runs `bin/suite` on a GitHub runner, with Go
-on the path so the parity check runs rather than skips. No push starts
-it: a caller starts it from the Actions tab or by
-`gh workflow run test.yml`.
+`.github/workflows/test.yml` runs `bin/suite` on a GitHub runner, with
+Go, the .NET SDK, rmac and unicorn on it so that no check skips, and the
+rigs' containers kept between runs under a key of the packer's sources.
+No push starts it: a caller starts it from the Actions tab or by `gh
+workflow run test.yml`.
 
-`bin/suite [maven argument ...]` runs that suite on the caller's machine.
-A skipped test is a check that did not run, so the script requires go on
-the path and rmac on it or at `RMAC`, exit 2 where one of them is absent,
-and reads the count of skipped tests off the run, exit 1 and the lines
-that report it where the count is above 0.
+`bin/suite [maven argument ...]` runs that suite on the caller's
+machine: `mvn test`, whose `RigsTest` runs the six rigs above side by
+side, and then `dotnet test csharp/Nt4.slnx`. A skipped test is a check
+that did not run, so the script requires go, rmac and dotnet on the path
+and python3 with unicorn in it, exit 2 where one of them is absent, and
+reads the count of skipped tests off both runs, exit 1 where either
+count is above 0. The three benchmarks run by hand.
 
 The Python rigs need `mvn compile`, [rmac](http://rmac.is-slick.com) and
 `pip install unicorn`: they pack every corpus with the real packer,
@@ -207,3 +210,13 @@ through the real tools, builds a decoder at a unit size, seeds the four
 streams and the registers a decoder reads them through, guards a ring
 against a write outside it, and reads every stream to its end. A rig
 reads the harness for those and has the calls its subject needs.
+
+The harness keeps every container the packer writes and every output
+`dst4 -rN` writes in `.st4` beside the rigs, in a directory named by a
+hash of the class files of `org.st4`, and removes a directory of another
+build on its first call. A warm cache runs the six rigs side by side in
+17 seconds on macOS and 24 on a GitHub runner. A cold one starts the JVM
+once for each container and each output, more than a thousand times, so
+its cost is the cost of a JVM's start: 70 seconds on the runner and 835
+on macOS. The key of the input and the format version alone let the rigs
+pass on the containers an old packer wrote.
