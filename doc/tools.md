@@ -214,8 +214,9 @@ reads the harness for those and has the calls its subject needs.
 The harness keeps every container the packer writes and every output
 `dst4 -rN` writes in `.st4` beside the rigs, in a directory named by a
 hash of the class files of `org.st4`, and removes a directory of another
-build on its first call. A warm cache runs the six rigs in about twenty
-seconds side by side. A cold one starts the JVM once for each container
-and each output, more than a thousand times, and is about fifteen
-minutes. The key of the input and the format version alone let the rigs
+build on its first call. A warm cache runs the six rigs side by side in
+17 seconds on macOS and 24 on a GitHub runner. A cold one starts the JVM
+once for each container and each output, more than a thousand times, so
+its cost is the cost of a JVM's start: 70 seconds on the runner and 835
+on macOS. The key of the input and the format version alone let the rigs
 pass on the containers an old packer wrote.
