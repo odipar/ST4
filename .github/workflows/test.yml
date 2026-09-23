@@ -34,16 +34,8 @@ jobs:
       # where go is absent, so a runner without it is green and asleep.
       - run: go version && rmac | sed -n '7p'
       # A skipped test is a check that did not run, and a run that skips
-      # one is green and asleep. Every skip here has a cause the steps
-      # above remove, so the count stands at 0.
+      # one is green and asleep. bin/suite (doc/tools.md) requires what
+      # the skipping tests need, runs the suite and ends with 1 where the
+      # count is above 0; a caller runs the same script here.
       - name: the suite, and no skip
-        run: |
-          set -o pipefail
-          mvn -B --no-transfer-progress test | tee /tmp/test.log
-          skipped=$(grep -oE 'Tests run: [0-9]+, Failures: [0-9]+, Errors: [0-9]+, Skipped: [0-9]+$' \
-              /tmp/test.log | tail -1 | grep -oE '[0-9]+$')
-          if [ "$skipped" != "0" ]; then
-              echo "::error::$skipped skipped, and this workflow reads 0"
-              grep -E 'Skipped: [1-9]' /tmp/test.log
-              exit 1
-          fi
+        run: bin/suite
