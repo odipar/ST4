@@ -171,7 +171,7 @@ copy:                                   ; MATCH copies only reach this entry
 copy_source:                            ; the offset is beyond the window, so
 ; the source is stream B, offset-M units behind the read pointer, which stays
 ; where it is. Stream B never wraps, so none of the ring arithmetic applies.
-; The offset advances by what this segment copies: a copy the budget or the
+; The offset falls by what this segment copies: a copy the budget or the
 ; ring end cuts continues where it stopped, and a rep after it starts past
 ; it. It stays beyond the window, since a copy is shorter than its distance.
 window_lea:

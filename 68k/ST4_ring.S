@@ -259,7 +259,7 @@ entry_special:                          ; d1.w = 0: the start, or done
 copy_source:                            ; the offset is beyond the window, so
 ; the source is stream B, offset-M units behind the read pointer, which stays
 ; where it is. Stream B never wraps, so none of the ring arithmetic applies.
-; The offset advances by what this segment copies: a copy the budget or the
+; The offset falls by what this segment copies: a copy the budget or the
 ; ring end cuts continues where it stopped, and a rep after it starts past
 ; it. It stays beyond the window, since a copy is shorter than its distance.
 window_lea:
@@ -404,7 +404,7 @@ gamma_done:                             ; doubles as the loop jump
         add.w   d4,d1                   ; +1 only for a new-offset match
         move.w  d3,d4                   ; the resume_fresh tail, duplicated so
         bne.w   segment                 ; the parse exit costs one branch
-        rts                             ; budget spent: the d1.w result stands
+        rts                             ; budget spent: d1.w is the result
 gamma_refill:                           ; queue-empty continuations share one
         move.w  (a0)+,d0                ; refill; carry set means another pair
         addx.w  d0,d0                   ; follows, otherwise finish the gamma

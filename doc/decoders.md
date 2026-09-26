@@ -1,9 +1,9 @@
 # The 68000 decoders
 
 Three decoders, each built for one unit size with `ST4_UNIT`. Each file
-defines its contract and its numbered assumptions; this document reads what
-they share and how a caller chooses between them. The format they read is
-[SPEC.md](SPEC.md).
+defines its contract and its numbered assumptions; this document covers
+what they share and how a caller chooses between them. The format they read
+is [SPEC.md](SPEC.md).
 
 | decoder | k = 1 | k = 2 | k = 4 | calls |
 |---|---:|---:|---:|---|
@@ -26,8 +26,8 @@ straight into what comes next; literals and longer runs run a counted one.
 The second ladder was worth 12 to 14% of the cycles in a small-budget
 streaming loop and 3 to 5% in bulk, with no case slower, measured against
 the single-ladder decoder at the release that made the change
-([RELEASES.md](RELEASES.md), v0.5). That decoder is not in this tree, so
-`bench_decode.py` cannot count it again.
+([RELEASES.md](RELEASES.md), v0.5). That decoder left the tree with the
+change, so the figure is the one measured then.
 
 ## The state
 
@@ -70,8 +70,8 @@ A block and its flag are an even number of bits (SPEC.md 3.8) and a refill
 is sixteen, so the queue can run out only on a gamma continuation bit, the
 class bit right after a flag, and the repeat bit; every other read skips
 the test. The destination, stream B and the ring start on a unit boundary,
-and the ring size is a whole number of units, so a wide move never lands on
-an odd address.
+and the ring size is a whole number of units, so a wide move lands on an
+even address.
 
 ## Loops
 
@@ -83,13 +83,14 @@ transition and one checked bit to the end code: streams that end paid 0.05
 to 0.4% more cycles than the decoders before the loop code, measured at the
 release that added it ([RELEASES.md](RELEASES.md), v7.0), and the loop
 itself runs at or below the rate of the pass, since it only copies. Such a
-stream never reaches DONE; drive it through `ST4_resume` with budgets and
-stop when you have enough, since `ST4_decompress` drains until DONE.
+stream runs without end, and `ST4_decompress` drains until DONE, so a
+caller drives it through `ST4_resume` with budgets and stops at the output
+it needs.
 
-A loop the caller replays (SPEC.md 6.3) needs no decoder code: when the
-output reaches the rewind point, save `a0`, `a2`, `a4`, `a5`, `d0`, `d1`
-and `d2`; when it reaches `O`, restore them, `a1` staying where the ring
-has got to, and carry on. Arrange the budgets so a call ends on both
+A loop the caller replays (SPEC.md 6.3) runs on the decoder as it is: when
+the output reaches the rewind point, save `a0`, `a2`, `a4`, `a5`, `d0`,
+`d1` and `d2`; when it reaches `O`, restore them, `a1` staying where the
+ring has got to, and carry on. Arrange the budgets so a call ends on both
 points; a state saved mid-operation replays like any other.
 
 ## Copies from the literal stream
@@ -98,14 +99,15 @@ A stream with copies (SPEC.md 5) needs a decoder built with `ST4_WINDOW equ
 1`, and the window it was packed for, the header's field at byte 24:
 `ST4_init` reads it in `d3`, in bytes, and writes it into the two
 instructions that use it. For the ring decoders that is the ring size
-`ST4_init` has already. Such a build tells a copy from a match by
+`ST4_init` has already. Such a build separates a copy from a match by
 magnitude, a `cmp.w` and a short branch a match segment, and reads a copy's
 source from the stream B read pointer with one `lea` in place of the ring
 arithmetic a match needs:
 
-``` d2 >= -M*k a match a3 = a1 + d2 the output, M units back at most d2 < -M*k
-a copy a3 = a2 + M*k + d2 stream B, offset-M units behind a2
-                          d2 += n*k               the offset advances by the segment
+```
+d2 >= -M*k  a match  a3 = a1 + d2        the output, M units back at most
+d2 < -M*k   a copy   a3 = a2 + M*k + d2  stream B, offset-M units behind a2
+                     d2 += n*k           the offset falls by the segment
 ```
 
 One build a unit size serves every window, and the decoder keeps no state
@@ -120,19 +122,18 @@ instruction on an MC68000 model. Over the whole corpus at `k` of 1, 2 and
 a window build of ST4_wrap through a 256-byte ring, and 0.3 to 0.7 on a
 window build of ST4.S. The compare runs once a match segment, and a ring
 splits a match at every wrap where ST4.S has one segment an operation. A
-stream with copies
-runs at the rate its operation count sets: word-soup at `k` of 1 packed
-with copies for a 16-unit ring decodes in ST4_wrap at 66.5 cycles a unit,
-where the same data packed without them for a 256-unit ring costs 64.8, and
-for the 16-unit ring, nearly all of it literals, 42.0 for 2.9 times the
-bytes. [research.md](research.md) has the tables.
+stream with copies runs at the rate its operation count sets: word-soup at
+`k` of 1 packed with copies for a 16-unit ring decodes in ST4_wrap at 66.5
+cycles a unit, where the same data packed without them for a 256-unit ring
+costs 64.8, and for the 16-unit ring, nearly all of it literals, 42.0 for
+2.9 times the bytes. [research.md](research.md) has the tables.
 
 ## What to feed them
 
-The decoders do not check their input (SPEC.md 7.1); use trusted files made
-at build time. The packers keep every operation within the decoders' 16-bit
-counters. For a ring of `N` units, pack with `-mN` so the decoder never
-needs data that has left the ring, which also decides how a loop is packed;
-add `-c` and build with `ST4_WINDOW equ 1` to let the ring reach the
-literals it has read. [research.md](research.md) prices the ring against
-the RAM it costs.
+The decoders read their input unchecked (SPEC.md 7.1), so feed them trusted
+files made at build time. The packers keep every operation within the
+decoders' 16-bit counters. For a ring of `N` units, pack with `-mN` so
+every match reads data still in the ring, which also decides how a loop is
+packed; add `-c` and build with `ST4_WINDOW equ 1` to let the ring reach
+the literals it has read. [research.md](research.md) prices the ring
+against the RAM it costs.
