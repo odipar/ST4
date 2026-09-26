@@ -5,17 +5,17 @@ worth 3.57 per cent of a stream packed without copies and 2.88 of one
 packed with them, and it costs 56 cycles a near match, 6.6 per cent of the
 decode over the columns those figures are measured on. A format version,
 two conformance kits and twenty-two images move with it. The sections below
-are the figures that decision rests on; none of it is built.
+are the figures behind that decision, and the change is unbuilt.
 
 Half the matches a stream makes reach back 32 units or fewer, and each of
-them spends a byte on an offset five bits would carry. Adding
-a near offset would be worth, what it would cost, and what building it
-touches.
+them spends a byte on an offset five bits would encode. This document
+measures what a near offset would save, what it would cost, and what
+building it changes.
 
-The measurement it rests on is in [research.md](research.md), under *What a
+The measurement is in [research.md](research.md), under *What a
 short-offset class is worth against the packer*.
 
-## What stands today
+## The format today
 
 A match at a new offset spends a flag bit, two class bits, gamma of the
 length less one, and the offset itself out of stream C or stream D:
@@ -30,11 +30,11 @@ length less one, and the offset itself out of stream C or stream D:
 ## The change
 
 A fifth outcome: an offset of 1 to 32 units, five bits read from stream A
-rather than a byte from stream C. Two class bits name four outcomes, so one
-of the four grows a third bit and its two children are the old meaning and
-the new one.
+rather than a byte from stream C. Two class bits encode four outcomes, so
+one of the four grows a third bit and its two children are the old meaning
+and the new one.
 
-**The end code is the one to grow, and parity settles it.** A block with
+**Parity picks the end code to grow.** A block with
 its flag is an even number of bits: a gamma is odd, and the flag with the
 class bits makes it even, which lets a 68000 decoder skip the refill check
 on every read but three. Grow the word-offset code and a word block is
@@ -44,7 +44,7 @@ is the end, once a stream, at the end of a stream A padded to an even
 length. So the end code grows, its two children are the end and the near
 offset, and a near offset is read in three class bits.
 
-**Five bits of offset is then the width parity admits.** A near block is
+**Five bits of offset is then the width parity allows.** A near block is
 flag, class, offset and gamma, so flag plus class plus offset has to be
 odd: three class bits and five of offset is nine, where four or six would
 be even.
@@ -62,7 +62,7 @@ This document read the second row until the arithmetic was checked against
 the parity rule above, and research.md's table beside it prices the same
 way. The second tree puts the near offset in the freed two-bit code and
 grows the end and the word code instead, which saves three bits a near
-match rather than two. What it costs is the property the format is shaped
+match rather than two. It costs the property the format is shaped
 around: a near block of flag, two class bits, five of offset and an odd
 gamma is odd, and a decoder reads it with the refill check the parity was
 there to spare. The end block itself becomes odd, being a flag, three class
@@ -86,14 +86,14 @@ A near match spends eight bits of class and offset against the ten it
 spends now, and the end code spends one more: 14,362 x 2 - 120 = 28,604
 bits, 3,576 bytes of 124,220, **2.88 per cent**.
 
-That is a floor. The parse it is priced on was chosen under the costs as
-they are; a parse made under the new ones reaches for more near matches,
-and the section below measures what that adds.
+That figure is a lower bound. The parse it is priced on was chosen under
+the costs as they are; a parse made under the new ones reaches for more
+near matches, and the section below measures what that adds.
 
 ## What a parse made under the new costs finds
 
-The floor above is priced on a parse the old costs chose. This parses again
-with the near class in the cost model, so the parse reaches for it.
+The lower bound above is priced on a parse the old costs chose. This parses
+again with the near class in the cost model, so the parse reaches for it.
 
 The corpus is thirty columns of real tunes, the three tone-period low bytes
 of the ten dumps under YMXR's `ym/test`, 90,138 bytes in all, packed a
@@ -110,10 +110,10 @@ it counts 14,701 bits where the packer reports 14,712.
 | the near class, today's parse | 13,562 | -3.30% |
 | the near class, parsed for it | 13,525 | **-3.57%** |
 
-**Parsing for the class adds 0.27 points to the floor's 3.30**, a twelfth
-of it. The parse does reach: near matches rise from 1,879 to 2,309 and byte
-offsets fall from 1,026 to 923, and each swap trades one encoding for
-another of nearly the same cost.
+**Parsing for the class adds 0.27 points to the lower bound's 3.30**, a
+twelfth of it. The parse moves toward the class: near matches rise from
+1,879 to 2,309 and byte offsets fall from 1,026 to 923, and each swap
+trades one encoding for another of nearly the same cost.
 
 Note: at a 256-byte ring without copies every offset fits a byte, so this
 corpus has no word offset in it at all. The 698 word offsets of the corpus
@@ -137,7 +137,7 @@ cycles a byte today, and 2,309 near matches at 56 cycles each add 1.43,
 So the decode is the dearer side of the trade on either corpus, and parsing
 for the class moves the file figure a quarter of a point.
 
-## What building it touches
+## What building it changes
 
 - **ST4**: the cost model, the compressor, the decompressor and the copies
   search's costing of a copy, in the Go, Java and C# trees; SPEC.md,
@@ -163,10 +163,10 @@ somewhere rather than a file that can be packed again.
 
 The decode cost lands in YMXR's frame budget, which performance.md prices.
 
-What DTX and YMXR say about a byte staying where it was is spent once,
-deliberately: two conformance kits and twenty-two images are written again
-in the same change, and a reader of them cannot tell a mistake from the
-change intended without reading the parse.
+DTX and YMXR pin their bytes, and this change moves them once: two
+conformance kits and twenty-two images are written again in one change,
+and a reader of them tells a mistake from the intended change only by
+reading the parse.
 
 ## What is open
 
