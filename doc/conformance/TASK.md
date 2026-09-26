@@ -18,7 +18,7 @@ saves the decoder's state at the loop point and restores it at the end
 
 ## The containers
 
-`SOURCES.md` lists them, and stands outside a run against this kit, since
+`SOURCES.md` lists them, and is left out of a run against this kit, since
 the input a container packs has the bytes a decoder writes in it. Each
 container is complete: the header of SPEC.md 2.1, then its four streams.
 
@@ -33,4 +33,4 @@ container is complete: the header of SPEC.md 2.1, then its four streams.
   byte that differs fails the container.
 
 A reader that produces every `.out` file from every `.st4` file reads ST4.
-How fast it runs, and how it is called, stand outside this kit.
+How fast it runs, and how it is called, are outside this kit.

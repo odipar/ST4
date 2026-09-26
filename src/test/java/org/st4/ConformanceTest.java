@@ -1,6 +1,7 @@
 package org.st4;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.io.IOException;
@@ -13,6 +14,9 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HexFormat;
 import java.util.List;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+import java.util.stream.Stream;
 import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 
@@ -21,7 +25,7 @@ import org.junit.jupiter.api.Test;
  *
  * <p>Every container in the kit is packed here, from the input and options
  * SOURCES.md defines, and compared byte for byte with the file in the tree;
- * beside each container stand the bytes a decoder writes for it, which the
+ * beside each container are the bytes a decoder writes for it, which the
  * decompressor writes back. A container the tree does not have yet is
  * written, and SOURCES.generated.md beside the kit lists what SOURCES.md
  * then has to say.
@@ -219,5 +223,28 @@ class ConformanceTest {
                 + ", and this run wrote them");
         assertTrue(sources.contains(said), "SOURCES.md has another table than this run"
                 + " writes: SOURCES.generated.md beside the kit has the rows");
+    }
+
+    /** The number words README.md counts the containers in. */
+    private static final List<String> COUNT = List.of("zero", "one", "two", "three",
+            "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve",
+            "thirteen", "fourteen", "fifteen", "sixteen", "seventeen", "eighteen",
+            "nineteen", "twenty");
+
+    /**
+     * README.md's count of the kit's containers, against the directory. The
+     * count read fifteen while the kit had sixteen.
+     */
+    @Test
+    void theReadmeCountsTheContainers() throws IOException {
+        long containers;
+        try (Stream<Path> at = Files.list(KIT_AT.resolve("containers"))) {
+            containers = at.filter(one -> one.toString().endsWith(".st4")).count();
+        }
+        String readme = String.join(" ",
+                Files.readString(KIT_AT.resolve("README.md")).split("\\s+"));
+        Matcher said = Pattern.compile("written against: (\\w+) containers").matcher(readme);
+        assertTrue(said.find(), "README.md does not count the containers");
+        assertEquals(containers, COUNT.indexOf(said.group(1)), "README.md's container count");
     }
 }

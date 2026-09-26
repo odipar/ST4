@@ -1,6 +1,6 @@
 # conformance
 
-The kit an independent reader is written against: fifteen containers under
+The kit an independent reader is written against: sixteen containers under
 `containers/`, the bytes a decoder writes for each beside them in
 `outputs/`, and TASK.md, which defines what a reader produces from each and
 the rules it is checked against.
@@ -24,7 +24,7 @@ read containers of the same shapes under emulation.
 
 An implementer reads SPEC.md and TASK.md, writes a reader from those alone,
 and produces the bytes a decoder writes for every container. The `outputs/`
-files and SOURCES.md stand outside the run, since either has the bytes a
+files and SOURCES.md are left out of the run, since either has the bytes a
 decoder writes in it. A run passes where every container's bytes equal the
 kit's and every reading the notes record is one the document decides.
 
@@ -42,15 +42,15 @@ marked *decides output*, and six clauses changed for what it found.
   the offset stays above `M` and that block is a copy again: the clause
   read a case the format cannot reach, and reads the invariant now.
 - 5.3 left "its distance" to the reader, which 5.4 uses for the
-  `offset - M` literal units. The clause names them.
+  `offset - M` literal units. The clause defines them.
 - 6.1 reads `R` in units where 2.1 records the rewind point in bytes,
   which a unit of 1 hides.
 - 6.2 leaves `R` out of the container: the clause reads it as `O` less
   the distance in stream D.
 - 6.3 rules out a match that straddles `R` and left open whether the
-  caller's save point stands inside a block. It does: the first block of
+  caller's save point can lie inside a block. It can: the first block of
   `k1-loop-long` is 84 literals with `R` at 64, and a reader that saved
-  at a block's end alone writes 1,560 bytes where 1,600 stand.
+  at a block's end alone writes 1,560 bytes of the 1,600.
 - 2.3 runs each stream to the next where 2.1 begins each on a long, so
   the bytes between are padding rather than data.
 
@@ -68,14 +68,14 @@ entries with 6 marked *decides output*, and eight places changed.
   two part.
 - 3.8 read that stream A is padded "to an even length" where the sentence
   before it counts bits and the reason counts words. It is bytes.
-- 3.6 reads that the end code stands where the output reaches `O`, which
+- 3.6 reads that the end code comes where the output reaches `O`, which
   2.1 and 2.3 both bear on and neither said.
 - 6.1 reads that a container has one loop form: the repeat bit and no
   rewind point, or a rewind point and that bit clear.
 - 5.1 read that a byte offset reaches `512 - M` literals back, which is
   bank 1's reach; one in bank 0 reaches `256 - M`.
-- 3.2's sentence on which bit of a class pair a reader reads first stands
-  with 3.5's table now, and 3.1 reads the last offset by the name the rest
+- 3.2's sentence on which bit of a class pair a reader reads first moved
+  to 3.5's table, and 3.1 reads the last offset by the name the rest
   of the document has.
 
 A third reader of DTX's kit, whose payloads this document packs, read three
