@@ -5,12 +5,11 @@
 **AI wrote most of ST4.** Claude (Anthropic's Claude Code) wrote the three
 tool trees, the 68000 decoders, the tests, the emulation rigs and most of
 what is written here, under Robbert van Dalen's direction: he requested,
-read and merged every change. [LICENSE](LICENSE) is the terms, and its
-attribution records who did what. Whether to use software written that way
-is the reader's decision, and this section is here so that the decision is
-informed.
+read and merged every change. [LICENSE](LICENSE) sets the terms, and its
+attribution records who did what. This section informs the reader's
+decision to use software written this way.
 
-What it is built on is older than it. ST4 grew out of
+ST4 builds on older work. It grew out of
 [ST1](https://github.com/odipar/ST1) and, through it, Einar Saukas's
 [ZX1](https://github.com/einar-saukas/ZX1), whose format and algorithm are
 his. ST4_wrap.S is based on ST1_wrap.S, which OpenAI Codex wrote for ST1.
@@ -71,17 +70,17 @@ quarter as many operations.
 
 ## The unit and the window
 
-A wider unit makes the output larger and the decoder faster. An offset or
-a length that is not a multiple of `k` cannot be stored, so a wider unit
-leaves the packer fewer matches to choose from, and the decoder runs half
-or a quarter as many operations. On the 120 test columns of
+A wider unit makes the output larger and the decoder faster. A container
+stores offsets and lengths in whole units, so a wider unit leaves the
+packer fewer matches to choose from, and the decoder runs half or a quarter
+as many operations. On the 120 test columns of
 [research.md](doc/research.md), 898,830 bytes, at the widest window a unit
 of 2 writes 32.3 per cent more than a unit of 1, and a unit of 4 writes
 99.7 per cent more. Those columns are bytes, the shape a wider unit costs
 most on, so `k` is chosen per asset against a decode budget rather than a
 size target, and recorded in the header.
 
-The packer is told the window `M`, the units a decoder keeps, and a
+The window `M`, a flag of the packer, is the units a decoder keeps, and a
 streaming decoder keeps a ring that wide. ZX1 reaches 511 bytes back, and
 ST4 at a unit of 1 reaches 32,512. On the same columns, at ZX1's window the
 two are level, 105,908 bytes against 105,742, and at the widest window ST4
@@ -98,7 +97,7 @@ writes 41.5 per cent fewer. The gain is reach alone.
 | copy | a block whose offset is beyond the window, which reads from the literal stream rather than from the output |
 | unit | the `k` bytes every length and offset counts in: 1, 2 or 4 |
 | offset | how far back a match or a copy reads, in units |
-| window | `M`: what the packer was told a decoder keeps, in units |
+| window | `M`: the units the packer assumes a decoder keeps |
 | ring | the buffer a streaming decoder writes into and matches back through, `M` units of it |
 | loop point | the unit a looping container continues from after its last |
 
@@ -113,7 +112,7 @@ writes 41.5 per cent fewer. The gain is reach alone.
 | [glossary.md](doc/glossary.md) | every term, and the document that explains it |
 | [research.md](doc/research.md) | what was measured: rings, algorithms, the search, the memory |
 | [RELEASES.md](doc/RELEASES.md) | what a release contains, and every one published |
-| [near-offset.md](doc/near-offset.md) | a near offset in five bits, measured and not built: the decode costs more than the file saves |
+| [near-offset.md](doc/near-offset.md) | a near offset in five bits, measured and parked: the decode costs more than the file saves |
 | [conformance/](doc/conformance) | the kit an independent reader is written against, and the runs against it |
 
 ## Building and the tests
