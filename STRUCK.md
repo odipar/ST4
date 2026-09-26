@@ -40,6 +40,16 @@ a noun as a verb
     vendor
     in: the repository vendors the library
 
+## One vocabulary
+
+The glossary names the class `0 1` that ends the data the end code
+(SPEC.md 3.6), in prose and in code.
+
+the end marker
+    \bend marker
+    in: the decoder stops on the end marker
+    not: the decoder stops on the end code
+
 ## Programs do not intend
 
 Roles and abstractions doing what a person does: a writer promising, a

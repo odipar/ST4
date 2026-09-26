@@ -157,7 +157,7 @@ def operations(control: bytes):
         first, second = bit(), bit()
         between.append([1, first, second])
         if not first and second:
-            return lengths, between             # the end marker ends stream A
+            return lengths, between             # the end code ends stream A
         lengths.append(gamma())
 
 

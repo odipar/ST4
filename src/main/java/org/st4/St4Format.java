@@ -53,7 +53,7 @@ package org.st4;
  * </pre>
  *
  * Stream A begins where the header ends and each stream runs to the next: no
- * length is stored, and the decoders stop on the end marker. The signature
+ * length is stored, and the decoders stop on the end code. The signature
  * has magic, version and k in one long, so a decoder built for one k checks
  * an asset with one {@code cmp.l}; the starts are header-relative, so opening
  * a container is one {@code adda.l} per stream. A stream cut at the next

@@ -55,7 +55,7 @@
 ;   28 ..  streams A, B, C and D, in that order
 ;
 ; Stream A begins where the header ends; a stream runs to the next, and the
-; decoder stops on the end marker. One cmp.l checks the signature and one
+; decoder stops on the end code. One cmp.l checks the signature and one
 ; adda.l per stream opens the container:
 ;
 ;       lea     asset(pc),a3
@@ -83,7 +83,7 @@
 ;         -lastOffset*UNIT during a match, zero once done
 ;
 ; A stream packed with st4 -r whose loop fits the window is never done: its
-; end marker installs one last offset and the decoder matches it forever,
+; end code installs one last offset and the decoder matches it forever,
 ; re-arming 65535 units at a time. Drive it through ST4_resume with budgets
 ; and stop when you have enough; ST4_decompress would never return.
 ;
@@ -264,7 +264,7 @@ new_offset:
 class_read:
         bcs.s   byte_offset
         add.w   d0,d0                   ; class bit 2: set means end of stream
-        bcs.s   end_marker
+        bcs.s   end_code
         move.w  (a5)+,d2                ; -lastOffset*UNIT, stored ready to use
 have_offset:
         moveq   #1,d4                   ; new-offset match: remaining = gamma+1
@@ -331,7 +331,7 @@ literals_transition:
         neg.w   d2                      ; a rep reuses the negated offset
         bra.w   gamma_seed0
 
-end_marker:
+end_code:
 ; One more bit: 0 ends the stream, 1 repeats it. It sits at an even position,
 ; where the queue can run out, so this is the other checked read.
         add.w   d0,d0

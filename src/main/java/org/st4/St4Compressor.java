@@ -183,7 +183,7 @@ public final class St4Compressor {
         flushLiterals();
         assert readIndex == units.length : "the parses did not cover the input";
 
-        // The end marker, then the repeat bit: end, or one last word offset
+        // The end code, then the repeat bit: end, or one last word offset
         // in stream D, the distance back to the loop point, matched forever.
         writeBit(true);
         writeBit(false);

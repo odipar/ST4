@@ -221,6 +221,7 @@ repositories of the family and the rows below it struck here.
 | `a ring of its own`, `the packer's own parse`, `the stream's own literals`, `complete on their own` | `a separate ring`, `the parse the packer writes`, `the literals of the stream itself`, `complete in themselves`; the possessive is struck before a comma or a semicolon as before a space |
 | `What stands today` | `The format today`; *stand* in every form, struck wherever it appeared, `stand-in` the noun excepted |
 | `What building it touches` | `What building it changes`; *touch* in every form, struck wherever it appeared |
+| `the end marker` | `the end code`, the glossary's term (SPEC.md 3.6), in prose and in the label of the three decoders |
 
 ## A specification defines operations
 

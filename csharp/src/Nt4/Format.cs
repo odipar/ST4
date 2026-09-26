@@ -14,7 +14,7 @@ namespace Nt4;
 /// offsets count units of k bytes. An offset of at most the window M is a
 /// match; an offset beyond M copies offset minus M units from behind the
 /// literal read pointer, which stays where it is, and advances the offset by
-/// what it copied. The end marker's extra bit repeats the stream from a loop
+/// what it copied. The end code's extra bit repeats the stream from a loop
 /// point, the distance written as one last word in stream D; a loop longer
 /// than the window is replayed by the caller from the rewind point the
 /// header records.</para>
