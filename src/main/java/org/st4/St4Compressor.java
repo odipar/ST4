@@ -232,7 +232,7 @@ public final class St4Compressor {
             // a lower bound on the literals between a source and the copy, so
             // it may choose one that reads further back than an offset
             // reaches. Those units go in as literals: they decode the same,
-            // and they stand where a later copy may read them.
+            // and they remain where a later copy may read them.
             if (window + back > St4Format.maxOffsetUnits(unit)) {
                 pendingLiterals += size;
                 continue;

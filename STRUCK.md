@@ -18,9 +18,9 @@ change that uses the construct.
 
 Before the first rule, three entries are read differently. `names` lists
 names a construct is spelled inside which are not that construct, each
-blanked before a line is lowered; this tree has none, and the entry stands
+blanked before a line is lowered; this tree has none, and the entry is
 empty. `carried` lists what the tree carries from another repository, by a
-fragment of the path, and `own` what is read despite standing there, by the
+fragment of the path, and `own` what is read despite being there, by the
 end of the path. A carried copy follows its own tree's style.
 
 names
@@ -323,8 +323,8 @@ the verdict, the whole point
 ## The verb that says the action
 
 The five stand-ins: `what a tune holds` is `the tune data structure`, and
-`the rate the tune states` is `the tune's rate`. The verb forms stand here
-rather than the stem, since a stem would match a word the rule leaves
+`the rate the tune states` is `the tune's rate`. The verb forms are listed
+here rather than the stem, since a stem would match a word the rule leaves
 alone.
 
 holding
@@ -414,6 +414,39 @@ the structure down
 putting down
     puts down
     in: the writer puts down the rows
+
+standing, the third person
+    \bstands\b
+    in: the marker stands in bit 7
+
+standing, the infinitive
+    \bstand\b(?!-)
+    in: the two bits stand in the source
+    not: a stand-in for the action
+
+standing, the participle
+    \bstanding\b
+    in: a negation standing where the sentence belongs
+
+stood
+    \bstood\b
+    in: where a jump to it stood
+
+touching, the third person
+    \btouches\b
+    in: what building it touches
+
+touching, the infinitive
+    \btouch\b
+    in: a step above can touch it
+
+touched
+    \btouched\b
+    in: a unit the change touched
+
+touching, the participle
+    \btouching\b
+    in: a step touching the tail
 
 ## No possessive decoration
 

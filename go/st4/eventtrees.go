@@ -2,7 +2,7 @@ package st4
 
 import "sort"
 
-// maxInt64 stands for "no entry", as long.MaxValue does in the other trees.
+// maxInt64 marks "no entry", as long.MaxValue does in the other trees.
 const maxInt64 = int64(^uint64(0) >> 1)
 
 // minTree is an iterative min segment tree over int64.

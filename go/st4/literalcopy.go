@@ -51,7 +51,7 @@ const (
 	copyPoolGrowth = 2
 	copyPoolFloor  = 1 << 20
 
-	// poolMarked stands in the forwarding table for a node a collection
+	// poolMarked is the forwarding entry for a node a collection
 	// keeps and has not moved yet.
 	poolMarked = -2
 )
@@ -360,7 +360,7 @@ func (s *copySearch) propose(dictionary []bool) string {
 
 // merge fills the gap between a literal run and the one after it. A move
 // that grows one run reaches a gap of twenty units only by drawing its
-// whole length at once; this one closes what stands between two runs.
+// whole length at once; this one closes what lies between two runs.
 func (s *copySearch) merge(dictionary []bool) {
 	if len(s.runs) < 2 {
 		return
@@ -374,7 +374,7 @@ func (s *copySearch) merge(dictionary []bool) {
 }
 
 // source grows the dictionary where a copy reads from, so that the copy
-// may read further: the literals a copy needs stand at its source, and the
+// may read further: the literals a copy needs are at its source, and the
 // parse names where that is.
 func (s *copySearch) source(dictionary []bool) {
 	if len(s.copies) == 0 {
@@ -573,7 +573,7 @@ type copyParser struct {
 	// cost, end and how to rebuild it, and its literal extension. A state is
 	// a ring match at the last offset or at a new one, a copy from the
 	// literal stream, or a rep of the last copy after literals; what it is
-	// stands in the chain rather than in the state, since the parse weighs
+	// goes in the chain rather than in the state, since the parse weighs
 	// the four by their bits alone.
 	stateBits   []int
 	stateEnd    []int
@@ -641,7 +641,7 @@ type copyParser struct {
 	// the run length that reaches a position from it. A class is a window in
 	// slot space that slides one slot a position, so a queue kept least
 	// first reads its least in one step where a min-tree read it in a
-	// logarithm. The values stand beside the queues, since a parse that
+	// logarithm. The values are kept beside the queues, since a parse that
 	// restarts at a checkpoint fills the queues from them.
 	leaf    []int64   // by match end + 1: bits - end*literalBits
 	dqAt    [][]int32 // by class: the slots of its queue, least first
@@ -652,7 +652,7 @@ type copyParser struct {
 	// Checkpoints: the state before position k*checkpoint, for the base
 	// dictionary, the last parse accepted, and for the parse under way. A
 	// parse restarts from the last checkpoint before its dictionary first
-	// differs from the base's, since what stands before is independent of what comes
+	// differs from the base's, since what comes before is independent of what comes
 	// after. Nodes are appended past the base's, so a rejected parse leaves
 	// the base's intact.
 	checkpoint int
@@ -1032,7 +1032,7 @@ func (p *copyParser) visit(index, distance int) {
 }
 
 // accept makes the parse just made the base for the ones to come: its
-// checkpoints stand, its nodes are kept, and the next parse is compared
+// checkpoints remain, its nodes are kept, and the next parse is compared
 // against its dictionary. The tails every accepted parse leaves in the pool
 // are collected with the rest, in place of the full re-parse that
 // compacted them.
@@ -1187,7 +1187,7 @@ func (p *copyParser) node(idx int) int {
 	return p.stateNode[idx]
 }
 
-// newNode writes one block of a chain. A literal run stands at an offset of
+// newNode writes one block of a chain. A literal run has an offset of
 // zero and every match and copy at one that is not, so the rebuild reads the
 // kind off the offset and the pool does not keep it.
 func (p *copyParser) newNode(end, offset, pred, bits int) int {
@@ -1210,10 +1210,10 @@ func (p *copyParser) newNode(end, offset, pred, bits int) int {
 // each state, its literal run and its predecessor, the winner and the best
 // match at every position the parse has written, and the checkpoints of the
 // base and of the parse under way. A node's predecessor is a node made
-// before it and so stands below it, so one pass over the pool in order
+// before it and so lies below it, so one pass over the pool in order
 // renumbers a node after the predecessor it names.
 //
-// The base's nodes stand below poolTop and a restore drops what is above,
+// The base's nodes lie below poolTop and a restore drops what is above,
 // so the pass counts what it keeps from below it and poolTop follows.
 func (p *copyParser) collect(at int) {
 	if len(p.forward) < p.nodes {
@@ -1311,7 +1311,7 @@ func (p *copyParser) markRuns(lengths, ids []int) {
 	}
 }
 
-// markPreds keeps the predecessor of every state that stands, which is a
+// markPreds keeps the predecessor of every state that remains, which is a
 // node where the state itself has none yet.
 func (p *copyParser) markPreds(ends, preds []int) {
 	for idx, end := range ends {

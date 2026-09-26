@@ -347,7 +347,7 @@ public sealed class RoundTripTests
     {
         // 32,512 units of random data and its first 500 units again. At a
         // window of 16 every match between the two lies outside it, so every
-        // unit between them stands in the literal stream, and a copy of the
+        // unit between them is in the literal stream, and a copy of the
         // tail reads 32,512 literal units back: past the 32,512 units an
         // offset reaches, once the window is added. The parse costs a copy
         // with the literal count of its dictionary, a lower bound, so it

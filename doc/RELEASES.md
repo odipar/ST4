@@ -67,7 +67,7 @@ two report, or none at all.
   container reader, one for the decoder and one for either tool, and
   `ConsistencyTest` reads twelve of those lines against the three trees:
   the longest run of words between the figures a tool writes into a line
-  must stand in each. A line reworded in one tree, or in the document
+  must appear in each. A line reworded in one tree, or in the document
   alone, fails there.
 
 The six executables are built from `go/`, where one line moved, so a
@@ -82,8 +82,8 @@ Checks: `mvn -o clean test` green, 73 tests; `dotnet test` green, 26;
 commit tagged `go/v0.1.11`.
 
 The rigs read one harness, one build runs at a time, and a quoted block
-keeps its words. Every file the six executables are built from stands as
-v0.1.9 has it - `go/`, `68k/` and `csharp/` - so they are that release's
+keeps its words. Every file the six executables are built from matches
+v0.1.9 - `go/`, `68k/` and `csharp/` - so they are that release's
 bytes and the Go module is unchanged. What this release has in it is the
 Java tree's style check, the script under `bin/` and the Python rigs.
 
@@ -92,7 +92,7 @@ Java tree's style check, the script under `bin/` and the Python rigs.
   unit size, the three stream regions mapped and seeded with the registers
   a decoder reads them through, a guard band and a write hook around a
   ring, and the read of all four streams to their ends. `test_st4.py` is
-  the module the other five load, so the blocks stand there now:
+  the module the other five load, so the blocks are there now:
   `assemble`, `seed`, `guarded`, `drained`, `looped` and `played`. The
   rigs lose 372 lines and gain 136, and each one has the calls its subject
   needs.
@@ -120,7 +120,7 @@ Java tree's style check, the script under `bin/` and the Python rigs.
 commit tagged `go/v0.1.10`.
 
 The document checks are one package. Every file a tool is built from
-stands as v0.1.9 has it - `go/`, `68k/`, `csharp/`, `bin/` and every
+matches v0.1.9 - `go/`, `68k/`, `csharp/`, `bin/` and every
 document - so the six executables are that release's and the Go module is
 its bytes.
 
@@ -155,9 +155,9 @@ and 4 to the bytes a build of the tag before writes.
   370 lines.
 - **The cleft was struck in AGENTS.md and in no list.** Adding the entry
   found 44 of the 67 lines reworded here, most of them in research.md. Each
-  paragraph those lines stand in is rewrapped, and every other paragraph is
+  paragraph with those lines in it is rewrapped, and every other paragraph is
   the one the release before has.
-- The `names` entry stands empty: the only names this tree spells a struck
+- The `names` entry is empty: the only names this tree spells a struck
   construct inside are Go identifiers, which the check reads past.
 
 ### go/v0.1.8, 2026-09-17
@@ -167,7 +167,7 @@ commit tagged `go/v0.1.8`.
 
 The documents alone. The tools write the bytes v0.1.7 wrote, the Go module
 is v0.1.7's, and the three 68000 decoders are v0.1.5's: every file under
-`src/main`, `go/`, `csharp/src` and `68k/` stands as v0.1.7 has it.
+`src/main`, `go/`, `csharp/src` and `68k/` matches v0.1.7.
 
 - **The near offset is priced and parked.** research.md and near-offset.md
   read a near offset at the class tree the format's parity rule allows, a
@@ -192,7 +192,7 @@ commit tagged `go/v0.1.7`.
 
 The checks alone. The tools write the bytes v0.1.6 wrote, the Go module is
 v0.1.6's, and the three 68000 decoders are v0.1.5's: every file under
-`src/main`, `go/`, `csharp/src` and `68k/` stands as v0.1.6 has it.
+`src/main`, `go/`, `csharp/src` and `68k/` matches v0.1.6.
 
 - `everyClauseCitedIsDefined` reads every `<document>.md N` citation
   against the clauses that document defines. It read `SPEC.md N` alone
@@ -200,7 +200,7 @@ v0.1.6's, and the three 68000 decoders are v0.1.5's: every file under
   went unread. 43 citations are read and each resolves.
 - The clause reader accepts any numbered heading and any bold clause number
   rather than SPEC.md's two shapes, so a document numbered another way is
-  read as it stands.
+  read as it is.
 - DTX and YMXR carry the same check now, and YMXR and YMXS read a citation
   written through a link as this one always has.
 
@@ -224,7 +224,7 @@ packs to the bytes v0.1.5 wrote, and the three 68000 decoders are v0.1.5's.
   as literals: they decode the same, and a later copy may read them. The
   same lines go into all three trees, and the three pack that stream to
   the same bytes.
-- Copies exist only where the window stands well under the 32,512 bytes an
+- Copies exist only where the window is well under the 32,512 bytes an
   offset reaches, so the default window never met this and a ring of 960 or
   of 16 does.
 - What moves: the broken case alone. README.md, doc/SPEC.md and 68k/ST4.S
@@ -246,7 +246,7 @@ branch, and ST4_wrap's shape is tightened further. The tools write the
 bytes v0.1.4 wrote: the Go module is v0.1.4's, no packer having changed.
 
 - The jump table keeps its slot addresses and changes what lives at the
-  last one. `ST4_resume`'s body starts where a `bra.w` to it stood, and
+  last one. `ST4_resume`'s body starts where a `bra.w` to it was, and
   `ST4_init` is reached through slot 0. A caller's `jsr base+4`, or `+8`
   under ST4.S, behaves as it did.
 - ST4.S is 5.86 per cent fewer cycles at a unit a call and ST4_wrap 5.73,
@@ -254,7 +254,7 @@ bytes v0.1.4 wrote: the Go module is v0.1.4's, no packer having changed.
   left alone: freeing its slot pushes five per-segment branches out of
   short range, and that costs more a segment than the slot saves a call.
 - ST4_wrap also packs `ST4_init`'s d2 in three instructions rather than
-  four, falls through where two `bra.s` stood, tests the gamma's end before
+  four, falls through where two `bra.s` were, tests the gamma's end before
   its refill, folds `match_next` into `match_transition`, and counts the
   counted ladder's full passes in units.
 - Sizes: ST4.S 306, 308 and 310 bytes becomes 304, 306 and 308, and

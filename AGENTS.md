@@ -42,7 +42,7 @@ player *assumes* a rule, a document *defines* an operation, a reader
 ## No possessive decoration
 
 `a table of its own` is `a table`, and `the two chips' own figures` are `the
-figures of the two chips`. Drop *own* wherever the sentence stands without
+figures of the two chips`. Drop *own* wherever the sentence reads without
 it, and prefer *each*, *separate* or *a* to a possessive: `each timer is a
 separate object`, `each source opens a table`.
 
@@ -87,10 +87,10 @@ instead:
 ## The verb that says the action
 
 Something *uses* a resource, a bit *marks* a case, a code *selects* an option,
-a field *is* the value it stands for. Reserve *names* for what a thing is
+a field *is* the value it encodes. Reserve *names* for what a thing is
 called.
 
-Five stand-ins for the action are struck, and a test reads every document for
+Seven stand-ins for the action are struck, and a test reads every document for
 them:
 
 - **holds.** `what a tune holds` is `the tune data structure`. A table *has*
@@ -105,7 +105,14 @@ them:
   this shape`. A tick *reads* a row, a tool's flags *are* what they are, and
   the row that stops an effect *sets* its register back.
 - **nothing.** `it states nothing about X` and `and no form is the format` are
-  a negation standing where the sentence that says what is there belongs.
+  a negation in place of the sentence that says what is there.
+- **stands.** `What stands today` is `The format today`, and `the end code
+  stands where the output reaches O` is `the end code comes where the output
+  reaches O`. A value *is* where it is, a block *comes* before another, a
+  figure *remains* as it was measured.
+- **touches.** `What building it touches` is `What building it changes`, and
+  `no step above touches it` is `every step above leaves it as it was`. A
+  step *reads* or *writes* a value, and a change *edits* a file.
 
 ## One negative at a time
 
@@ -146,8 +153,8 @@ repositories of the family and the rows below it struck here.
 | `the text form`, `the table form` | `JSON`, `CSV` |
 | `a timer no row uses opens none` | `each timer a row uses opens a table` |
 | `Writing a tune down is a separate job, and a form does it.` | dropped; the paragraph below it defines a form |
-| `A form is the structure written down` | `A form is an encoding of the structure`; `written down` is a metaphor for encoded, struck wherever it stood |
-| `a blank line belongs to no block and is not read` | `a reader skips a blank line`; a `no X` where the operation has a name, struck wherever it stood |
+| `A form is the structure written down` | `A form is an encoding of the structure`; `written down` is a metaphor for encoded, struck wherever it appeared |
+| `a blank line belongs to no block and is not read` | `a reader skips a blank line`; a `no X` where the operation has a name, struck wherever it appeared |
 | `Each player names the version of this it reads.` | `A player is a separate program, and pins a version of this format.` |
 | `a table of its own` | `a table` |
 | `for a reader who would rather open one in a spreadsheet` | `for reading in a spreadsheet` |
@@ -212,6 +219,8 @@ repositories of the family and the rows below it struck here.
 | `-r asks for more of it` | `-r extends it` |
 | `a stream decodes with any window at least its own` | `with any window at least as wide` |
 | `a ring of its own`, `the packer's own parse`, `the stream's own literals`, `complete on their own` | `a separate ring`, `the parse the packer writes`, `the literals of the stream itself`, `complete in themselves`; the possessive is struck before a comma or a semicolon as before a space |
+| `What stands today` | `The format today`; *stand* in every form, struck wherever it appeared, `stand-in` the noun excepted |
+| `What building it touches` | `What building it changes`; *touch* in every form, struck wherever it appeared |
 
 ## A specification defines operations
 

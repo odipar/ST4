@@ -1,5 +1,5 @@
 # The Java suite with the six rigs in it, and the C# suite, run by hand
-# through bin/suite (doc/tools.md). The benchmarks under 68k/test/emu stand
+# through bin/suite (doc/tools.md). The benchmarks under 68k/test/emu are
 # outside it.
 name: test
 
