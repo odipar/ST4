@@ -36,7 +36,7 @@
 ;
 ; THERE IS NO DONE STATE. For an output of O units the caller makes
 ; T = ceil(O/C) calls and never calls again. A stream packed with st4 -r is
-; the exception: its end marker installs one last offset and the decoder
+; the exception: its end code installs one last offset and the decoder
 ; matches it forever, so call for as long as output is wanted; every call
 ; emits its full budget.
 ;
@@ -278,7 +278,7 @@ new_offset:
 class_read:
         bcs.s   byte_offset
         add.w   d0,d0                   ; class bit 2: set means end of stream
-        bcs.s   end_marker
+        bcs.s   end_code
         move.w  (a5)+,d2                ; -lastOffset*UNIT, stored ready to use
 have_offset:
         moveq   #1,d4                   ; new-offset match: remaining = gamma+1
@@ -310,7 +310,7 @@ scale_offset:
         moveq   #1,d4                   ; new-offset match: remaining = gamma+1
         bra.s   get_gamma               ; one branch, not two through have_offset
 
-end_marker:
+end_code:
 ; One more bit: 0 ends the stream, 1 repeats it. It sits at an even position,
 ; where the queue can run out, so this is the other checked read.
         add.w   d0,d0

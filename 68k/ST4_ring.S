@@ -10,7 +10,7 @@
 ; ST4_ring decodes through a ring and clamps each call to the ring end, wrapping
 ; the write pointer on the next entry, so the caller sets any budget and
 ; counts none of it. d1.w = 0 means done; a stream packed with st4 -r is never
-; done: its end marker installs one last offset and the decoder matches it
+; done: its end code installs one last offset and the decoder matches it
 ; forever, re-arming 65535 units at a time. Literals come from stream B in a2
 ; and offsets from stream C in a4 (bytes) or D in a5 (words); stream A has
 ; the bits, so the queue refills a word at a time. Set the unit size before
@@ -317,7 +317,7 @@ new_offset:
 class_read:
         bcs.s   byte_offset
         add.w   d0,d0                   ; class bit 2: set means end of stream
-        bcs.s   end_marker
+        bcs.s   end_code
         move.w  (a5)+,d2                ; -lastOffset*UNIT, stored ready to use
 have_offset:
         moveq   #1,d4                   ; new-offset match: remaining = gamma+1
@@ -349,7 +349,7 @@ scale_offset:
         moveq   #1,d4                   ; new-offset match: remaining = gamma+1
         bra.s   get_gamma               ; one branch, not two through have_offset
 
-end_marker:
+end_code:
 ; One more bit: 0 ends the stream, 1 repeats it. It sits at an even position,
 ; where the queue can run out, so this is the other checked read.
         add.w   d0,d0

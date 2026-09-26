@@ -16,7 +16,7 @@ const (
 // decompressor is the reference decoder, which the 68000 decoders have to
 // agree with: ZX1's state machine with four changes. Literals come from
 // stream B and offsets from stream C or D by width; lengths and offsets
-// count units; the end marker's extra bit turns the end into an endless
+// count units; the end code's extra bit turns the end into an endless
 // match, the repeat; and an offset beyond the window copies offset - window
 // units from behind the literal read pointer, which stays where it is, and
 // advances the offset by what was copied. A copy that would not stay behind

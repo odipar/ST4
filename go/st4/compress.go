@@ -213,7 +213,7 @@ func (c *compressor) run(chains []*Block, maxOpLength, repeatIndex,
 		panic("the parses did not cover the input")
 	}
 
-	// The end marker, then the repeat bit: end, or one last word offset in
+	// The end code, then the repeat bit: end, or one last word offset in
 	// stream D, the distance back to the loop point, matched forever.
 	c.writeBit(true)
 	c.writeBit(false)

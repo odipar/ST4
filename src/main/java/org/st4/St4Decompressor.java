@@ -4,7 +4,7 @@ package org.st4;
  * The reference decoder, which the 68000 decoders have to agree with. ZX1's
  * state machine with four changes: literals come from stream B and offsets
  * from stream C or D by width; lengths and offsets count units; the end
- * marker's extra bit turns the end into an endless match, the repeat; and an
+ * code's extra bit turns the end into an endless match, the repeat; and an
  * offset beyond the window copies {@code offset - window} units from behind
  * the literal read pointer, which stays where it is, and advances the offset
  * by what was copied. A copy that would not stay behind the pointer is

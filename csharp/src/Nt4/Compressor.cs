@@ -250,7 +250,7 @@ public sealed class Compressor
             throw new InvalidOperationException("the parses did not cover the input");
         }
 
-        // The end marker, then the repeat bit: end, or one last word offset
+        // The end code, then the repeat bit: end, or one last word offset
         // in stream D, the distance back to the loop point, matched forever.
         WriteBit(true);
         WriteBit(false);

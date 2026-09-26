@@ -149,7 +149,7 @@ def track_source_reads(uc: Uc, src_at: int) -> list[int]:
 
     Stronger than reading ctx_src afterwards, and independent of it: the field
     is defined only while a stream is suspended, where the last byte fetched
-    pins both "read the whole stream" and "stopped at the end marker", which
+    pins both "read the whole stream" and "stopped at the end code", which
     is the last thing any stream contains.
     """
     high = [src_at]
