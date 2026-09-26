@@ -428,8 +428,8 @@ final class ConsistencyTest {
     void theOffsetLimitsAreTheFormats() throws IOException {
         String spec = read(SPEC);
         List<String> wrong = new ArrayList<>();
-        defines(wrong, spec, "further back than " + St4Format.MAX_OFFSET
-                + " bytes", "4.3's furthest offset");
+        defines(wrong, spec, "at most " + St4Format.MAX_OFFSET + " bytes back",
+                "4.3's furthest offset");
         defines(wrong, read(REQ), "at most " + St4Format.MAX_OFFSET + " bytes back",
                 "R1.5's furthest offset");
         int bank = St4Format.BYTE_OFFSET_LIMIT / 2;

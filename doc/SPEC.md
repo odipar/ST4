@@ -5,7 +5,7 @@ numbered so another document can cite it. The terms are
 [glossary.md](glossary.md)'s, and what this repository has to do is
 [requirements.md](requirements.md).
 
-A container stands for one output: a run of bytes, a whole number of units
+A container encodes one output: a run of bytes, a whole number of units
 long. What produced it, and what a caller does with it, are outside this
 document.
 
@@ -14,13 +14,13 @@ document.
 **1.1** A unit is `k` bytes, and `k` is 1, 2 or 4. Every length and every
 offset counts units.
 
-**1.2** Input that is not a whole number of units is padded with zeros to
-one. The padding is part of the output the container stands for, so a
-reader of the output reads it back.
+**1.2** Input that ends in a partial unit is padded with zeros to a whole
+one. The padding is part of the output the container encodes, so a reader
+of the output reads it back.
 
-**1.3** The unit is a trade rather than a property of the data: an offset
-or a length that is not a multiple of `k` cannot be stored, so `k` of 2 or
-4 pays compression for speed. A file records the `k` it was packed at
+**1.3** The unit is a trade rather than a property of the data: a
+container stores offsets and lengths in whole units of `k` bytes, so `k` of
+2 or 4 pays compression for speed. A file records the `k` it was packed at
 (2.1).
 
 ## 2. The container
@@ -75,7 +75,7 @@ value below its leading 1 follows a `1` marker bit, most significant first,
 and a `0` bit ends the value. So 1 is `0`, 2 is `100`, 3 is `110`, 4 is
 `10100`.
 
-**3.4** One flag bit says which block comes next. After literals, `0`
+**3.4** One flag bit selects the block that comes next. After literals, `0`
 starts a match at the last offset and `1` a match at a new offset, so two
 literal runs in a row cannot occur. After a match, `0` starts literals and
 `1` a match at a new offset. A literals block leaves the last offset as it
@@ -96,9 +96,8 @@ after a match:   0 gamma(n)                 n literal units from stream B
 
 **3.5** The two class bits `cc` of a new offset select the stream the
 offset comes from, and its reach. A block reads the next entry of that
-stream, the entries of each standing in the order the blocks that read
-them do, and the left bit of a pair below is the one a reader reads
-first:
+stream, the entries of each in the order the blocks read them, and the
+left bit of a pair below is the one a reader reads first:
 
 | class | meaning |
 |---|---|
@@ -107,9 +106,9 @@ first:
 | `0 0` | word offset from stream D |
 | `0 1` | the data ends, and one repeat bit follows |
 
-**3.6** The end code stands where the output reaches `O` (2.1), and is
-the class `0 1`. The repeat bit after it says
-whether the stream ends there: a `0` ends it, and a `1` loops it (6.2).
+**3.6** The end code comes where the output reaches `O` (2.1), and is the
+class `0 1`. The repeat bit after it selects whether the stream ends there:
+a `0` ends it, and a `1` loops it (6.2).
 
 **3.7** A new-offset match is two units long at least, which is why it
 stores gamma of the length less one.
@@ -131,18 +130,17 @@ significant byte first, which a decoder reads as -nk and installs with one
 move. The word is the units times `k` where a byte offset (4.1) is the
 units themselves, so a reader that needs `n` reads the word over `k`.
 
-**4.3** No offset reaches further back than 32512 bytes, at any `k`.
+**4.3** An offset reaches at most 32512 bytes back, at any `k`.
 
-**4.4** `M`, the window (2.1), is the figure the packer was told a
-decoder keeps.
-An offset of at most `M` is a match: it reads the output that many units
-back. An offset above `M` is a copy from the literal stream (5).
+**4.4** `M`, the window (2.1), is the units the packer assumes a decoder
+keeps. An offset of at most `M` is a match: it reads the output that many
+units back. An offset above `M` is a copy from the literal stream (5).
 
-**4.5** A stream packed without copies has no offset above `M`.
+**4.5** Every offset of a stream packed without copies is at most `M`.
 
 ## 5. Copies from the literal stream
 
-**5.1** A copy is a match block whose offset stands above `M` (4.4): the
+**5.1** A copy is a match block whose offset is above `M` (4.4): the
 flag that starts it, the class bits and the length it reads are a match's
 (3.1, 3.4), and it leaves a reader where a match does. It reads
 `offset - M` literal units back from the stream B read pointer, and leaves
@@ -185,7 +183,7 @@ one past where the copy stopped, shifted by the literal between.
 
 ## 6. Loops
 
-**6.1** A container packed with a loop point `R` stands for the infinite
+**6.1** A container packed with a loop point `R` encodes the infinite
 output `[0,R)` `[R,O)*`: after its last unit the output continues from unit
 `R`. `R` counts units here, where the header records the rewind point in
 bytes (2.1). The loop's length against the window decides which of the two
@@ -206,26 +204,26 @@ bytes.
 ends plainly, and the header records the rewind point (2.6). The caller
 saves the decoder's state when the output reaches `R` and restores it, all
 but the write pointer, when the output reaches `O`, every pass. `R` is a
-unit of the output and stands inside a block as readily as at its end, so
-the caller saves at that unit. For every
-pass to read the same history, the loop `[R,O)` is packed apart: no match
-in it reaches before `R` or straddles `R`. The cost is the first window of
+unit of the output and can lie inside a block as readily as at its end, so
+the caller saves at that unit. For every pass to read the same history,
+the loop `[R,O)` is packed apart: no match in it reaches before `R` or
+straddles `R`. The cost is the first window of
 the loop, which cannot reference the intro.
 
 ## 7. What a reader assumes
 
-**7.1** A reader does not check its input. A container is made at build
+**7.1** A reader reads its input unchecked. A container is made at build
 time by a packer that keeps every operation within a decoder's counters,
 and a wrong byte reads as arbitrary output.
 
 **7.2** A reader built for one unit size reads the containers of that size,
 which 2.4 lets it check.
 
-**7.3** A reader keeps `M` units of output where the container names `M`,
+**7.3** A reader keeps `M` units of output where the container records `M`,
 or the copies of 5 read what a smaller ring has dropped.
 
 **7.4** A reader of a stream with copies is built for them, and reads `M`
-out of the header (2.1) to tell a copy from a match.
+out of the header (2.1) to separate a copy from a match.
 
 ## 8. Later versions
 
@@ -233,4 +231,4 @@ out of the header (2.1) to tell a copy from a match.
 container of another as an error.
 
 **8.2** [near-offset.md](near-offset.md) prices a fifth class code, which
-would be version 8. It is not built.
+would be version 8, and parks it.
