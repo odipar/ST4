@@ -27,13 +27,13 @@ bin/st4 -k2 < tune.bin | bin/dst4 > back.bin
 | `-rN` (dst4) | the pass and then N - 1 repeats of the loop section |
 
 `st4` reports progress and a time estimate as it works. Where a loop is
-longer than `-m` it names the unit at which to save the decoder's state and
-the unit at which to restore it (SPEC.md 6.3).
+longer than `-m` it reports the unit at which to save the decoder's state
+and the unit at which to restore it (SPEC.md 6.3).
 
 `dst4` is the readable reference the 68000 decoders are checked against.
 Its output is padded to a whole number of units, as the format stores it
-(SPEC.md 1.2): for a looping stream one whole pass, and it names where the
-loop is.
+(SPEC.md 1.2): for a looping stream one whole pass, and it reports where
+the loop is.
 
 ## What the tools report
 
@@ -49,8 +49,8 @@ input, which `ConsistencyTest` reads against each of them.
 | the signature's high word is other than the magic | `not an ST4 file` |
 | the signature's version byte is V, other than 7 | `ST4 format version V, not 7` |
 | the unit byte K is other than 1, 2 or 4 | `unit size K is not 1, 2 or 4` |
-| the output size N is negative, or no whole number of units | `output size N is not a whole number of K-byte units` |
-| the rewind point R is other than -1 and no unit of the output | `rewind point R is not a unit of the output` |
+| the output size N is negative, or other than a whole number of units | `output size N is not a whole number of K-byte units` |
+| the rewind point R is other than -1 and outside the output's units | `rewind point R is not a unit of the output` |
 | the window W is outside 1 to M units, M the reach at that unit | `window W is not 1..M units` |
 | stream S, B, C or D, begins off a long boundary | `stream S does not start on a long boundary` |
 | stream S begins before the one before it, or past the file | `stream S lies outside the file` |
@@ -67,8 +67,8 @@ Either tool:
 
 | condition | reported as |
 |---|---|
-| standard input cannot be read | `Cannot read standard input` |
-| standard output cannot be written | `Cannot write standard output` |
+| a read of standard input fails | `Cannot read standard input` |
+| a write of standard output fails | `Cannot write standard output` |
 
 `st4` reports two notes on standard error as it packs, the tool exiting
 0: `The loop is longer than the -mN window, so the decoder cannot loop
@@ -110,13 +110,13 @@ check the three against each other:
 - **St4Optimizer**, the readable reference. It tries every choice at every
   position and keeps the cheapest.
 - **St4FastOptimizer**, the same choices on plain arrays: the same bytes
-  out, measured 4 to 7 times faster on data that repeats at range, and no
-  faster on data that does not.
-- **St4EventOptimizer**, the default. It only works where a repeated
-  stretch of data starts or ends, which on repetitive data happens
-  thousands of times less often than the positions the others visit. Same
-  packed size, not always the same bytes; it falls back to the fast one
-  where the data repeats in stretches too short to profit.
+  out, measured 4 to 7 times faster on data that repeats at range, and as
+  fast as the reference on data that repeats less.
+- **St4EventOptimizer**, the default. It works at the positions where a
+  repeated stretch of data starts or ends, on repetitive data thousands of
+  times fewer than the positions the others visit. It packs to the same
+  size, in bytes that can differ, and falls back to the fast one where the
+  data repeats in stretches too short to profit.
 
 Measured on the optimizer alone, on corpora outside this repository:
 
@@ -126,11 +126,11 @@ Measured on the optimizer alone, on corpora outside this repository:
 | 300 KB slice, full window, k = 4 | 24 s | 5.7 s | 0.12 s |
 | 32 KB of 68000 code, k = 1 | 9.8 s | 1.5 s | falls back to fast |
 
-The repetition separates the three, not the size.
-[research.md](research.md) measures them again on two corpora made from this
-repository: over 900 KB of its sources the three are within 12 per cent of
-one another, and over one 4 KB block repeated to the same length the event
-optimizer is 246 times the reference.
+Repetition, rather than size, separates the three.
+[research.md](research.md) measures them again on two corpora made from
+this repository: over 900 KB of its sources the three are within 12 per
+cent of one another, and over one 4 KB block repeated to the same length
+the event optimizer is 246 times the reference.
 
 ## The search
 
@@ -163,8 +163,8 @@ step is scored by what the compressor writes.
 against it the opening passes are 0.8 per cent above the optimum and the
 search 0.4 per cent, reaching it on 56 of 60. `ConsistencyTest` measures
 those three again and reads this sentence for them.
-[research.md](research.md) reads what the search leaves, what each move is
-worth, and what a ring costs.
+[research.md](research.md) measures what the search leaves, what each move
+is worth, and what a ring costs.
 
 ## The tests
 
@@ -203,7 +203,7 @@ check every output byte, the exact consumption of all four streams, ring
 guard bands and the register state. The two loop rigs drive all three
 decoders as a caller would, budgets, snapshots and restores included,
 through more than two passes, against the infinite output the container
-stands for, and read `dst4 -rN` back against the same bytes.
+encodes, and read `dst4 -rN` back against the same bytes.
 
 `test_st4.py` is the harness the other five read: it packs and unpacks
 through the real tools, builds a decoder at a unit size, seeds the four
