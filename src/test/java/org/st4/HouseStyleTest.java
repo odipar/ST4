@@ -181,7 +181,7 @@ final class HouseStyleTest {
                 "A waiting process writes",
                 "`run: a build holds the lock`.")));
         // The prose around a span is read, and so is the prose after a
-        // backtick that stands alone.
+        // lone backtick.
         assertEquals(1, style().document(Path.of("a.md"), List.of(
                 "The lock `run` holds a build.")).size());
         assertEquals(1, style().document(Path.of("a.md"), List.of(
@@ -190,7 +190,7 @@ final class HouseStyleTest {
 
     @Test
     void anIndentedBlockIsQuotedAndAListItemIsRead() throws IOException {
-        // An indented block standing after a blank line is a code block,
+        // An indented block after a blank line is a code block,
         // quoted as a fenced one is, and it runs to the first line that is
         // neither blank nor indented.
         List<Hit> hits = style().document(Path.of("a.md"), List.of(

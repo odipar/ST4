@@ -48,7 +48,7 @@ public static class LiteralCopySearch
 
     /// <summary>
     /// The pool a collection allows against what it kept, the smallest pool
-    /// it collects at, and what stands in the forwarding table for a node it
+    /// it collects at, and what is in the forwarding table for a node it
     /// keeps and has not moved yet.
     /// </summary>
     private const int PoolGrowth = 2;
@@ -405,7 +405,7 @@ public static class LiteralCopySearch
         /// <summary>
         /// Fills the gap between a literal run and the one after it. A move
         /// that grows one run reaches a gap of twenty units only by drawing
-        /// its whole length at once; this one closes what stands between
+        /// its whole length at once; this one closes what lies between
         /// two runs.
         /// </summary>
         private void Merge(bool[] dictionary)
@@ -425,7 +425,7 @@ public static class LiteralCopySearch
 
         /// <summary>
         /// Grows the dictionary where a copy reads from, so that the copy
-        /// may read further: the literals a copy needs stand at its source,
+        /// may read further: the literals a copy needs are at its source,
         /// and the parse names where that is.
         /// </summary>
         private void Source(bool[] dictionary)
@@ -629,7 +629,7 @@ public static class LiteralCopySearch
         // its cost, end and how to rebuild it, and its literal extension. A
         // state is a ring match at the last offset or at a new one, a copy
         // from the literal stream, or a rep of the last copy after literals;
-        // what it is stands in the chain rather than in the state, since the
+        // what it is goes in the chain rather than in the state, since the
         // parse weighs the four by their bits alone.
         private readonly int[] stateBits;
         private readonly int[] stateEnd;
@@ -690,7 +690,7 @@ public static class LiteralCopySearch
         // of the run length that reaches a position from it. A class is a
         // window in slot space that slides one slot a position, so a queue
         // kept least first reads its least in one step where a min-tree read
-        // it in a logarithm. The values stand beside the queues, since a
+        // it in a logarithm. The values are kept beside the queues, since a
         // parse that restarts at a checkpoint fills the queues from them.
         private readonly long[] leaf;              // by match end + 1: bits - end*literalBits
         private readonly int[][] dqAt;             // by class: the slots of its queue, least first
@@ -701,7 +701,7 @@ public static class LiteralCopySearch
         // Checkpoints: the state before position k*checkpoint, for the base
         // dictionary, the last parse accepted, and for the parse under way.
         // A parse restarts from the last checkpoint before its dictionary
-        // first differs from the base's, since what stands before is independent of
+        // first differs from the base's, since what comes before is independent of
         // what comes after. Nodes are appended past the base's, so a
         // rejected parse leaves the base's intact.
         private readonly int checkpoint;
@@ -1128,7 +1128,7 @@ public static class LiteralCopySearch
 
         /// <summary>
         /// Makes the parse just made the base for the ones to come: its
-        /// checkpoints stand, its nodes are kept, and the next parse is
+        /// checkpoints remain, its nodes are kept, and the next parse is
         /// compared against its dictionary. The tails every accepted parse
         /// leaves in the pool are collected with the rest, in place of the
         /// full re-parse that compacted them.
@@ -1288,7 +1288,7 @@ public static class LiteralCopySearch
         }
 
         /// <summary>
-        /// Writes one block of a chain. A literal run stands at an offset of
+        /// Writes one block of a chain. A literal run has an offset of
         /// zero and every match and copy at one that is not, so the rebuild
         /// reads the kind off the offset and the pool does not keep it.
         /// </summary>
@@ -1316,11 +1316,11 @@ public static class LiteralCopySearch
         /// predecessor, the winner and the best match at every position the
         /// parse has written, and the checkpoints of the base and of the
         /// parse under way. A node's predecessor is a node made before it
-        /// and so stands below it, so one pass over the pool in order
+        /// and so lies below it, so one pass over the pool in order
         /// renumbers a node after the predecessor it names.
         /// </summary>
         /// <remarks>
-        /// The base's nodes stand below <c>poolTop</c> and a restore drops
+        /// The base's nodes lie below <c>poolTop</c> and a restore drops
         /// what is above, so the pass counts what it keeps from below it and
         /// <c>poolTop</c> follows.
         /// </remarks>
@@ -1441,7 +1441,7 @@ public static class LiteralCopySearch
         }
 
         /// <summary>
-        /// Keeps the predecessor of every state that stands, which is a node
+        /// Keeps the predecessor of every state that remains, which is a node
         /// where the state itself has none yet.
         /// </summary>
         private void MarkPreds(int[] ends, int[] preds)

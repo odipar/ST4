@@ -2,7 +2,7 @@ package st4
 
 import "fmt"
 
-// Where the decoder stands between operations: what it emitted last selects
+// Where the decoder is between operations: what it emitted last selects
 // what the next control bit means.
 type decodeState int
 

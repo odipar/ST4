@@ -38,7 +38,7 @@ final class ConsistencyTest {
      * Every line tools.md reports reads the same in the three trees: a
      * line reworded in one tree and the document, or in the document
      * alone, fails here. The letters a table writes for a figure, V or N
-     * or K, and the figures a tool builds a line from stand outside the
+     * or K, and the figures a tool builds a line from are outside the
      * comparison, and this reads the words around them.
      *
      * <p>The check came from YMXR, where a release took a descriptor's
@@ -71,7 +71,7 @@ final class ConsistencyTest {
      *  short runs. */
     private static String longest(String said) {
         String longest = "";
-        // a letter a table writes for a figure stands alone: a capital
+        // a letter a table writes for a figure is a lone capital, one
         // with no letter after it and no capital before it, as V or N or
         // the N of -rN, or a run of digits between word boundaries
         for (String part : said.split("(?<![A-Z])[A-Z](?![A-Za-z])|\\bi\\b|\\b[0-9]+\\b")) {
@@ -192,7 +192,7 @@ final class ConsistencyTest {
         int found = 0;
         for (Path p : documents()) {
             if (p.getFileName().toString().equals("RELEASES.md")) {
-                continue;   // what was true at a release stands as it was
+                continue;   // what was true at a release keeps its words
             }
             String said = read(p);
             Matcher m = Pattern.compile("([A-Za-z_]+)\\.md\\)? (\\d+(?:\\.\\d+)*)"
@@ -879,7 +879,7 @@ final class ConsistencyTest {
     }
 
     /** The clauses one document defines: `**N.N**` and `## N.N`, a section
-     *  number standing for itself and for the clauses under it. */
+     *  number marking itself and the clauses under it. */
     private static Set<String> clausesOf(String said) {
         Set<String> out = new HashSet<>();
         Matcher m = Pattern.compile("(?m)^(?:\\*\\*|#+ )R?(\\d+(?:\\.\\d+)*)").matcher(said);
