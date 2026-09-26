@@ -322,9 +322,9 @@ the verdict, the whole point
 
 ## The verb that says the action
 
-The five stand-ins: `what a tune holds` is `the tune data structure`, and
-`the rate the tune states` is `the tune's rate`. The verb forms are listed
-here rather than the stem, since a stem would match a word the rule leaves
+The stand-ins: `what a tune holds` is `the tune data structure`, and `the
+rate the tune states` is `the tune's rate`. The verb forms are listed here
+rather than the stem, since a stem would match a word the rule leaves
 alone.
 
 holding
