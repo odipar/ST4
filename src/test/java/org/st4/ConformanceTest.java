@@ -53,7 +53,7 @@ class ConformanceTest {
         return out;
     }
 
-    /** {@code pattern} laid down until {@code count} bytes stand. */
+    /** {@code pattern} repeated to {@code count} bytes. */
     private static byte[] tiled(byte[] pattern, int count) {
         byte[] out = new byte[count];
         for (int i = 0; i < count; i++) {
