@@ -1,7 +1,7 @@
 # What ST4 has to do
 
-Numbered so a change can name what it answers to. The format itself is
-[SPEC.md](SPEC.md), which these requirements are about rather than repeat.
+Numbered so a change can cite the requirement it meets. The format itself
+is [SPEC.md](SPEC.md), which these requirements cite rather than repeat.
 
 ## R0. The house style and the terms
 
@@ -12,22 +12,23 @@ before both.
 - **R0.1** `AGENTS.md` defines the rules, for every document, code comment
   and commit message.
 - **R0.2** A test reads every document, and every code comment this
-  repository writes, against a list of phrases struck in review, and names
-  the file and line of each hit.
-- **R0.3** The test walks the tree for documents. A document is checked
-  because it is there, not because someone listed it.
+  repository writes, against a list of phrases struck in review, and
+  reports the file and line of each hit.
+- **R0.3** The test walks the tree for documents and checks every one it
+  finds.
 - **R0.4** Striking a phrase adds it to the list, in the same change.
 - **R0.5** Using a struck phrase again removes it from the list, in the
   same change.
-- **R0.6** [glossary.md](glossary.md) lists every term and names the
-  document that explains it.
+- **R0.6** [glossary.md](glossary.md) lists every term and the document
+  that explains it.
 - **R0.7** Every document, comment and name in this repository uses those
   terms, and no second word for a thing that has one.
 - **R0.8** A term that changes in the glossary changes everywhere in the
   same change.
-- **R0.9** A figure in a document is measured, and what measured it stands
-  beside it or in [research.md](research.md). A figure measured against
-  something no longer in the tree names the release that measured it.
+- **R0.9** A figure in a document is measured, and the method that
+  measured it is beside it or in [research.md](research.md). A figure
+  measured against something no longer in the tree cites the release that
+  measured it.
 - **R0.10** A test reads the documents against the tree: the clauses and
   requirements they cite, the figures the code defines, the flags the tools
   print, the scripts and rigs they name, and the toolchains the build files
@@ -35,11 +36,11 @@ before both.
 
 ## R1. The format
 
-- **R1.1** One container stands for one output, a whole number of units
+- **R1.1** One container encodes one output, a whole number of units
   long (SPEC.md 1.2).
-- **R1.2** A container names the version, the unit, the output size, the
-  window and where each stream begins, and a reader needs no other input
-  (SPEC.md 2.1).
+- **R1.2** A container records the version, the unit, the output size,
+  the window and where each stream begins, and a reader needs no other
+  input (SPEC.md 2.1).
 - **R1.3** A reader of one version reads a container of another as an
   error (SPEC.md 8.1).
 - **R1.4** The bits of a block are a whole number of pairs with the flag,
@@ -50,15 +51,15 @@ before both.
 - **R1.6** A stream packed for a window of `N` units is read by a decoder
   keeping `N` units, and a stream packed without copies reads no further
   back (SPEC.md 4.5).
-- **R1.7** A looping container stands for an infinite output, by a match
+- **R1.7** A looping container encodes an infinite output, by a match
   that never ends or by a rewind the caller drives (SPEC.md 6).
 
 ## R2. What a packer does
 
 - **R2.1** A packer writes a container a decoder of the same unit size
   reads, and every operation in it is within a 16-bit counter.
-- **R2.2** A packer names the unit, the window, the operation limit and the
-  loop point; every one of them is a flag (tools.md).
+- **R2.2** The unit, the window, the operation limit and the loop point
+  are each a flag of the packer (tools.md).
 - **R2.3** What a packer writes for one input and one set of flags is one
   sequence of bytes, whichever tree runs it.
 - **R2.4** A parse without copies is the cheapest the format allows for its
@@ -70,15 +71,15 @@ before both.
 
 ## R3. What a decoder does
 
-- **R3.1** A decoder reads a container into the output it stands for, byte
+- **R3.1** A decoder reads a container into the output it encodes, byte
   for byte, which an emulated 68000 checks against the reference
   decompressor over every corpus.
 - **R3.2** A decoder is one build a unit size, and a build is the same
   bytes wherever it is assembled.
-- **R3.3** A decoder does not check its input (SPEC.md 7.1).
+- **R3.3** A decoder reads its input unchecked (SPEC.md 7.1).
 - **R3.4** A decoder keeps its state in registers, and only `a6`, `d6` and
   `d7` survive a call (decoders.md, the state).
-- **R3.5** A wide move never lands on an odd address, at any unit size
+- **R3.5** A wide move lands on an even address, at any unit size
   (decoders.md, the state).
 - **R3.6** A decoder built for copies reads the window out of the header
   and writes it into the instructions that read it, so one build a unit
@@ -98,8 +99,8 @@ before both.
 
 - **R5.1** A release names its version in the pom, and the zips and the Go
   module tag are named by it.
-- **R5.2** A release ships an executable a tool a platform, with no runtime
-  to install beside it.
+- **R5.2** A release ships a self-contained executable a tool a
+  platform.
 - **R5.3** A release lists every file's size and sha256, and the commit it
   was built from.
 - **R5.4** A release records whether a packer writes other bytes than the
