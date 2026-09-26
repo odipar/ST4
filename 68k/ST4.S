@@ -90,7 +90,7 @@
 ; A loop longer than the window is replayed by the caller: when the output
 ; reaches the rewind point, save the seven registers but a1; when it reaches
 ; O, restore them and carry on, every pass. The packer parsed the loop on its
-; alone, so every match in it stands after the rewind point and every pass sees
+; alone, so every match in it comes after the rewind point and every pass sees
 ; the same history. Arrange the budgets so a call ends on both points; the
 ; state mid-operation is saved like any other.
 ;
@@ -170,7 +170,7 @@ suspend:                                ; done, or a suspended operation
         .if ST4_WINDOW
 copy_source:                            ; the offset is beyond the window, so
 ; the source is stream B, offset-M units behind the read pointer, which stays
-; where it is. The offset advances by what this segment copies: a copy the
+; where it is. The offset falls by what this segment copies: a copy the
 ; budget cuts continues where it stopped, and a rep after it starts past it.
 ; It stays beyond the window, since a copy is shorter than its distance.
 window_lea:
