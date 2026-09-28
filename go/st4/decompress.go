@@ -19,7 +19,7 @@ const (
 // count units; the end code's extra bit turns the end into an endless
 // match, the repeat; and an offset beyond the window copies offset - window
 // units from behind the literal read pointer, which stays where it is, and
-// advances the offset by what was copied. A copy that would not stay behind
+// lowers the offset by what was copied. A copy that would not stay behind
 // the pointer is rejected.
 type decompressor struct {
 	window          int
@@ -235,7 +235,7 @@ func (d *decompressor) copyLength(length int32) error {
 
 // copyFromLiterals copies length units from the literal stream, lastOffset -
 // window units behind the read pointer, which stays where it is, and
-// advances the offset by what it copied.
+// lowers the offset by what it copied.
 func (d *decompressor) copyFromLiterals(length int32) error {
 	back := d.lastOffset - d.window
 	if back <= int(length) {

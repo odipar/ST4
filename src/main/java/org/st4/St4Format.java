@@ -27,7 +27,7 @@ package org.st4;
  * <p>An offset of at most the window M, recorded in the header, is a match
  * from the output. An offset beyond M copies {@code offset - M} units from
  * behind the literal read pointer, leaves the pointer where it is, and
- * advances the offset by what it copied, so a rep after a copy resumes past
+ * lowers the offset by what it copied, so a rep after a copy resumes past
  * it. A copy is shorter than its distance. A stream packed without copies
  * has no offset beyond M.
  *

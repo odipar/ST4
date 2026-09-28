@@ -11,7 +11,7 @@
 // offsets and stream D the word offsets. An offset of at most the window M,
 // recorded in the header, is a match from the output. An offset beyond M
 // copies offset - M units from behind the literal read pointer, leaves the
-// pointer where it is, and advances the offset by what it copied, so a rep
+// pointer where it is, and lowers the offset by what it copied, so a rep
 // after a copy resumes past it. A copy is shorter than its distance.
 //
 // The end code's extra bit: 0 ends the stream; 1 repeats it from a loop
