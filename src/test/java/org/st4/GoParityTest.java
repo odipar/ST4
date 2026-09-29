@@ -159,6 +159,40 @@ final class GoParityTest {
         }
     }
 
+    /**
+     * A loop played again, in both trees, in each of its two forms. The
+     * kit's looping containers at -r2 and -r3, the -r3 output its reference
+     * (TASK.md), and a loop by rewind packed here at a unit of 2 and of 4.
+     * The Go tree ended a loop by rewind at an error until it replayed the
+     * pass as the caller does (SPEC.md 6.3).
+     */
+    @Test
+    void aLoopPlaysAgainTheSameInBothTrees() throws Exception {
+        List<byte[]> loops = new java.util.ArrayList<>();
+        for (String named : List.of("k1-loop-from-zero", "k1-loop-in-window", "k1-loop-long")) {
+            byte[] container = Files.readAllBytes(
+                    Path.of("doc/conformance/containers", named + ".st4"));
+            assertArrayEquals(Files.readAllBytes(Path.of("doc/conformance/outputs", named + ".out")),
+                    go("dst4", container, List.of("-r3")), named + ": three passes, the kit's");
+            loops.add(container);
+        }
+        byte[] input = new byte[800];
+        new java.util.Random(5).nextBytes(input);
+        for (String unit : List.of("-k2", "-k4")) {
+            byte[] container = java(() -> St4.main(
+                    new String[] {"-silent", unit, "-m32", "-r40"}), input);
+            assertTrue(St4Format.read(container).rewind() >= 0, unit + " loops by rewind");
+            loops.add(container);
+        }
+        for (byte[] container : loops) {
+            for (String times : List.of("-r2", "-r3")) {
+                assertArrayEquals(java(() -> Dst4.main(new String[] {"-silent", times}), container),
+                        go("dst4", container, List.of(times)),
+                        times + ": the two trees play the loop the same");
+            }
+        }
+    }
+
     /** What a tool run reported: standard output, and the lines of its
      *  report the two trees share, the banner and the progress left out. */
     private record Said(byte[] out, List<String> lines) { }
