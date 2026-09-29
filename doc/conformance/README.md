@@ -91,6 +91,13 @@ the replay of 6.3 and the rewind point of 2.6 were outside those runs:
 `k1-loop-long` is here for them, and `k1-loop-in-window` and
 `k1-loop-from-zero` for the two places a loop of 6.2 begins.
 
+DTX's fourth run, 2026-09-29, read two more places in this document for
+its payloads at a unit of 2 and of 4: 1.1 left the order of a unit's
+bytes in the output, which every byte of `dtx2-w1-k4`, `dtx2-w2-k2` and
+`dtx2-w4-k4` turns on, and 3.6 the stream of the repeat bit. Both read
+now: a unit's bytes keep the order stream B stores them in, and the
+repeat bit is the next bit of stream A.
+
 **The third run**, 2026-09-29, against the kit with the clauses of the
 first two in it and a third implementer. The reader was 242 lines and
 produced all sixteen outputs byte for byte; its notes had 21 entries,

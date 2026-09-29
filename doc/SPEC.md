@@ -11,8 +11,10 @@ document.
 
 ## 1. Units
 
-**1.1** A unit is `k` bytes, and `k` is 1, 2 or 4. Every length and every
-offset counts units.
+**1.1** A unit is `k` consecutive bytes of the output, and `k` is 1, 2 or 4.
+Every length and every offset counts units. The bytes of a unit keep their
+order: stream B stores a literal unit as its bytes in output order, and a
+match copies a unit's bytes in that order.
 
 **1.2** Input that ends in a partial unit is padded with zeros to a whole
 one. The padding is part of the output the container encodes, so a reader
@@ -110,8 +112,8 @@ left bit of a pair below is the one a reader reads first:
 
 **3.6** The end code comes where the output reaches `O` (2.1), and is the
 flag `1` and the class `0 1`, read as a new offset is (3.4, 3.5). The
-repeat bit after it selects whether the stream ends there:
-a `0` ends it, and a `1` loops it (6.2).
+repeat bit after it in stream A selects whether the stream ends there: a
+`0` ends it, and a `1` loops it (6.2).
 
 **3.7** A new-offset match is two units long at least, which is why it
 stores gamma of the length less one.
