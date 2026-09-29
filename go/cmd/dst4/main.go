@@ -83,10 +83,9 @@ func main() {
 		fail(err.Error())
 	}
 	output := decoded.Output
-	if decoded.RepeatIndex < 0 && passes > 1 {
-		fail(fmt.Sprintf("The stream does not loop, so -r%d has nothing to repeat", passes))
-	}
-	if decoded.RepeatIndex >= 0 && passes > 1 {
+	switch {
+	case passes == 1:
+	case decoded.RepeatIndex >= 0:
 		// A repeating stream decodes to any size from one pass up: the pass,
 		// then the loop again for every repeat asked for.
 		loop := size - decoded.RepeatIndex*container.Unit
@@ -97,6 +96,20 @@ func main() {
 		if err != nil {
 			fail(err.Error())
 		}
+	case container.Rewind != st4.NoRewind:
+		// A stream that loops by rewind is replayed by the caller, which
+		// restores the decoder's state at the end of each pass (SPEC.md
+		// 6.3), so every pass after the first is the output from the rewind
+		// point, in bytes, to the end.
+		pass := output
+		loop := len(pass) - container.Rewind
+		output = make([]byte, len(pass)+(passes-1)*loop)
+		copy(output, pass)
+		for at := len(pass); at < len(output); at += loop {
+			copy(output[at:], pass[container.Rewind:])
+		}
+	default:
+		fail(fmt.Sprintf("The stream does not loop, so -r%d has nothing to repeat", passes))
 	}
 
 	if _, err := os.Stdout.Write(output); err != nil {
