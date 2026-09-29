@@ -26,6 +26,15 @@ func usage() string {
 		"The output is padded to a whole number of units, as the format stores it."
 }
 
+// count is a count and its noun: one for a count of 1 and many for any
+// other (tools.md, the report).
+func count(n int, one, many string) string {
+	if n == 1 {
+		return fmt.Sprintf("%d %s", n, one)
+	}
+	return fmt.Sprintf("%d %s", n, many)
+}
+
 func fail(message string) {
 	fmt.Fprintln(os.Stderr, "Error: "+message)
 	os.Exit(1)
@@ -74,7 +83,6 @@ func main() {
 		fail(err.Error())
 	}
 	output := decoded.Output
-	note := ""
 	if decoded.RepeatIndex < 0 && passes > 1 {
 		fail(fmt.Sprintf("The stream does not loop, so -r%d has nothing to repeat", passes))
 	}
@@ -89,16 +97,28 @@ func main() {
 		if err != nil {
 			fail(err.Error())
 		}
-		note = fmt.Sprintf(", %d passes of a loop from unit %d", passes, decoded.RepeatIndex)
-	} else if decoded.RepeatIndex >= 0 {
-		note = fmt.Sprintf(", which loops from unit %d", decoded.RepeatIndex)
 	}
 
 	if _, err := os.Stdout.Write(output); err != nil {
 		fail("Cannot write standard output")
 	}
 	if !silent {
-		fmt.Fprintf(os.Stderr, "Unpacked %d bytes into %d%s\n",
-			len(file), len(output), note)
+		// The line of the Java and C# trees, word for word.
+		whole := ""
+		if container.Unit != 1 {
+			whole = " (a whole number of units)"
+		}
+		loop := ""
+		if decoded.RepeatIndex >= 0 {
+			loop = fmt.Sprintf(", looping from unit %d", decoded.RepeatIndex)
+		} else if container.Rewind != st4.NoRewind {
+			loop = fmt.Sprintf(", looping from unit %d by rewind", container.Rewind/container.Unit)
+		}
+		played := ""
+		if passes != 1 {
+			played = fmt.Sprintf(", played %d times", passes)
+		}
+		fmt.Fprintf(os.Stderr, "File decompressed from %d to %s, k=%d%s%s%s!\n", len(file),
+			count(len(output), "byte", "bytes"), container.Unit, whole, loop, played)
 	}
 }

@@ -146,15 +146,16 @@ public final class St4 {
         }
 
         int padded = Units.paddedLength(input.length, unit);
-        System.err.printf("Packed %d bytes%s into %d (%.1f%%): A %d, B %d, C %d, D %d, "
-                + "%d operations%s%n",
-                input.length, padded == input.length ? "" : " padded to " + padded,
+        System.err.printf(java.util.Locale.ROOT,
+                "Packed %s%s into %d (%.1f%%): A %d, B %d, C %d, D %d, %s%s%n",
+                count(input.length, "byte", "bytes"),
+                padded == input.length ? "" : " padded to " + padded,
                 result.packedSize(), 100.0 * result.packedSize() / input.length,
                 result.control().length, result.literal().length,
                 result.byteOffsets().length, result.wordOffsets().length,
-                result.operations(),
-                (result.copies() == 0 ? "" : ", " + result.copies()
-                        + " copies from the literal stream")
+                count(result.operations(), "operation", "operations"),
+                (result.copies() == 0 ? "" : ", " + count(result.copies(), "copy", "copies")
+                        + " from the literal stream")
                         + (repeatIndex < 0 ? "" : ", loops from unit " + repeatIndex
                         + (result.rewindIndex() < 0 ? "" : " by rewind")));
         if (result.rewindIndex() >= 0) {
@@ -163,9 +164,9 @@ public final class St4 {
                     + "every pass%n", offsetLimit, repeatIndex, units.length);
         }
         if (result.longestOp() > maxOpLength) {
-            System.err.printf("Warning: longest operation is %d units, over the -l%d limit: "
+            System.err.printf("Warning: longest operation is %s, over the -l%d limit: "
                     + "a literal run, which the format cannot split%n",
-                    result.longestOp(), maxOpLength);
+                    count(result.longestOp(), "unit", "units"), maxOpLength);
         }
     }
 
@@ -229,6 +230,12 @@ public final class St4 {
     private static void putLong(byte[] file, int at, int value) {
         putWord(file, at, value >>> 16);
         putWord(file, at + 2, value);
+    }
+
+    /** A count and its noun: {@code one} for a count of 1 and {@code many}
+     *  for any other (tools.md, the report). */
+    static String count(long count, String one, String many) {
+        return count + " " + (count == 1 ? one : many);
     }
 
     private static RuntimeException error(String message) {

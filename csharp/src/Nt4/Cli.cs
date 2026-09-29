@@ -8,6 +8,11 @@ namespace Nt4;
 /// <summary>Shared command-line parsing and error-reporting helpers.</summary>
 internal static class Cli
 {
+    /// <summary>A count and its noun: <paramref name="one"/> for a count of 1 and
+    /// <paramref name="many"/> for any other (tools.md, the report).</summary>
+    internal static string Count(long count, string one, string many) =>
+        string.Create(CultureInfo.InvariantCulture, $"{count} {(count == 1 ? one : many)}");
+
     /// <summary>Writes an error message as the Java tools do and returns the failure exit code.</summary>
     internal static int Error(string message)
     {

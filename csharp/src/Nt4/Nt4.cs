@@ -200,12 +200,12 @@ public static class Nt4
 
         int padded = Units.PaddedLength(input.Length, unit);
         Console.Error.WriteLine(string.Create(CultureInfo.InvariantCulture,
-            $"Packed {input.Length} bytes{(padded == input.Length ? "" : $" padded to {padded}")} "
+            $"Packed {Cli.Count(input.Length, "byte", "bytes")}{(padded == input.Length ? "" : $" padded to {padded}")} "
             + $"into {result.PackedSize} ({100.0 * result.PackedSize / input.Length:F1}%): "
             + $"A {result.Control.Length}, B {result.Literal.Length}, "
             + $"C {result.ByteOffsets.Length}, D {result.WordOffsets.Length}, "
-            + $"{result.Operations} operations"
-            + $"{(result.Copies == 0 ? "" : $", {result.Copies} copies from the literal stream")}"
+            + $"{Cli.Count(result.Operations, "operation", "operations")}"
+            + $"{(result.Copies == 0 ? "" : $", {Cli.Count(result.Copies, "copy", "copies")} from the literal stream")}"
             + $"{(repeatIndex < 0 ? "" : $", loops from unit {repeatIndex}")}"
             + $"{(result.RewindIndex < 0 ? "" : " by rewind")}"));
         if (result.RewindIndex >= 0)
@@ -217,7 +217,7 @@ public static class Nt4
         if (result.LongestOp > maxOpLength)
         {
             Console.Error.WriteLine(
-                $"Warning: longest operation is {result.LongestOp} units, over the "
+                $"Warning: longest operation is {Cli.Count(result.LongestOp, "unit", "units")}, over the "
                 + $"-l{maxOpLength} limit: a literal run, which the format cannot split");
         }
         return 0;

@@ -37,6 +37,15 @@ func usage() string {
 		"  -silent Leave the report off standard error"
 }
 
+// count is a count and its noun: one for a count of 1 and many for any
+// other (tools.md, the report).
+func count(n int, one, many string) string {
+	if n == 1 {
+		return fmt.Sprintf("%d %s", n, one)
+	}
+	return fmt.Sprintf("%d %s", n, many)
+}
+
 func fail(message string) {
 	fmt.Fprintln(os.Stderr, "Error: "+message)
 	os.Exit(1)
@@ -158,7 +167,7 @@ func main() {
 	}
 	tail := ""
 	if result.Copies != 0 {
-		tail = fmt.Sprintf(", %d copies from the literal stream", result.Copies)
+		tail = ", " + count(result.Copies, "copy", "copies") + " from the literal stream"
 	}
 	if repeatIndex >= 0 {
 		tail += fmt.Sprintf(", loops from unit %d", repeatIndex)
@@ -166,19 +175,19 @@ func main() {
 			tail += " by rewind"
 		}
 	}
-	fmt.Fprintf(os.Stderr, "Packed %d bytes%s into %d (%.1f%%): A %d, B %d, C %d, D %d, %d operations%s\n",
-		len(input), note, result.PackedSize(),
+	fmt.Fprintf(os.Stderr, "Packed %s%s into %d (%.1f%%): A %d, B %d, C %d, D %d, %s%s\n",
+		count(len(input), "byte", "bytes"), note, result.PackedSize(),
 		100.0*float64(result.PackedSize())/float64(len(input)),
 		len(result.Control), len(result.Literal), len(result.ByteOffsets),
-		len(result.WordOffsets), result.Operations, tail)
+		len(result.WordOffsets), count(result.Operations, "operation", "operations"), tail)
 	if result.RewindIndex >= 0 {
-		fmt.Printf("The loop is longer than the -m%d window, so the decoder cannot loop it"+
+		fmt.Fprintf(os.Stderr, "The loop is longer than the -m%d window, so the decoder cannot loop it"+
 			" alone: save its state at unit %d and restore it at unit %d, every pass\n",
 			offsetLimit, repeatIndex, len(units))
 	}
 	if result.LongestOp > maxOpLength {
-		fmt.Printf("Warning: longest operation is %d units, over the -l%d limit:"+
+		fmt.Fprintf(os.Stderr, "Warning: longest operation is %s, over the -l%d limit:"+
 			" a literal run, which the format cannot split\n",
-			result.LongestOp, maxOpLength)
+			count(result.LongestOp, "unit", "units"), maxOpLength)
 	}
 }

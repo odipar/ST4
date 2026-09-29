@@ -110,7 +110,7 @@ public static class Dnt4
             return 0;
         }
 
-        Console.Error.WriteLine($"File decompressed from {file.Length} to {output.Length} bytes, "
+        Console.Error.WriteLine($"File decompressed from {file.Length} to {Cli.Count(output.Length, "byte", "bytes")}, "
             + $"k={container.Unit}{(container.Unit == 1 ? "" : " (a whole number of units)")}"
             + $"{(decoded.RepeatIndex >= 0 ? $", looping from unit {decoded.RepeatIndex}"
                 : container.Rewind < 0 ? ""

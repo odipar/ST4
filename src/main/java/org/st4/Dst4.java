@@ -84,8 +84,8 @@ public final class Dst4 {
             return;
         }
 
-        System.err.printf("File decompressed from %d to %d bytes, k=%d%s%s%s!%n",
-                file.length, output.length, container.unit(),
+        System.err.printf("File decompressed from %d to %s, k=%d%s%s%s!%n",
+                file.length, St4.count(output.length, "byte", "bytes"), container.unit(),
                 container.unit() == 1 ? "" : " (a whole number of units)",
                 decoded.repeatIndex() >= 0 ? ", looping from unit " + decoded.repeatIndex()
                         : container.rewind() < 0 ? ""

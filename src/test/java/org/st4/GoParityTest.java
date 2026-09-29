@@ -158,4 +158,80 @@ final class GoParityTest {
             }
         }
     }
+
+    /** What a tool run reported: standard output, and the lines of its
+     *  report the two trees share, the banner and the progress left out. */
+    private record Said(byte[] out, List<String> lines) { }
+
+    /** The report lines both trees write: the summary, the two notes. */
+    private static List<String> shared(String err) {
+        return err.lines().filter(line -> line.startsWith("Packed ")
+                || line.startsWith("The loop is longer") || line.startsWith("Warning: ")
+                || line.startsWith("File decompressed")).toList();
+    }
+
+    /** The Go tool run with its report on. */
+    private static Said goSaid(String tool, byte[] input, List<String> flags)
+            throws IOException, InterruptedException {
+        List<String> argv = new java.util.ArrayList<>();
+        argv.add(built.resolve(tool).toString());
+        argv.addAll(flags);
+        Process ran = new ProcessBuilder(argv).start();
+        ran.getOutputStream().write(input);
+        ran.getOutputStream().close();
+        byte[] out = ran.getInputStream().readAllBytes();
+        String err = new String(ran.getErrorStream().readAllBytes());
+        assertEquals(0, ran.waitFor(), tool + " exits 0: " + err);
+        return new Said(out, shared(err));
+    }
+
+    /** This tree's tool run with its report on. */
+    private static Said javaSaid(Runnable tool, byte[] input) {
+        PrintStream stderr = System.err;
+        var caught = new ByteArrayOutputStream();
+        byte[] out;
+        try {
+            System.setErr(new PrintStream(caught, true));
+            out = java(tool, input);
+        } finally {
+            System.setErr(stderr);
+        }
+        return new Said(out, shared(caught.toString()));
+    }
+
+    /**
+     * The report beside the output, in both trees. A loop longer than the
+     * window has its note on standard error and the output is the container
+     * alone: the Go tree wrote the note after the container until it wrote
+     * it to standard error. A count of 1 reads in the singular, and a
+     * percentage has a point for its decimal in every locale.
+     */
+    @Test
+    void theReportIsTheSameInBothTreesAndLeavesTheOutputAlone() throws Exception {
+        byte[] loop = new byte[600];
+        new java.util.Random(1).nextBytes(loop);
+        Said java = javaSaid(() -> St4.main(new String[] {"-m64", "-r100"}), loop);
+        Said go = goSaid("st4", loop, List.of("-m64", "-r100"));
+        assertArrayEquals(java.out(), go.out(), "the notes leave the output alone");
+        assertEquals(java.lines(), go.lines(), "the two trees report the same");
+        assertTrue(java.lines().size() == 2
+                && java.lines().get(0).matches("Packed 600 bytes into \\d+ \\(\\d+\\.\\d%\\).*")
+                && java.lines().get(1).startsWith("The loop is longer than the -m64 window"),
+                "the summary and the note: " + java.lines());
+
+        byte[] one = {'x'};
+        java = javaSaid(() -> St4.main(new String[] {}), one);
+        go = goSaid("st4", one, List.of());
+        assertArrayEquals(java.out(), go.out(), "one byte packs the same");
+        assertEquals(java.lines(), go.lines(), "and is reported the same");
+        assertTrue(java.lines().get(0).startsWith("Packed 1 byte into ")
+                && java.lines().get(0).endsWith(", 1 operation"), java.lines().toString());
+
+        byte[] unit = Files.readAllBytes(Path.of("doc/conformance/containers/k1-one-unit.st4"));
+        java = javaSaid(() -> Dst4.main(new String[] {}), unit);
+        go = goSaid("dst4", unit, List.of());
+        assertArrayEquals(java.out(), go.out(), "one unit unpacks the same");
+        assertEquals(List.of("File decompressed from 36 to 1 byte, k=1!"), java.lines());
+        assertEquals(java.lines(), go.lines(), "and is reported the same");
+    }
 }
