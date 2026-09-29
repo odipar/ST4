@@ -631,7 +631,7 @@ public sealed class RoundTripTests
     public void TheHeaderIsTwentyEightBytesAndSaysOnlyWhatCannotBeDerived()
     {
         byte[] input = Encoding.ASCII.GetBytes(
-            "a header should hold nothing that follows from the rest");
+            "a header records only what the rest leaves open");
         foreach (int unit in new[] { 1, 2, 4 })
         {
             Compressor.Result packed = Pack(input, unit);

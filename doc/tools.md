@@ -61,7 +61,7 @@ input, which `ConsistencyTest` reads against each of them.
 |---|---|
 | a copy of L units from B units back reads past the literal read pointer | `a copy of L units from B units back does not stay behind the literal read pointer` |
 | the loop distance D units reaches past the window W | `the loop distance D units reaches past the W-unit window` |
-| `-rN` with N above 1 on a container with the repeat bit clear and the rewind point -1 (SPEC.md 6.1) | `The stream does not loop, so -rN has nothing to repeat` |
+| `-rN` with N above 1 on a container with the repeat bit clear and the rewind point -1 (SPEC.md 6.1) | `The stream does not loop, and -rN repeats a loop` |
 
 Either tool:
 

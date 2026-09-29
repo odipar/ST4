@@ -202,7 +202,7 @@ class ConformanceTest {
                 assertArrayEquals(file, onDisk, containerAt + " is the container the"
                         + " packer writes from the input and options of SOURCES.md");
                 assertArrayEquals(played, Files.readAllBytes(outputAt), outputAt
-                        + " is what a decoder writes for that container");
+                        + " is the output a decoder writes for that container");
             }
             rows.add("| `%s` | %s | %d | %d | %s | %s | %d | %d | %s | %s |".formatted(
                     source.name(), source.from(), source.unit(), source.window(),

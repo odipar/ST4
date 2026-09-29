@@ -109,7 +109,7 @@ func main() {
 			copy(output[at:], pass[container.Rewind:])
 		}
 	default:
-		fail(fmt.Sprintf("The stream does not loop, so -r%d has nothing to repeat", passes))
+		fail(fmt.Sprintf("The stream does not loop, and -r%d repeats a loop", passes))
 	}
 
 	if _, err := os.Stdout.Write(output); err != nil {

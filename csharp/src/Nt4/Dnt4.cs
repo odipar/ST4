@@ -144,7 +144,7 @@ public static class Dnt4
         }
         if (container.Rewind < 0)
         {
-            throw new ArgumentException($"The stream does not loop, so -r{times} has nothing to repeat");
+            throw new ArgumentException($"The stream does not loop, and -r{times} repeats a loop");
         }
         int section = output.Length - container.Rewind;
         byte[] result = new byte[output.Length + (times - 1) * section];

@@ -45,7 +45,7 @@ def _binary(name):
     out = here / name
     if PREBUILT:
         if not out.exists():
-            raise SystemExit(f'--binary given but no {out}')
+            raise SystemExit(f'--binary passed, and {out} is missing')
         return _ASSEMBLED.setdefault(name, out.read_bytes())
     stem = Path(name).stem
     src = here.parent.parent / (stem + '.S')

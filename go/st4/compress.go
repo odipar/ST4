@@ -276,7 +276,7 @@ func (c *compressor) copy(distance, length, maxOpLength int) {
 		}
 		back := c.literalsAt(start) - c.literalsAt(source)
 		if back < size {
-			panic("a copy's source lies behind its own literals")
+			panic("a copy's source is fewer literals back than the copy is long")
 		}
 		// The parse costs a copy with the literal count of its dictionary, a
 		// lower bound on the literals between a source and the copy, so it

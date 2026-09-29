@@ -11,8 +11,8 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
-import org.st4.style.Comments;
-import org.st4.style.Comments.Comment;
+import org.st4.style.Prose;
+import org.st4.style.Prose.Run;
 import org.st4.style.Construct;
 import org.st4.style.HouseStyle;
 import org.st4.style.HouseStyle.Hit;
@@ -25,8 +25,11 @@ import org.junit.jupiter.api.io.TempDir;
  * <p>The first half reads STRUCK.md back: every construct is in each of its
  * samples and in none of its counter-samples, every rule is a heading of
  * AGENTS.md, and the list is parsed as its preamble describes. The
- * second half runs the check over this repository: no document and no code
- * comment has a struck construct.
+ * second half runs the check over this repository: every document, code
+ * comment and string reads without a struck construct.
+ *
+ * <p>This file is among the samples STRUCK.md lists, since its strings are
+ * struck constructs written to test the check.
  */
 final class HouseStyleTest {
 
@@ -101,6 +104,9 @@ final class HouseStyleTest {
                 "own",
                 "    packer.go",
                 "",
+                "samples",
+                "    HouseStyleTest.java",
+                "",
                 "## Programs do not intend",
                 "",
                 "A line of prose under a rule.",
@@ -119,6 +125,7 @@ final class HouseStyleTest {
         assertEquals(List.of("Windows"), style.names());
         assertEquals(List.of("/org/st4/style/"), style.carried());
         assertEquals(List.of("packer.go"), style.own());
+        assertEquals(List.of("HouseStyleTest.java"), style.samples());
         assertEquals(2, style.constructs().size());
         Construct wanting = style.constructs().get(0);
         assertEquals("Programs do not intend", wanting.rule());
@@ -130,6 +137,8 @@ final class HouseStyleTest {
         assertTrue(style.isCarried(Path.of("src/main/java/org/st4/style/A.java")));
         assertTrue(!style.isCarried(Path.of("go/st4/packer.go")));
         assertTrue(!style.isCarried(Path.of("src/main/java/org/dtx/A.java")));
+        assertTrue(style.isSample(Path.of("src/test/java/HouseStyleTest.java")));
+        assertTrue(!style.isSample(Path.of("src/test/java/ConsistencyTest.java")));
     }
 
     @Test
@@ -271,7 +280,7 @@ final class HouseStyleTest {
     }
 
     @Test
-    void aCommentIsReadAndAStringIsNot() throws IOException {
+    void aCommentAndAStringAreRead() throws IOException {
         List<Hit> hits = style().source(Path.of("A.java"),
                 "class A {\n"
                         + "    String s = \"the ring holds\";\n"
@@ -281,18 +290,61 @@ final class HouseStyleTest {
                         + "     */\n"
                         + "    int ring; // the payload states it\n"
                         + "}\n");
-        assertEquals(List.of("A.java:5 has \"holds\" - The verb that says"
+        assertEquals(List.of("A.java:2 has \"holds\" - The verb that says"
+                + " the action, holding, the third person",
+                "A.java:5 has \"holds\" - The verb that says"
                 + " the action, holding, the third person", "A.java:7 has"
                 + " \"states\" - The verb that says the action, stating, the"
                 + " third person"),
                 hits.stream().map(Hit::toString).toList());
+        // The strings of a file among the samples are left out, and its
+        // comments are read.
+        assertEquals(List.of("HouseStyleTest.java:1"), style().source(
+                Path.of("HouseStyleTest.java"),
+                "// the ring holds\nString s = \"the ring holds\";\n")
+                .stream().map(hit -> hit.file() + ":" + hit.line()).toList());
+    }
+
+    @Test
+    void theStringScannerJoinsWhatTheSourceJoins() {
+        // A message wrapped over lines is one string, read whole, and a
+        // hit in it is reported at the line of its words. Code between two
+        // literals ends a string; a hole of an interpolated string is code.
+        record Sample(String name, String text, List<String> strings) {}
+        for (Sample one : List.of(
+                new Sample("a.java",
+                        "f(\"the ring \"\n        + \"holds a row\", x);\n"
+                                + "g(\"a\" + x + \"b\"); // \"no string\"\n"
+                                + "String t = \"\"\"\n    a block\n    \"\"\";\n",
+                        List.of("1:the ring \nholds a row", "3:a", "3:b",
+                                "4:\n    a block\n    ")),
+                new Sample("a.go",
+                        "s := `a raw\nstring` + \"\\tand \\\"more\\\"\"\n",
+                        List.of("1:a raw\nstring and \"more\"")),
+                new Sample("a.cs",
+                        "W($\"row {r} gives {value}\");\n",
+                        List.of("1:row     gives        ")),
+                new Sample("a.py",
+                        "p(f\"the {work} holds\" 'x')  # a 'comment'\n",
+                        List.of("1:the        holdsx")),
+                new Sample("a.sh",
+                        "echo \"a line\"\\\n     \"wrapped\" >&2 # it's\n",
+                        List.of("1:a line\nwrapped")),
+                new Sample("a.csproj",
+                        "<A B=\"the ring holds\">it's</A>\n",
+                        List.of()))) {
+            List<String> read = Prose.strings(Path.of(one.name()), one.text())
+                    .stream().map(run -> run.line() + ":" + run.text()).toList();
+            assertEquals(one.strings(), read, one.name());
+        }
     }
 
     @Test
     void theCommentScannerReadsCommentsAndNotStrings() {
         // A struck phrase in a comment is a hit and one in a string is not,
         // or the check would read a URL's // as prose and a literal as a
-        // sentence. Each language is tried in the marks it writes.
+        // sentence. Each language is tried in the marks it writes, XML
+        // among them.
         record Sample(String name, String text, String prose, String hidden) {}
         for (Sample one : List.of(
                 new Sample("a.java",
@@ -314,9 +366,12 @@ final class HouseStyleTest {
                         "a guarantee here", "promise"),
                 new Sample("a.sh",
                         "echo \"a promise\"   # a guarantee here\n",
-                        "a guarantee here", "promise"))) {
+                        "a guarantee here", "promise"),
+                new Sample("pom.xml",
+                        "<a b=\"a promise\">it's</a> <!-- a guarantee\n here -->\n",
+                        "a guarantee\n here", "promise"))) {
             StringBuilder read = new StringBuilder();
-            for (Comment comment : Comments.of(Path.of(one.name()), one.text())) {
+            for (Run comment : Prose.comments(Path.of(one.name()), one.text())) {
                 read.append(comment.text()).append('\n');
             }
             String found = read.toString();
@@ -346,13 +401,22 @@ final class HouseStyleTest {
                 "// a carried copy, whose ring holds a row\n");
         Files.writeString(root.resolve("a.go"),
                 "// the ring holds a row\nvar s = \"the ring holds\"\n");
+        Files.writeString(root.resolve("go.mod"),
+                "module a\n\n// the ring holds a row\n");
+        Files.writeString(root.resolve("pom.xml"),
+                "<project>\n  <!-- the ring holds a row -->\n</project>\n");
+        Files.writeString(root.resolve("test.yml"),
+                "# the ring holds a row\non: [push]\n");
+        Files.writeString(root.resolve("HouseStyleTest.java"),
+                "// a test of the check\nvar s = \"the ring holds\";\n");
         Files.createDirectories(root.resolve("target"));
         Files.writeString(root.resolve("target/b.md"),
                 "the ring holds a row, in build output\n");
         List<String> hits = HouseStyle.read(root).check(root).stream()
                 .map(hit -> root.relativize(hit.file()) + ":" + hit.line())
                 .toList();
-        assertEquals(List.of("doc/a.md:3", "a.go:1"), hits);
+        assertEquals(List.of("doc/a.md:3", "a.go:1", "a.go:2", "go.mod:3",
+                "pom.xml:2", "test.yml:1"), hits);
     }
 
     @Test
@@ -369,12 +433,12 @@ final class HouseStyleTest {
         }
         assertTrue(hits.isEmpty(), () -> String.join("\n", hits)
                 + "\nAGENTS.md defines the rule each construct is struck under;"
-                + " reword the line, or take the entry off " + HouseStyle.STRUCK
-                + " in the same change.");
+                + " reword the line, or remove the entry from "
+                + HouseStyle.STRUCK + " in the same change.");
     }
 
     @Test
-    void noCommentHasAStruckConstruct() throws IOException {
+    void noCommentOrStringHasAStruckConstruct() throws IOException {
         HouseStyle style = style();
         List<Path> sources = style.sources(ROOT);
         assertTrue(!sources.isEmpty(), "no source was found");
@@ -385,9 +449,9 @@ final class HouseStyleTest {
             }
         }
         assertTrue(hits.isEmpty(), () -> String.join("\n", hits)
-                + "\nAGENTS.md reads a code comment against the rules a"
-                + " document is read against; reword the comment, or take"
-                + " the entry off " + HouseStyle.STRUCK + " in the same"
-                + " change.");
+                + "\nAGENTS.md reads a code comment and a string against the"
+                + " rules a document is read against; reword the line, or"
+                + " remove the entry from " + HouseStyle.STRUCK + " in the"
+                + " same change.");
     }
 }

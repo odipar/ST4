@@ -118,8 +118,8 @@ public final class Dst4 {
                     .output();
         }
         if (container.rewind() < 0) {
-            throw new IllegalArgumentException("The stream does not loop, so -r" + times
-                    + " has nothing to repeat");
+            throw new IllegalArgumentException("The stream does not loop, and -r" + times
+                    + " repeats a loop");
         }
         int loop = output.length - container.rewind();
         byte[] result = java.util.Arrays.copyOf(output, output.length + (times - 1) * loop);

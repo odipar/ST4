@@ -36,7 +36,7 @@ if owed; then
     while ! mkdir "$lock" 2>/dev/null; do
         waited=$((waited + 1))
         if [ "$waited" -gt 180 ]; then
-            echo "st4-run: a build has held $lock for three minutes" >&2
+            echo "st4-run: a build has kept $lock for three minutes" >&2
             exit 2
         fi
         sleep 1
