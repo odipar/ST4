@@ -71,11 +71,20 @@ Either tool:
 | a write of standard output fails | `Cannot write standard output` |
 
 `st4` reports two notes on standard error as it packs, the tool exiting
-0: `The loop is longer than the -mN window, so the decoder cannot loop
-it after the first pass` where the loop the caller asked for reaches
-past the window, and `Warning: longest operation is L units, over the
--lN limit: a literal run always reaches` where an operation runs past
-the limit.
+0: `The loop is longer than the -mN window, so the decoder cannot loop it
+alone: save its state at unit U and restore it at unit O, every pass`
+where the loop the caller asked for reaches past the window, and
+`Warning: longest operation is L units, over the -lN limit: a literal
+run, which the format cannot split` where an operation runs past the
+limit.
+
+The summary line of each tool, `Packed B bytes into P (X%): ...` and
+`File decompressed from B to O bytes, k=K...!`, and the two notes are one
+text in the three trees. A count in them is followed by its noun,
+singular for a count of 1 and plural for any other, as `Packed 1 byte
+into 3` and `File decompressed from 36 to 1 byte, k=1!`, and a percentage
+has a point for its decimal. `GoParityTest` reads the Go tree's against
+this one's.
 
 ## The three trees
 
