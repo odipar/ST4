@@ -85,7 +85,35 @@ every byte of that kit's `dtx2-copies` after its second block: 5.1 reads it
 now. 5.1's reach by bank is a bound rather than a distance, and 6.2's loop
 word is the next entry of stream D.
 
-DTX's kit was read cold the same day and its reader read this document
-for the packed payloads it has; those payloads pack without a loop, so
-sections 6.2, 6.3 and the rewind point of 2.6 were outside that run, and
-the three containers named for them here are why this kit exists.
+DTX's kit was read cold the same day, and its readers read this document
+for the payloads it packs. Its `dtx2-repeat` loops at the form of 6.2, so
+the replay of 6.3 and the rewind point of 2.6 were outside those runs:
+`k1-loop-long` is here for them, and `k1-loop-in-window` and
+`k1-loop-from-zero` for the two places a loop of 6.2 begins.
+
+**The third run**, 2026-09-29, against the kit with the clauses of the
+first two in it and a third implementer. The reader was 242 lines and
+produced all sixteen outputs byte for byte; its notes had 21 entries,
+none marked *decides output*, so the run passes whole. Six clauses read
+more closely for what the notes found:
+
+- 2.1's signature is bytes, the stream starts count from byte 0 of the
+  header, the rewind point is in bytes of output, and a long is four
+  bytes; glossary.md, which defines the long, is outside the kit.
+- 3.2 reads stream A from its first byte, bit 7 first, and a decoder that
+  reads a word at a time reads the same bits.
+- 3.6's end code is the flag `1` and the class `0 1`, where it read the
+  class alone.
+- 5.1 reads unit i of a copy `offset - M - i` units back, and the flag
+  after a copy as after a match. The comments of the three trees read
+  that a copy lowers its offset, where they read that it advances it, the
+  word the first run struck from 5.2.
+- 6.2's loop distance is at most `M`, which the packer requires.
+- 7.3 read that the copies of 5 read what a smaller ring has dropped. A
+  copy reads stream B (5.1), and the reads a smaller ring breaks are a
+  match's, up to `M` units back (4.4), which the clause reads now.
+
+`TASK.md` reads which containers loop from the container itself, where it
+pointed at SOURCES.md, which is outside a run; it names `out/` as where
+the reader writes; and it defines `READ.md` and `NOTES.md`, which the
+rule of this section reads and `TASK.md` lacked.

@@ -28,14 +28,14 @@ container stores offsets and lengths in whole units of `k` bytes, so `k` of
 **2.1** A container is twenty-eight bytes of header, then four streams:
 
 ```
- 0  4  signature: 'S', '4', format version (7), k
+ 0  4  signature: bytes 'S', '4', then version 7 and k, a byte each
  4  4  O, the output size in bytes, a multiple of k
- 8  4  where stream B starts, in bytes from the header
+ 8  4  where stream B starts, in bytes from byte 0 of the header (2.5)
 12  4  where stream C starts
 16  4  where stream D starts
-20  4  the rewind point in bytes, or $FFFFFFFF where there is none
+20  4  the rewind point in bytes of output, or $FFFFFFFF where there is none
 24  4  M, the window in units
-28 ..  streams A, B, C and D in that order, each starting on a long
+28 ..  streams A, B, C and D in that order, each starting on a 4-byte long
 ```
 
 **2.2** Every field of more than one byte is most significant byte first.
@@ -65,7 +65,9 @@ $FFFFFFFF otherwise.
 | match at the last offset | gamma(length) | copied from the last offset |
 | match at a new offset | 2 class bits, gamma(length - 1) | one byte from C or one word from D |
 
-**3.2** Bits are read from stream A most significant first.
+**3.2** Bits are read from stream A most significant first: its first
+byte from bit 7 to bit 0, then the next. A decoder that reads a word at a
+time reads the same bits, a word being most significant byte first (2.2).
 
 **3.2.1** A match copies unit by unit as the output grows, so a match
 longer than its offset repeats the units it has just written.
@@ -107,7 +109,8 @@ left bit of a pair below is the one a reader reads first:
 | `0 1` | the data ends, and one repeat bit follows |
 
 **3.6** The end code comes where the output reaches `O` (2.1), and is the
-class `0 1`. The repeat bit after it selects whether the stream ends there:
+flag `1` and the class `0 1`, read as a new offset is (3.4, 3.5). The
+repeat bit after it selects whether the stream ends there:
 a `0` ends it, and a `1` loops it (6.2).
 
 **3.7** A new-offset match is two units long at least, which is why it
@@ -140,13 +143,13 @@ units back. An offset above `M` is a copy from the literal stream (5).
 
 ## 5. Copies from the literal stream
 
-**5.1** A copy is a match block whose offset is above `M` (4.4): the
-flag that starts it, the class bits and the length it reads are a match's
-(3.1, 3.4), and it leaves a reader where a match does. It reads
-`offset - M` literal units back from the stream B read pointer, and leaves
-that pointer where it is. The distance counts literal units, so a byte
-offset in bank 1 reaches at most `512 - M` literals back and one in bank 0
-at most `256 - M`.
+**5.1** A copy is a match block whose offset is above `M` (4.4): the flag
+that starts it, the class bits and the length it reads are a match's (3.1,
+3.4), and the flag after it is read as after a match. Its unit i, from 0,
+is the literal unit `offset - M - i` units back from the stream B read
+pointer, which stays where it is. The distance counts literal units, so a
+byte offset in bank 1 reaches at most `512 - M` literals back and one in
+bank 0 at most `256 - M`.
 
 **5.2** A copy's offset falls by what it copies, so a copy cut short
 continues where it stopped, and a block at the last offset after a copy
@@ -192,13 +195,13 @@ repeat bit set and no rewind point, or a rewind point and that bit
 clear.
 
 **6.2** A loop within the window loops by itself. The repeat bit (3.6) is
-set, and the next entry of stream D is the distance back to the loop
-point in units, `O` over `k` less `R`, stored as 4.2 stores an offset; the
-header's rewind point is $FFFFFFFF in this form (2.6), so a reader that
-needs `R` reads it as `O` over `k` less that distance. A decoder installs
-the word as any other offset and matches it forever, so after one pass
-every unit is the one that many units back. It costs the container two
-bytes.
+set, and the next entry of stream D is the distance back to the loop point
+in units, `O` over `k` less `R` and at most `M`, stored as 4.2 stores an
+offset; the header's rewind point is $FFFFFFFF in this form (2.6), so a
+reader that needs `R` reads it as `O` over `k` less that distance. A
+decoder installs the word as any other offset and matches it forever, so
+after one pass every unit is the one that many units back. It costs the
+container two bytes.
 
 **6.3** A loop longer than the window is replayed by the caller. The stream
 ends plainly, and the header records the rewind point (2.6). The caller
@@ -219,8 +222,8 @@ and a wrong byte reads as arbitrary output.
 **7.2** A reader built for one unit size reads the containers of that size,
 which 2.4 lets it check.
 
-**7.3** A reader keeps `M` units of output where the container records `M`,
-or the copies of 5 read what a smaller ring has dropped.
+**7.3** A reader keeps the last `M` units of output: a match reads up to
+`M` units back (4.4).
 
 **7.4** A reader of a stream with copies is built for them, and reads `M`
 out of the header (2.1) to separate a copy from a match.

@@ -9,7 +9,7 @@ namespace Nt4;
 /// offsets from stream C or D by width; lengths and offsets count units; the
 /// end code's extra bit turns the end into an endless match, the repeat;
 /// and an offset beyond the window copies <c>offset - window</c> units from
-/// behind the literal read pointer, which stays where it is, and advances
+/// behind the literal read pointer, which stays where it is, and lowers
 /// the offset by what was copied. A malformed stream throws
 /// <see cref="InvalidDataException"/>, where the Java reference trips an
 /// assertion.
@@ -280,7 +280,7 @@ public sealed class Decompressor
     /// <summary>
     /// Copies <paramref name="length"/> units from the literal stream,
     /// <c>lastOffset - window</c> units behind the read pointer, which stays
-    /// where it is, and advances the offset by what it copied.
+    /// where it is, and lowers the offset by what it copied.
     /// </summary>
     private void CopyFromLiterals(int length)
     {

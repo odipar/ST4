@@ -6,7 +6,7 @@ package org.st4;
  * from stream C or D by width; lengths and offsets count units; the end
  * code's extra bit turns the end into an endless match, the repeat; and an
  * offset beyond the window copies {@code offset - window} units from behind
- * the literal read pointer, which stays where it is, and advances the offset
+ * the literal read pointer, which stays where it is, and lowers the offset
  * by what was copied. A copy that would not stay behind the pointer is
  * rejected.
  */
@@ -176,7 +176,7 @@ public final class St4Decompressor {
     /**
      * Copies {@code length} units from the literal stream, {@code lastOffset -
      * window} units behind the read pointer, which stays where it is, and
-     * advances the offset by what it copied.
+     * lowers the offset by what it copied.
      */
     private void copyFromLiterals(int length) {
         int back = lastOffset - window;

@@ -347,7 +347,7 @@ final class ConsistencyTest {
     void theHeaderPictureIsTheFormat() throws IOException {
         String spec = read(SPEC);
         Matcher version = Pattern.compile(
-                "signature: 'S', '4', format version \\((\\d+)\\), k")
+                "signature: bytes 'S', '4', then version (\\d+) and k, a byte each")
                 .matcher(spec);
         assertTrue(version.find(), "SPEC.md 2.1 does not draw a signature");
         List<String> wrong = new ArrayList<>();
