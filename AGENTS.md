@@ -1,6 +1,7 @@
 # House style
 
-Rules for prose: documents, code comments, commit messages. Each appears once.
+Rules for prose: documents, code comments, strings, commit messages. Each
+appears once.
 
 ## Plain words
 

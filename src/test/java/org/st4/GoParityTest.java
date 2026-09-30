@@ -154,7 +154,7 @@ final class GoParityTest {
                         named + " " + flags + ": the two trees unpack the same");
                 assertArrayEquals(input,
                         java.util.Arrays.copyOf(mine, input.length),
-                        named + " " + flags + ": the input is what comes back");
+                        named + " " + flags + ": the input comes back");
             }
         }
     }

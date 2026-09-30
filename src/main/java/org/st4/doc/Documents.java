@@ -15,7 +15,7 @@ import java.util.regex.Pattern;
  * that implements it, a table against what a tool measures. The four
  * here read what every repository of this family requires of a document - a
  * link that resolves, one wrap width, a glossary in order - and each was
- * written four times before it stood here.
+ * written four times before it was here.
  *
  * <p>Each returns the lines to report, empty where the documents are true,
  * so a caller names the rule in the words it uses and says how many
@@ -38,7 +38,7 @@ public final class Documents {
     /**
      * Every link whose target the tree lacks.
      *
-     * <p>A link to a URL and one to an anchor of the document it stands in
+     * <p>A link to a URL and one to an anchor of the document it is in
      * are left, and a target with an anchor after it is read up to the
      * anchor. A line names the link, since a document names one target
      * twice as often as not.
@@ -114,14 +114,14 @@ public final class Documents {
         return out;
     }
 
-    /** Every row of a glossary whose term stands before the one above it. */
+    /** Every row of a glossary whose term sorts before the one above it. */
     public static List<String> outOfOrder(List<String[]> rows) {
         List<String> wrong = new ArrayList<>();
         for (int i = 1; i < rows.size(); i++) {
             String before = rows.get(i - 1)[0].replace("`", "").toLowerCase();
             String after = rows.get(i)[0].replace("`", "").toLowerCase();
             if (before.compareTo(after) > 0) {
-                wrong.add('"' + before + "\" stands before \"" + after + '"');
+                wrong.add('"' + before + "\" comes before \"" + after + '"');
             }
         }
         return wrong;

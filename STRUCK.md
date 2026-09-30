@@ -2,8 +2,8 @@
 
 What the style check strikes, under the AGENTS.md rule that strikes it.
 The check, `org.st4.style.HouseStyle`, reads this file and then every
-document and code comment in the tree against it. `mvn test` runs it, and
-so does
+document, code comment and string in the tree against it. `mvn test` runs
+it, and so does
 
     java -cp target/classes org.st4.style.HouseStyle
 
@@ -16,12 +16,15 @@ every sample back, so a pattern that drifts fails there rather than in
 review. Add an entry to strike a construct, and take one off in the same
 change that uses the construct.
 
-Before the first rule, three entries are read differently. `names` lists
+Before the first rule, four entries are read differently. `names` lists
 names a construct is spelled inside which are not that construct, each
 blanked before a line is lowered; this tree has none, and the entry is
 empty. `carried` lists what the tree carries from another repository, by a
 fragment of the path, and `own` what is read despite being there, by the
-end of the path. A carried copy follows its own tree's style.
+end of the path. A carried copy follows its own tree's style. `samples`
+lists the files whose strings are samples of struck constructs, as a test
+of the check writes them, by the end of the path: their comments are read
+and their strings are left out.
 
 names
 
@@ -30,6 +33,9 @@ carried
     /org/st4/doc/
 
 own
+
+samples
+    HouseStyleTest.java
 
 ## Plain words
 

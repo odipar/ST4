@@ -4,19 +4,20 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
-import org.st4.style.Comments.Comment;
 import org.st4.style.Construct.Match;
+import org.st4.style.Prose.Run;
 
 /**
  * The house style, as a check over a tree.
  *
  * <p>AGENTS.md defines the rules and STRUCK.md lists the constructs struck
- * under them; this class reads the list, then every document and every code
- * comment the tree writes against it. A hit names the file, the line, the
- * text matched and the rule. {@code main} runs the check over a tree and
+ * under them; this class reads the list, then every document, code comment
+ * and string the tree writes against it. A hit names the file, the line,
+ * the text matched and the rule. {@code main} runs the check over a tree and
  * exits with 1 where it found a hit; HouseStyleTest runs it under Maven.
  *
  * <p>The documents and sources are found rather than listed: a list is a
@@ -31,10 +32,13 @@ import org.st4.style.Construct.Match;
  * @param carried fragments of a path that mark a file as carried from
  *     another repository
  * @param own ends of a path that mark a file as the tree's despite
- *     standing among carried ones
+ *     being among carried ones
+ * @param samples ends of a path that mark a file whose strings are samples
+ *     of struck constructs, as a test of the check writes them: its
+ *     comments are read and its strings are left out
  */
 public record HouseStyle(List<Construct> constructs, List<String> names,
-        List<String> carried, List<String> own) {
+        List<String> carried, List<String> own, List<String> samples) {
 
     /** The file that lists the constructs, at the root of the tree. */
     public static final String STRUCK = "STRUCK.md";
@@ -62,16 +66,17 @@ public record HouseStyle(List<Construct> constructs, List<String> names,
      *
      * <p>A heading {@code ## Rule} opens a rule. An entry is an unindented
      * line followed by an indented block: before the first rule the entries
-     * {@code names}, {@code carried} and {@code own} list their items, one a
-     * line; under a rule the block is the pattern, over as many lines as it
-     * needs, then {@code in:} and {@code not:} samples. Every other line is
-     * prose and is not read.
+     * {@code names}, {@code carried}, {@code own} and {@code samples} list
+     * their items, one a line; under a rule the block is the pattern, over
+     * as many lines as it needs, then {@code in:} and {@code not:} samples.
+     * Every other line is prose and is not read.
      */
     public static HouseStyle parse(List<String> lines) {
         List<Construct> constructs = new ArrayList<>();
         List<String> names = new ArrayList<>();
         List<String> carried = new ArrayList<>();
         List<String> own = new ArrayList<>();
+        List<String> samples = new ArrayList<>();
         String rule = "";
         for (int at = 0; at < lines.size(); at++) {
             String line = lines.get(at);
@@ -94,9 +99,11 @@ public record HouseStyle(List<Construct> constructs, List<String> names,
                     case "names" -> names.addAll(block);
                     case "carried" -> carried.addAll(block);
                     case "own" -> own.addAll(block);
+                    case "samples" -> samples.addAll(block);
                     default -> throw new IllegalArgumentException(STRUCK
-                            + ": \"" + name + "\" stands before the first"
-                            + " rule, where names, carried and own are read");
+                            + ": \"" + name + "\" comes before the first"
+                            + " rule, where names, carried, own and samples"
+                            + " are read");
                 }
                 continue;
             }
@@ -121,7 +128,7 @@ public record HouseStyle(List<Construct> constructs, List<String> names,
                     List.copyOf(not)));
         }
         return new HouseStyle(List.copyOf(constructs), List.copyOf(names),
-                List.copyOf(carried), List.copyOf(own));
+                List.copyOf(carried), List.copyOf(own), List.copyOf(samples));
     }
 
     private static boolean indented(String line) {
@@ -143,10 +150,10 @@ public record HouseStyle(List<Construct> constructs, List<String> names,
     /**
      * The hits in one run of lines that begins at line {@code first} of
      * {@code file}. The lines are read joined, since a phrase broken by a
-     * line wrap stands in neither of its lines, and a hit is reported at the
+     * line wrap is in neither of its lines, and a hit is reported at the
      * line the matched text begins on. A line joins without its indent and
      * without the marks a comment writes in front of it, or those would
-     * stand inside the phrase a wrap broke. The code spans are blanked once
+     * are inside the phrase a wrap broke. The code spans are blanked once
      * the lines are joined, so a span a wrap breaks is blanked whole.
      */
     public List<Hit> hits(Path file, int first, List<String> lines) {
@@ -197,7 +204,7 @@ public record HouseStyle(List<Construct> constructs, List<String> names,
      * <p>A span opens and closes over the run rather than the line: a
      * message as wide as the document wraps, and the half on each line is
      * quoted as much as a message that fits one line. Blanking needs the
-     * pair, so where one mark stands alone in the run the words after it
+     * pair, so where one mark is alone in the run the words after it
      * are read.
      */
     private static String quoted(String line) {
@@ -233,7 +240,7 @@ public record HouseStyle(List<Construct> constructs, List<String> names,
      * <p>A fenced block is quoted material, as a code span is: a command, a
      * file, a run of output. Its words are those of what it quotes rather
      * than this tree's, so the check reads past the block and the two
-     * fences around it. A script a document quotes stands in the tree as
+     * fences around it. A script a document quotes is in the tree as
      * well, and is read there, under {@code sources}.
      *
      * <p>An indent reads two ways, and where it falls decides which. An
@@ -284,11 +291,20 @@ public record HouseStyle(List<Construct> constructs, List<String> names,
         return out;
     }
 
-    /** The hits in the comments of a source file. */
+    /**
+     * The hits in the comments and the strings of a source file, in the
+     * order of their lines. The strings of a file among the samples are
+     * left out.
+     */
     public List<Hit> source(Path file, String text) {
+        List<Run> runs = new ArrayList<>(Prose.comments(file, text));
+        if (!isSample(file)) {
+            runs.addAll(Prose.strings(file, text));
+        }
+        runs.sort(Comparator.comparingInt(Run::line));
         List<Hit> out = new ArrayList<>();
-        for (Comment comment : Comments.of(file, text)) {
-            List<String> lines = List.of(comment.text().split("\n", -1));
+        for (Run run : runs) {
+            List<String> lines = List.of(run.text().split("\n", -1));
             List<String> paragraph = new ArrayList<>();
             int began = 0;
             for (int at = 0; at <= lines.size(); at++) {
@@ -299,12 +315,24 @@ public record HouseStyle(List<Construct> constructs, List<String> names,
                     }
                     paragraph.add(line);
                 } else if (!paragraph.isEmpty()) {
-                    out.addAll(hits(file, comment.line() + began, paragraph));
+                    out.addAll(hits(file, run.line() + began, paragraph));
                     paragraph.clear();
                 }
             }
         }
         return out;
+    }
+
+    /** Whether the strings of {@code path} are samples of struck
+     *  constructs. */
+    public boolean isSample(Path path) {
+        String at = path.toString();
+        for (String end : samples) {
+            if (at.endsWith(end)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /** Whether {@code path} is carried from another repository. */
@@ -345,12 +373,16 @@ public record HouseStyle(List<Construct> constructs, List<String> names,
     }
 
     /**
-     * Every source file under {@code root} whose comments the tree writes.
+     * Every source file under {@code root} whose comments and strings the
+     * tree writes.
      *
-     * <p>A name is read by its extension, and two kinds do not carry one:
-     * the scripts under {@code bin/}, which a shell reads, and a
-     * {@code .gitignore}. Both write their comments behind a {@code #}, as
-     * a shell script does.
+     * <p>A name is read by its extension, and three kinds do not carry one:
+     * the scripts under {@code bin/}, which a shell reads, a
+     * {@code .gitignore}, and a {@code go.mod}. The first two write their
+     * comments behind a {@code #}, as a shell script and a workflow's
+     * {@code .yml} do, and a {@code go.mod} behind a {@code //}. An XML
+     * file, a POM or a .NET project, writes them between {@code <!--} and
+     * {@code -->}.
      */
     public List<Path> sources(Path root) throws IOException {
         try (Stream<Path> tree = Files.walk(root)) {
@@ -360,6 +392,8 @@ public record HouseStyle(List<Construct> constructs, List<String> names,
                         return at.endsWith(".java") || at.endsWith(".go")
                                 || at.endsWith(".cs") || at.endsWith(".S")
                                 || at.endsWith(".py") || at.endsWith(".sh")
+                                || at.endsWith(".yml") || at.endsWith("go.mod")
+                                || Prose.isXml(at)
                                 || at.endsWith(".gitignore") || inBin(path);
                     })
                     .filter(path -> !built(path))
@@ -384,7 +418,8 @@ public record HouseStyle(List<Construct> constructs, List<String> names,
                 || over.equals(Path.of(".")) || over.getNameCount() == 0;
     }
 
-    /** Every hit in the documents and source comments under {@code root}. */
+    /** Every hit in the documents, source comments and strings under
+     *  {@code root}. */
     public List<Hit> check(Path root) throws IOException {
         List<Hit> out = new ArrayList<>();
         for (Path document : documents(root)) {
@@ -408,8 +443,8 @@ public record HouseStyle(List<Construct> constructs, List<String> names,
         }
         if (!hits.isEmpty()) {
             System.out.println(hits.size() + " hits. AGENTS.md defines the rule"
-                    + " each was struck under; reword the line, or take the"
-                    + " entry off " + STRUCK + " in the same change.");
+                    + " each was struck under; reword the line, or remove"
+                    + " the entry from " + STRUCK + " in the same change.");
             System.exit(1);
         }
     }

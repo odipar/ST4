@@ -227,7 +227,7 @@ public final class St4Compressor {
             assert literalsAt(source + size) - literalsAt(source) == size
                     : "a copy's source must be literal";
             int back = literalsAt(start) - literalsAt(source);
-            assert back >= size : "a copy's source lies behind its own literals";
+            assert back >= size : "a copy's source is fewer literals back than the copy is long";
             // The parse costs a copy with the literal count of its dictionary,
             // a lower bound on the literals between a source and the copy, so
             // it may choose one that reads further back than an offset

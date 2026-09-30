@@ -100,11 +100,11 @@ final class St4RoundTripTest {
             for (byte[] input : inputs()) {
                 St4Compressor.Result packed = pack(input, unit);
                 assertEquals(0, packed.literal().length % unit,
-                        "stream B holds whole units only");
+                        "stream B has whole units only");
                 assertEquals(0, packed.control().length % 2,
                         "stream A is refilled a word at a time, so it ends on one");
                 assertEquals(0, packed.wordOffsets().length % 2,
-                        "stream D holds whole words only");
+                        "stream D has whole words only");
                 assertEquals(0, packed.paddedSize() % unit);
             }
         }
@@ -602,7 +602,7 @@ final class St4RoundTripTest {
 
     @Test
     void theHeaderIsTwentyEightBytesAndSaysOnlyWhatCannotBeDerived() {
-        byte[] input = "a header should hold nothing that follows from the rest".getBytes(
+        byte[] input = "a header records only what the rest leaves open".getBytes(
                 java.nio.charset.StandardCharsets.US_ASCII);
         for (int unit : new int[] {1, 2, 4}) {
             St4Compressor.Result packed = pack(input, unit);
