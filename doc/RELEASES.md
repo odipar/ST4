@@ -44,6 +44,45 @@ plain `vN.0` means the format.
 
 ## Published
 
+### go/v0.1.13, 2026-09-30
+
+<https://github.com/odipar/ST4/releases/tag/go/v0.1.13>, built from the
+commit tagged `go/v0.1.13`.
+
+What a caller sees: the Go tools do what the Java and C# trees do in the
+three places where they differed, and a line a tool reports reads the
+plain verb. Packing is as it was: over the four inputs of `GoParityTest`
+at ten flag settings, `st4` of this release and of `go/v0.1.12` write
+the same 40 containers, and `dst4` unpacks the 16 containers of the kit
+the same.
+
+- **The notes of `st4`.** With the report on, the Go `st4` wrote its two
+  notes, the loop past the window and the `-l` warning, to standard
+  output after the container: `st4 -m64 -r100` over 600 random bytes
+  wrote 784 bytes in `go/v0.1.12`, the 640 of the container and 144 of
+  text. The notes go to standard error, as in the other two trees and
+  tools.md.
+- **`dst4 -rN` on a loop by rewind.** The Go `dst4` replayed a loop of
+  SPEC.md 6.2 alone and reported `The stream does not loop` for one of
+  6.3: `dst4 -r3` of the kit's `k1-loop-long` exited 1 in `go/v0.1.12`,
+  and writes the kit's 1,600 bytes now, as the other two trees do.
+- **The report.** A count of 1 reads in the singular, `Packed 1 byte`
+  and `from 36 to 1 byte`. The Go `dst4` prints `File decompressed from B
+  to O bytes` with the unit and the loop, the line of the other two trees,
+  where it printed `Unpacked B bytes into O`. The Java tree prints a
+  percentage with a point in every locale.
+- **Reworded lines.** The style check reads strings now: `dst4 -rN` on a
+  stream that loops in neither form reports `The stream does not loop,
+  and -rN repeats a loop`, and the compressor's check of a copy reads `a
+  copy's source is fewer literals back than the copy is long`.
+
+The Go module's API is as it was. SPEC.md 1.1 and 3.6 define the order of
+a unit's bytes and the stream the repeat bit comes from, as the reference
+decoder has them; the end code has one name in every comment and label;
+and a third reader read the kit cold.
+
+Checks: `bin/suite` green, 78 tests and 26 in C#, 0 skipped.
+
 ### go/v0.1.12, 2026-09-22
 
 <https://github.com/odipar/ST4/releases/tag/go/v0.1.12>, built from the
